@@ -8,6 +8,7 @@ font: Font;
 window: Window;
 framebuffer: Software_Render_Target;
 texture_catalog: Software_Texture_Catalog;
+backlog: [..]string;
 
 draw_text :: (text: string, x: u32, y: u32) {
     render_tinted_text_with_font(*font, text, x, y, .Left, 255, 255, 255, xx render_tinted_textured_quad, xx *framebuffer);
@@ -32,10 +33,20 @@ draw_text_input :: (input: *Text_Input, x: u32, y: u32) {
     
     if input.active {
         // Render the cursor if the text input is active
-        render_colored_quad(*framebuffer, x + xx input.cursor_position_interpolation, y - glyph_height * 2 - font.descender / 2, glyph_width, glyph_height * 2, 255, 255, 255, xx (input.cursor_alpha * 255));
+        render_colored_quad(*framebuffer, x + xx input.cursor_interpolated_position, y - glyph_height * 2 - font.descender / 2, glyph_width, glyph_height * 2, 255, 255, 255, xx (input.cursor_alpha * 255));
     } else if text.count == 0 {
         // Render the tool tip if the text input is not active, and the no text is currently in the buffer
         draw_text(input.tool_tip, x, y);
+    }
+}
+
+draw_backlog :: (x: s32, y: s32) {
+    index: s64 = backlog.count - 1;
+    while y > 0 && index >= 0 {
+        log := array_get(*backlog, index);
+        draw_text(~log, x, y);
+        y -= font.line_height;
+        --index;
     }
 }
 
@@ -47,6 +58,8 @@ main :: () -> s32 {
     text_input: Text_Input;
     text_input.active = true;
     
+    for i := 0; i < 128; ++i array_add(*backlog, "Hello Sailor");
+
     while !window.should_close {
         update_window(*window);
         if window.resized   resize_software_render_target(*framebuffer, window.width, window.height);
@@ -54,8 +67,20 @@ main :: () -> s32 {
         clear_software_render_target(*framebuffer, 20, 60, 100, 255);
 
         for i := 0; i < window.text_input_event_count; ++i   handle_text_input_event(*text_input, window.text_input_events[i]);
+
+        if text_input.entered {
+            input := get_string_from_text_input(*text_input);
+            if input.count {
+                array_add(*backlog, input);
+            }
+
+            clear_text_input(*text_input);
+            activate_text_input(*text_input);
+        }
+        
         draw_text(">", 5, window.height - 10);
         draw_text_input(*text_input, 20, window.height - 10);
+        draw_backlog(20, window.height - 10 - font.line_height);
         
         blit_pixels_to_window(*window, framebuffer.pixels, framebuffer.width, framebuffer.height);
         

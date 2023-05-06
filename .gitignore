@@ -51,6 +51,7 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Emacs
+# Local Program Stuff
 .emacs.desktop
 .emacs.desktop.lock
+*.rdbg
