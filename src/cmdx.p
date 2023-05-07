@@ -63,8 +63,6 @@ CmdX :: struct {
 }
 
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
-    if !message.count return;
-
     array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
 }
 
@@ -173,10 +171,11 @@ main :: () -> s32 {
             clear_text_input(*cmdx.text_input);
             activate_text_input(*cmdx.text_input);
 
-
-            feedback_string := concatenate_strings("> ", input_string, *cmdx.global_allocator);
-            add_string_to_backlog(*cmdx, feedback_string);
-            handle_input_string(*cmdx, input_string);
+            if input_string.count {
+                feedback_string := concatenate_strings("> ", input_string, *cmdx.global_allocator);
+                add_string_to_backlog(*cmdx, feedback_string);
+                handle_input_string(*cmdx, input_string);
+            }
         }
     }
 

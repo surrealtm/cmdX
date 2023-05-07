@@ -63,14 +63,25 @@ destroy_win32 :: (cmdx: *CmdX) {
 }
 
 try_reading_from_child_process :: (cmdx: *CmdX) {
-    input_buffer: [512]s8 = ---;
-    input_buffer_size: u32 = ---;
-    total_bytes: u32 = ---;
+    total_bytes_available: u32 = ---;
     
-    if PeekNamedPipe(cmdx.platform_data.child_pipe_output_read, null, 0, null, *total_bytes, null) && total_bytes > 0 {
-        if ReadFile(cmdx.platform_data.child_pipe_output_read, xx input_buffer, total_bytes, *input_buffer_size, null) {
-            string := string_view(input_buffer, input_buffer_size);
-            add_string_to_backlog(cmdx, string);
+    if PeekNamedPipe(cmdx.platform_data.child_pipe_output_read, null, 0, null, *total_bytes_available, null) && total_bytes_available > 0 {
+        input_buffer := allocate(*cmdx.frame_allocator, total_bytes_available);
+        bytes_read: u32 = ---;
+
+        if ReadFile(cmdx.platform_data.child_pipe_output_read, xx input_buffer, total_bytes_available, *bytes_read, null) {
+            string := string_view(xx input_buffer, bytes_read);
+            line_break := search_string(string, 10);
+            while line_break != -1 {
+                line := substring(string, 0, line_break);
+                if line[line.count - 1] == 13   --line.count; // Cut the \r character
+                
+                add_string_to_backlog(cmdx, line);
+                string = substring(string, line_break + 1, string.count);
+                line_break = search_string(string, 10);
+            }
+
+            assert(string.count == 0, "String read from child process did not end with a new_line (as expected).");
         }
     }
 }
