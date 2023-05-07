@@ -17,20 +17,42 @@ void main(void) {
 @fragment
 #version 330 core
 
-#define USE_LCD_SAMPLING false
-
 in vec2 pass_uv;
 
 out vec4 out_color;
 
 uniform sampler2D t_texture;
-uniform vec3 u_color;
+uniform vec4 u_foreground;
+uniform vec4 u_background;
+
+const float c_gamma = 1.2;
+const float c_inverse_gamma = 1 / c_gamma;
+
+vec4 pow4(vec4 _input, float exponent) {
+    vec4 _output = vec4(pow(_input.x, exponent),
+                        pow(_input.y, exponent),
+                        pow(_input.z, exponent),
+                        pow(_input.w, exponent));
+    return _output;
+}
 
 void main(void) {
-#if USE_LCD_SAMPLING
-    vec4 _sample = texture2D(t_texture, pass_uv);
-    out_color = vec4(_sample.rgb * u_color, _sample.a);
+#if 1
+    // LCD SUBFILTERING
+    vec4 texture_sample = texture2D(t_texture, pass_uv);
+    // Convert the gamma encoded color values into linear space
+    vec4 linear_foreground = pow4(u_foreground, c_gamma);
+    vec4 linear_background = pow4(u_background, c_gamma);
+    
+    // Blend between the background color and the pixel
+    float r = texture_sample.r * linear_foreground.r + (1.0 - texture_sample.r) * linear_background.r;
+    float g = texture_sample.g * linear_foreground.g + (1.0 - texture_sample.g) * linear_background.g;
+    float b = texture_sample.b * linear_foreground.b + (1.0 - texture_sample.b) * linear_background.b;
+
+    // Gamma encode the resuling texel
+    out_color = pow4(vec4(r, g, b, texture_sample.a), c_inverse_gamma);
 #else
+    // NO LCD SUBFILTERING
     float alpha = texture2D(t_texture, pass_uv).r;
     out_color = vec4(u_color, alpha);
 #endif

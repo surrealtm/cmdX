@@ -1,3 +1,10 @@
+Color :: struct {
+    r: u16;
+    g: u16;
+    b: u16;
+    a: u16;
+}
+
 Renderer :: struct {
     font_shader: Shader;
     quad_shader: Shader;
@@ -25,6 +32,13 @@ destroy_renderer :: () {
 
 prepare_renderer :: () {
     renderer.projection_matrix = make_orthographic_projection_matrix(xx window.width, xx window.height, 1);
+
+    glClearColor(xx Active_Theme.background_color.r / 255.0,
+                 xx Active_Theme.background_color.g / 255.0,
+                 xx Active_Theme.background_color.b / 255.0,
+                 xx Active_Theme.background_color.a / 255.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(0, 0, window.width, window.height);
 }
 
 draw_single_glyph :: (window: *Window, x: s32, y: s32, w: u32, h: u32, texture: u64, r: u8, g: u8, b: u8) {
@@ -34,7 +48,7 @@ draw_single_glyph :: (window: *Window, x: s32, y: s32, w: u32, h: u32, texture: 
     glBindTexture(GL_TEXTURE_2D, texture);
     set_shader_uniform_v2f(*renderer.font_shader, "u_position", position);
     set_shader_uniform_v2f(*renderer.font_shader, "u_scale", scale);
-    set_shader_uniform_v3f(*renderer.font_shader, "u_color", v3f.{ xx r / 255.0, xx g / 255.0, xx b / 255.0 });
+    set_shader_uniform_v4f(*renderer.font_shader, "u_foreground", v4f.{ xx r / 255.0, xx g / 255.0, xx b / 255.0, 1 });
     draw_vertex_buffer(*renderer.quad_vertex_buffer);
 }
 
@@ -43,11 +57,15 @@ draw_text :: (text: string, x: s32, y: s32) {
     set_shader(*renderer.font_shader);
     set_vertex_buffer(*renderer.quad_vertex_buffer);
     set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix);
-
-    render_tinted_text_with_font(*font, text, x, y, .Left, 255, 255, 255, xx draw_single_glyph, xx *window);
+    set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{ xx Active_Theme.background_color.r / 255.0,
+                                                                        xx Active_Theme.background_color.g / 255.0,
+                                                                        xx Active_Theme.background_color.b / 255.0,
+                                                                        xx Active_Theme.background_color.a / 255.0 });
+    
+    render_tinted_text_with_font(*font, text, x, y, .Left, Active_Theme.font_color.r, Active_Theme.font_color.b, Active_Theme.font_color.b, xx draw_single_glyph, xx *window);
 }
 
-draw_quad :: (r: u8, g: u8, b: u8, a: u8, x: s32, y: s32, w: u32, h: u32) {
+draw_quad :: (x: s32, y: s32, w: u32, h: u32, color: Color) {
     position := v2f.{ xx (x - window.width / 2), xx (y - window.height / 2) };
     scale := v2f.{ xx w, xx h };
 
@@ -55,7 +73,7 @@ draw_quad :: (r: u8, g: u8, b: u8, a: u8, x: s32, y: s32, w: u32, h: u32) {
     set_shader(*renderer.quad_shader);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_position", position);
-    set_shader_uniform_v4f(*renderer.quad_shader, "u_color", v4f.{ xx r / 255.0, xx g / 255.0, xx b / 255.0, xx a / 255.0 });
+    set_shader_uniform_v4f(*renderer.quad_shader, "u_color", v4f.{ xx color.r / 255.0, xx color.g / 255.0, xx color.b / 255.0, xx color.a / 255.0 });
     set_shader_uniform_m4f(*renderer.quad_shader, "u_projection", renderer.projection_matrix);
     set_vertex_buffer(*renderer.quad_vertex_buffer);
     draw_vertex_buffer(*renderer.quad_vertex_buffer);
@@ -65,8 +83,8 @@ draw_text_input :: (input: *Text_Input, x: s32, y: s32) {
     // Query the complete text to render
     text := get_string_from_text_input(input);
 
-    cursor_width: u32 = 10;
-    cursor_height: u32 = 20;
+    cursor_width: u32 = 8;
+    cursor_height: u32 = font.line_height;
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
 
     // Query the text until the cursor for rendering alignment
@@ -82,7 +100,8 @@ draw_text_input :: (input: *Text_Input, x: s32, y: s32) {
     
     if input.active {
         // Render the cursor if the text input is active
-        draw_quad(255, 255, 255, xx (input.cursor_alpha * 255), x + xx input.cursor_interpolated_position, y - cursor_height - font.descender / 2, cursor_width, cursor_height);
+        cursor_color := Color.{ Active_Theme.font_color.r, Active_Theme.font_color.g, Active_Theme.font_color.b, xx (input.cursor_alpha * 255) };
+        draw_quad(x + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, cursor_color);
     } else if text.count == 0 {
         // Render the tool tip if the text input is not active, and the no text is currently in the buffer
         draw_text(input.tool_tip, x, y);
