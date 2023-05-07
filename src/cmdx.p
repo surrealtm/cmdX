@@ -19,6 +19,7 @@
 #load "draw.p";
 #load "commands.p";
 #load "command_handlers.p";
+#load "win32.p";
 
 // --- Fonts
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
@@ -53,9 +54,12 @@ CmdX :: struct {
 
     commands: [..]Command;
     current_directory: string;
+    current_child_process_name: string;
     
     active_theme: *Theme;
     themes: [..]Theme;
+
+    platform_data: Win32;
 }
 
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
@@ -86,7 +90,45 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color
 
 update_window_name :: (cmdx: *CmdX) {
     window_name := concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator);
+
+    if cmdx.current_child_process_name.count {
+        // This is pretty bad... Should probably just use some kind of string builder for this, but that
+        // does not exist yet.
+        window_name = concatenate_strings(window_name, " (", *cmdx.frame_allocator);
+        window_name = concatenate_strings(window_name, cmdx.current_child_process_name, *cmdx.frame_allocator);
+        window_name = concatenate_strings(window_name, ")", *cmdx.frame_allocator);
+    }
+
     set_window_name(*cmdx.window, window_name);
+}
+
+single_cmdx_frame :: (cmdx: *CmdX) {
+    frame_start := get_hardware_time();
+
+    // Prepare the next frame
+    update_window(*cmdx.window);
+    prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);        
+    
+    // Update the terminal input
+    for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
+    
+    // Draw all the text in the terminal
+    draw_text(*cmdx.renderer, cmdx.active_theme, ">", 5, cmdx.window.height - 10);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 20, cmdx.window.height - 10);
+    draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
+
+    // Reset the frame arena
+    reset_memory_arena(*cmdx.frame_memory_arena);
+    
+    // Finish the frame, sleep until the next one
+    swap_gl_buffers(*cmdx.window);
+
+    frame_end := get_hardware_time();
+    active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
+    if active_frame_time < EXPECTED_FRAME_TIME_MILLISECONDS {
+        time_to_sleep: f32 = EXPECTED_FRAME_TIME_MILLISECONDS - active_frame_time;
+        Sleep(xx floorf(time_to_sleep) - 1);
+    }
 }
 
 main :: () -> s32 {
@@ -100,7 +142,7 @@ main :: () -> s32 {
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
 
-    cmdx.current_directory = get_working_directory();
+    cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
 
@@ -118,47 +160,28 @@ main :: () -> s32 {
     cmdx.active_theme = create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 }, .{ 255, 255, 255, 255 });
     create_theme(*cmdx, "dark", COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 0, 0, 0, 255 });
 
+    // Create the platform specific pipes
+    create_win32(*cmdx);
+    
     while !cmdx.window.should_close {
-        frame_start := get_hardware_time();
+        single_cmdx_frame(*cmdx);
 
-        // Prepare the next frame
-        update_window(*cmdx.window);
-        prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);        
-        
-        // Update the terminal input
-        for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
-        
         if cmdx.text_input.entered {
             // The user has entered a string, add that to the backlog, clear the input and actually run
             // the command.
             input_string := get_string_view_from_text_input(*cmdx.text_input);
+            clear_text_input(*cmdx.text_input);
+            activate_text_input(*cmdx.text_input);
+
+
             feedback_string := concatenate_strings("> ", input_string, *cmdx.global_allocator);
             add_string_to_backlog(*cmdx, feedback_string);
             handle_input_string(*cmdx, input_string);
-            clear_text_input(*cmdx.text_input);
-            activate_text_input(*cmdx.text_input);
-        }
-
-        // Draw all the text in the terminal
-        draw_text(*cmdx.renderer, cmdx.active_theme, ">", 5, cmdx.window.height - 10);
-        draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 20, cmdx.window.height - 10);
-        draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
-
-        // Reset the frame arena
-        reset_memory_arena(*cmdx.frame_memory_arena);
-        
-        // Finish the frame, sleep until the next one
-        swap_gl_buffers(*cmdx.window);
-
-        frame_end := get_hardware_time();
-        active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
-        if active_frame_time < EXPECTED_FRAME_TIME_MILLISECONDS {
-            time_to_sleep: f32 = EXPECTED_FRAME_TIME_MILLISECONDS - active_frame_time;
-            Sleep(xx floorf(time_to_sleep) - 1);
         }
     }
 
     // Cleanup
+    destroy_win32(*cmdx);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);

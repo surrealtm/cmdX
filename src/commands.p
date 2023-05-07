@@ -110,7 +110,8 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
     }
 
     command_found := false;
-    
+
+    // Search for a built-in command with that name, if one is found, run it.
     for i := 0; i < cmdx.commands.count; ++i {
         command := array_get(*cmdx.commands, i);
         if compare_strings(command.name, command_name) {
@@ -120,7 +121,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         }
     }
 
-    if !command_found   cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
+    if !command_found try_spawn_process_for_command(cmdx, command_name);
 }
 
 
@@ -166,6 +167,7 @@ cd :: (cmdx: *CmdX, new_directory: string) {
     cwd := concatenate_strings(cmdx.current_directory, "\\", *cmdx.frame_allocator);   
     concat := concatenate_strings(cwd, new_directory, *cmdx.frame_allocator);
     if folder_exists(concat) {
+        free_string(cmdx.current_directory, *cmdx.global_allocator);
         cmdx.current_directory = get_absolute_path(concat, *cmdx.global_allocator); // Remove any redundency in the path (e.g. parent/../parent)
         update_window_name(cmdx);
     } else {
