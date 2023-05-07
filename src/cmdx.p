@@ -22,7 +22,6 @@
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
-SELECTED_FONT   :: COURIER_NEW;
 
 // --- Timing
 EXPECTED_FPS: f32 : 60;
@@ -37,6 +36,10 @@ Theme :: struct {
 }
 
 CmdX :: struct {
+    memory_arena: Memory_Arena;
+    memory_pool: Memory_Pool;
+    allocator: Allocator;
+    
     window: Window;
     renderer: Renderer;
 
@@ -47,8 +50,16 @@ CmdX :: struct {
     themes: [..]Theme;
 }
 
-add_message_to_backlog :: (cmdx: *CmdX, message: string) {
-    if message.count    array_add(*cmdx.backlog, message);
+add_string_to_backlog :: (cmdx: *CmdX, message: string) {
+    if !message.count return;
+
+    array_add(*cmdx.backlog, copy_string(message, *cmdx.allocator));
+}
+
+add_buffer_to_backlog :: (cmdx: *CmdX, buffer: []s8, count: u32) {
+    if !count return;
+
+    array_add(*cmdx.backlog, make_string(buffer, count, *cmdx.allocator));
 }
 
 create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color, background_color: Color) -> *Theme {
@@ -63,12 +74,16 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color
 main :: () -> s32 {
     // Prepare the module
     run_tree := get_module_path();
-    defer free_string(run_tree);
+    defer free_string(run_tree, *Default_Allocator);
     set_working_directory(run_tree);
     enable_high_resolution_time();
 
     // Set up CmdX
     cmdx: CmdX;
+    create_memory_arena(*cmdx.memory_arena, 4 * GIGABYTES);
+    create_memory_pool(*cmdx.memory_pool, *cmdx.memory_arena);
+    cmdx.allocator         = memory_pool_allocator(*cmdx.memory_pool);
+    cmdx.backlog.allocator = *cmdx.allocator;
     cmdx.text_input.active = true;
     
     // Create the window and the renderer
@@ -88,9 +103,10 @@ main :: () -> s32 {
         for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
         
         if cmdx.text_input.entered {
-            input_string := get_string_from_text_input(*cmdx.text_input);
-            add_message_to_backlog(*cmdx, input_string);
-            
+            // The user has entered a string, add that to the backlog, clear the input and actually run
+            // the command.
+            feedback_string := concatenate_strings("> ", get_string_view_from_text_input(*cmdx.text_input), *cmdx.allocator);
+            add_string_to_backlog(*cmdx, feedback_string);
             clear_text_input(*cmdx.text_input);
             activate_text_input(*cmdx.text_input);
         }
@@ -98,7 +114,7 @@ main :: () -> s32 {
         // Draw all the text in the terminal
         draw_text(*cmdx.renderer, cmdx.active_theme, ">", 5, cmdx.window.height - 10);
         draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 20, cmdx.window.height - 10);
-        draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 20, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
+        draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
 
         // Finish the frame, sleep until the next one
         swap_gl_buffers(*cmdx.window);

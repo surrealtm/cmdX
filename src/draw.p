@@ -83,14 +83,14 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
 
 draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, x: s32, y: s32) {
     // Query the complete text to render
-    text := get_string_from_text_input(input);
+    text := get_string_view_from_text_input(input);
 
     cursor_width: u32 = 8;
     cursor_height: u32 = theme.font.line_height;
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
 
     // Query the text until the cursor for rendering alignment
-    text_until_cursor := get_string_until_cursor_from_text_input(input);
+    text_until_cursor := get_string_view_until_cursor_from_text_input(input);
     text_until_cursor_width, text_until_cursor_height := calculate_text_size(*theme.font, text_until_cursor);
     
     // Update the internal text input rendering state
