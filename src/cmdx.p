@@ -59,7 +59,7 @@ CmdX :: struct {
     active_theme: *Theme;
     themes: [..]Theme;
 
-    platform_data: Win32;
+    win32_pipes: Win32_Pipes;
 }
 
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
@@ -136,7 +136,7 @@ main :: () -> s32 {
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
     cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
     cmdx.backlog.allocator = *cmdx.global_allocator;
-
+    
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
 
@@ -157,9 +157,6 @@ main :: () -> s32 {
     create_renderer(*cmdx.renderer);
     cmdx.active_theme = create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 }, .{ 255, 255, 255, 255 });
     create_theme(*cmdx, "dark", COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 0, 0, 0, 255 });
-
-    // Create the platform specific pipes
-    create_win32(*cmdx);
     
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
@@ -180,7 +177,6 @@ main :: () -> s32 {
     }
 
     // Cleanup
-    destroy_win32(*cmdx);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);
