@@ -161,3 +161,14 @@ ls :: (cmdx: *CmdX) {
         cmdx_print(cmdx, " > %", file_name);
     }
 }
+
+cd :: (cmdx: *CmdX, new_directory: string) {
+    cwd := concatenate_strings(cmdx.current_directory, "\\", *cmdx.frame_allocator);   
+    concat := concatenate_strings(cwd, new_directory, *cmdx.frame_allocator);
+    if folder_exists(concat) {
+        cmdx.current_directory = get_absolute_path(concat, *cmdx.global_allocator); // Remove any redundency in the path (e.g. parent/../parent)
+        update_window_name(cmdx);
+    } else {
+        cmdx_print(cmdx, "Cannot change directory: The folder '%' does not exists.", concat);
+    }
+}

@@ -11,6 +11,12 @@ ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
 
+cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    new_directory := array_get_value(*argument_values, 0);
+    cd(cmdx, new_directory);
+}
+
+
 register_command_argument :: (command: *Command, name: string, type: Command_Argument_Type) {
     argument := array_push(*command.arguments);
     argument.name = name;
@@ -30,4 +36,9 @@ register_all_commands :: (cmdx: *CmdX) {
     ls := array_push(*cmdx.commands);
     ls.name = "ls";
     ls.handler = ls_handler;
+
+    cd := array_push(*cmdx.commands);
+    cd.name = "cd";
+    cd.handler = cd_handler;
+    register_command_argument(cd, "new_directory", .String);
 }

@@ -84,6 +84,11 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color
     return theme;
 }
 
+update_window_name :: (cmdx: *CmdX) {
+    window_name := concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator);
+    set_window_name(*cmdx.window, window_name);
+}
+
 main :: () -> s32 {
     // Set up CmdX
     cmdx: CmdX;
@@ -107,12 +112,12 @@ main :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
         
     // Create the window and the renderer
-    create_window(*cmdx.window, "cmdX", 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
+    create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     cmdx.active_theme = create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 }, .{ 255, 255, 255, 255 });
     create_theme(*cmdx, "dark", COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 0, 0, 0, 255 });
-    
+
     while !cmdx.window.should_close {
         frame_start := get_hardware_time();
 
