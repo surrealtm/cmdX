@@ -111,7 +111,8 @@ main :: () -> s32 {
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     cmdx.active_theme = create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 }, .{ 255, 255, 255, 255 });
-
+    create_theme(*cmdx, "dark", COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 0, 0, 0, 255 });
+    
     while !cmdx.window.should_close {
         frame_start := get_hardware_time();
 

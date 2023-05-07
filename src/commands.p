@@ -1,11 +1,15 @@
 // A command handler takes in the actual name of the command, as well as all the arguments parsed from the input.
 // If the command has been parsed successfully (no syntax errors), the handler returns true. If the handler
 // returns false, the custom help message for the command will be displayed.
-Command_Handler :: (*CmdX, string, [..]string) -> bool;
+Command_Handler :: (*CmdX, [..]string);
+
+Command_Argument_Type :: enum {
+    String;
+}
 
 Command_Argument :: struct {
     name: string;
-    type: s64;
+    type: Command_Argument_Type;
 }
 
 Command :: struct {
@@ -15,34 +19,112 @@ Command :: struct {
 }
 
 
-/* --- Handling of commands --- */
+/* --- Command Handling --- */
 
-print_command_syntax :: (cmdx: *CmdX, command: *Command) {
-    cmdx_print(cmdx, " > %", command.name);
+command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
+    result: string = ---;
+
+    switch type {
+    case .String; result = "String";
+    case; result = "Unknown Type";
+    }
+
+    return result;
 }
 
-handle_input_string :: (cmdx: *CmdX, input: string) {
-    command_name := input;
-    command_arguments: [..]string;
+is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) -> bool {
+    return true;
+}
 
-    success := false;
+dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
+    if argument_values.count != command.arguments.count {
+        cmdx_print(cmdx, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
+        return false;
+    }
+
+    for i := 0; i < command.arguments.count; ++i {
+        argument := array_get(*command.arguments, i);
+        argument_value := array_get_value(*argument_values, i);
+        if !is_valid_command_argument_value(argument.type, argument_value) {
+            cmdx_print(cmdx, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
+            return false;
+        }
+    }
+
+    command.handler(cmdx, argument_values);
+    return true;
+}
+
+
+/* Input splitting */
+
+print_command_syntax :: (cmdx: *CmdX, command: *Command) {
+    print_buffer: Print_Buffer = ---;
+    print_buffer.size = 0;
+    print_buffer.output_handle = 0;
+
+    internal_print(*print_buffer, " > %", command.name);
+
+    for i := 0; i < command.arguments.count; ++i {
+        argument := array_get(*command.arguments, i);
+        internal_print(*print_buffer, " %: %", argument.name, command_argument_type_to_string(argument.type));
+        if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
+    }
+
+    string := string_view(print_buffer.buffer, print_buffer.size);
+    add_string_to_backlog(cmdx, string);
+}
+
+get_next_word_in_input :: (input: string, start: *u32, end: *u32) {
+    // Eat empty characters before the word
+    while ~start < input.count && input[~start] == ' '    ~start += 1;
+
+    if ~start == input.count {
+        // There was no more word in the input string
+        ~start = input.count;
+        ~end = input.count;
+        return;
+    }
+    
+    // Get the length of the word
+    ~end = search_string_from(input, ' ', ~start);
+    if ~end == -1    ~end = input.count;
+}
+
+handle_input_string :: (cmdx: *CmdX, input: string) {    
+    word_start, word_end: u32 = 0;
+    get_next_word_in_input(input, *word_start, *word_end);
+    command_name := substring(input, word_start, word_end);
+    word_start = word_end;
+    
+    command_arguments: [..]string;
+    command_arguments.allocator = *cmdx.frame_allocator;
+
+    get_next_word_in_input(input, *word_start, *word_end);
+    while word_start < input.count {
+        argument := substring(input, word_start, word_end);
+        array_add(*command_arguments, argument);
+
+        word_start = word_end;
+        get_next_word_in_input(input, *word_start, *word_end);
+    }
+
+    command_found := false;
     
     for i := 0; i < cmdx.commands.count; ++i {
         command := array_get(*cmdx.commands, i);
         if compare_strings(command.name, command_name) {
-            command.handler(cmdx, command_name, command_arguments);
-            success = true;
+            if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
+            command_found = true;
             break;
         }
     }
 
-    if !success {
-        cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
-    }
+    if !command_found   cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
 }
 
 
-/* --- Actual builtin command behaviour --- */
+/* Builtin command behaviour */
 
 help :: (cmdx: *CmdX) {
     cmdx_print(cmdx, "=== HELP ===");
@@ -53,6 +135,18 @@ help :: (cmdx: *CmdX) {
     }
     
     cmdx_print(cmdx, "=== HELP ===");
+}
+
+theme :: (cmdx: *CmdX, theme_name: string) {
+    for i := 0; i < cmdx.themes.count; ++i {
+        t := array_get(*cmdx.themes, i);
+        if compare_strings(t.name, theme_name) {
+            cmdx.active_theme = t;
+            return;
+        }
+    }
+
+    cmdx_print(cmdx, "No loaded theme named '%' could be found.", theme_name);
 }
 
 ls :: (cmdx: *CmdX) {
