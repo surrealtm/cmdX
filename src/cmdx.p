@@ -17,6 +17,8 @@
 
 // --- Local files
 #load "draw.p";
+#load "commands.p";
+#load "command_handlers.p";
 
 // --- Fonts
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
@@ -36,9 +38,12 @@ Theme :: struct {
 }
 
 CmdX :: struct {
-    memory_arena: Memory_Arena;
-    memory_pool: Memory_Pool;
-    allocator: Allocator;
+    global_memory_arena: Memory_Arena;
+    global_memory_pool: Memory_Pool;
+    global_allocator: Allocator;
+
+    frame_memory_arena: Memory_Arena;
+    frame_allocator: Allocator;
     
     window: Window;
     renderer: Renderer;
@@ -46,6 +51,9 @@ CmdX :: struct {
     text_input: Text_Input;
     backlog: [..]string;
 
+    commands: [..]Command;
+    current_directory: string;
+    
     active_theme: *Theme;
     themes: [..]Theme;
 }
@@ -53,13 +61,18 @@ CmdX :: struct {
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
     if !message.count return;
 
-    array_add(*cmdx.backlog, copy_string(message, *cmdx.allocator));
+    array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
 }
 
-add_buffer_to_backlog :: (cmdx: *CmdX, buffer: []s8, count: u32) {
-    if !count return;
+cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
+    required_characters := query_required_print_buffer_size(format, ..args);
 
-    array_add(*cmdx.backlog, make_string(buffer, count, *cmdx.allocator));
+    message: string = ---;
+    message.count = required_characters;
+    message.data  = xx allocate(*cmdx.global_allocator, required_characters);
+
+    mprint(string_view(message.data, message.count), format, ..args);
+    array_add(*cmdx.backlog, message);
 }
 
 create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color, background_color: Color) -> *Theme {
@@ -72,20 +85,27 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color
 }
 
 main :: () -> s32 {
-    // Prepare the module
+    // Set up CmdX
+    cmdx: CmdX;
+    create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
+    create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
+    cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
+    cmdx.backlog.allocator = *cmdx.global_allocator;
+
+    create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
+    cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
+
+    cmdx.current_directory = get_working_directory();
+    cmdx.text_input.active = true;
+    register_all_commands(*cmdx);
+
+    // Set the working directory of this program to where to executable file is, so that the data folder
+    // can always be accessed.
     run_tree := get_module_path();
     defer free_string(run_tree, *Default_Allocator);
     set_working_directory(run_tree);
-    enable_high_resolution_time();
-
-    // Set up CmdX
-    cmdx: CmdX;
-    create_memory_arena(*cmdx.memory_arena, 4 * GIGABYTES);
-    create_memory_pool(*cmdx.memory_pool, *cmdx.memory_arena);
-    cmdx.allocator         = memory_pool_allocator(*cmdx.memory_pool);
-    cmdx.backlog.allocator = *cmdx.allocator;
-    cmdx.text_input.active = true;
-    
+    enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
+        
     // Create the window and the renderer
     create_window(*cmdx.window, "cmdX", 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
@@ -105,8 +125,10 @@ main :: () -> s32 {
         if cmdx.text_input.entered {
             // The user has entered a string, add that to the backlog, clear the input and actually run
             // the command.
-            feedback_string := concatenate_strings("> ", get_string_view_from_text_input(*cmdx.text_input), *cmdx.allocator);
+            input_string := get_string_view_from_text_input(*cmdx.text_input);
+            feedback_string := concatenate_strings("> ", input_string, *cmdx.global_allocator);
             add_string_to_backlog(*cmdx, feedback_string);
+            handle_input_string(*cmdx, input_string);
             clear_text_input(*cmdx.text_input);
             activate_text_input(*cmdx.text_input);
         }
@@ -116,9 +138,11 @@ main :: () -> s32 {
         draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 20, cmdx.window.height - 10);
         draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
 
+        // Reset the frame arena
+        reset_memory_arena(*cmdx.frame_memory_arena);
+        
         // Finish the frame, sleep until the next one
         swap_gl_buffers(*cmdx.window);
-        dump_gl_errors("Frame");
 
         frame_end := get_hardware_time();
         active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
