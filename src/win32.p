@@ -111,21 +111,21 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
 }
 
 try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
+    // Append a new line character to the data so that the child process recognizes a complete line was
+    // input from the terminal, since the actual new line character obviously does not get added to the
+    // text input.
+    complete_buffer: *s8 = xx allocate(*cmdx.frame_allocator, data.count + 1);
+    copy_memory(xx complete_buffer, xx data.data, data.count);
+    complete_buffer[data.count] = 10;
+    
     // Write the actual line to the pipe
-    if !WriteFile(cmdx.win32_pipes.input_write_pipe, xx data.data, data.count, null, null) {
-        print("Failed to write to child process :(\n");
-        cmdx.win32_pipes.child_closed_the_pipe = true;
-    }
-
-    new_line := "\n";
-    
-    // Append a new line to the pipe, since the user has finished his line of input
-    if !WriteFile(cmdx.win32_pipes.input_write_pipe, xx new_line.data, new_line.count, null, null) {
+    if !WriteFile(cmdx.win32_pipes.input_write_pipe, xx complete_buffer, data.count + 1, null, null) {
         print("Failed to write to child process :(\n");
         cmdx.win32_pipes.child_closed_the_pipe = true;
     }
     
-    // Flush the buffer so that the data is actually written into the pipe, and not just the internal process buffer.
+    // Flush the buffer so that the data is actually written into the pipe, and not just the internal process
+    // buffer.
     FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
 }
 
@@ -143,8 +143,8 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
 
     process: PROCESS_INFORMATION;
 
-    // Actually create the process. If the process requests a console, it will take the std handles of this process here,
-    // which are set to be the pipes.
+    // Actually create the process. If the process requests a console, it will take the std handles of this
+    // process here, which are set to be the pipes.
     result := CreateProcessA(null, c_command_name, null, null, false, 0, null, c_current_directory, *startup_info, *process);
     if !result {
         cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
