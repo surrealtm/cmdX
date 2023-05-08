@@ -143,7 +143,7 @@ main :: () -> s32 {
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
-
+    
     // Set the working directory of this program to where to executable file is, so that the data folder
     // can always be accessed.
     run_tree := get_module_path();
