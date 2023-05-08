@@ -43,6 +43,7 @@ create_win32_pipes :: (cmdx: *CmdX, pipes: *Win32_Pipes) {
     }
 
     SetStdHandle(STD_OUTPUT_HANDLE, pipes.child_pipe_output_write);
+    SetStdHandle(STD_ERROR_HANDLE, pipes.child_pipe_output_write);
     SetStdHandle(STD_INPUT_HANDLE, pipes.child_pipe_input_read);
 }
 
@@ -69,7 +70,6 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
     if !PeekNamedPipe(cmdx.win32_pipes.child_pipe_output_read, null, 0, null, *total_bytes_available, null) {
         // If the pipe on the child side has been closed, PeekNamedPipe will fail. At this point, the console
         // connection should be terminated.
-        print("Child closed the pipe.\n");
         cmdx.win32_pipes.child_closed_the_pipe = true;
         return;
     }
@@ -123,10 +123,11 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
         return;
     }
 
+    // Destroy the ends of the pipe which belong to the child process side.
     destroy_child_side_win32_pipes(*cmdx.win32_pipes);
     
     // Wait for the child process to terminate
-    while /*WaitForSingleObject(process.hProcess, 0) != 0 &&*/ !cmdx.win32_pipes.child_closed_the_pipe && !cmdx.window.should_close { // 0 is WAIT_OBJECT_0
+    while !cmdx.win32_pipes.child_closed_the_pipe && !cmdx.window.should_close { // 0 is WAIT_OBJECT_0
         // Check if any data is available to be read in the pipe
         try_reading_from_child_process(cmdx);
         
@@ -141,8 +142,6 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
         cmdx.current_child_process_name = make_string(process_name, process_name_length, *cmdx.global_allocator);
         update_window_name(cmdx);
     }
-
-    print("Stopped listening to the child.\n");
     
     // Do one final read from the child process
     try_reading_from_child_process(cmdx);
