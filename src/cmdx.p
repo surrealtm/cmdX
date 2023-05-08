@@ -123,7 +123,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
-    if active_frame_time < EXPECTED_FRAME_TIME_MILLISECONDS {
+    if active_frame_time < EXPECTED_FRAME_TIME_MILLISECONDS - 1 {
         time_to_sleep: f32 = EXPECTED_FRAME_TIME_MILLISECONDS - active_frame_time;
         Sleep(xx floorf(time_to_sleep) - 1);
     }
