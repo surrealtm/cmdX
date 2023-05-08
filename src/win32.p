@@ -45,8 +45,8 @@ create_win32_pipes :: (cmdx: *CmdX) {
     }
 
     cmdx.win32_pipes.my_output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    cmdx.win32_pipes.my_error_handle = GetStdHandle(STD_ERROR_HANDLE);
-    cmdx.win32_pipes.my_input_handle = GetStdHandle(STD_INPUT_HANDLE);
+    cmdx.win32_pipes.my_error_handle  = GetStdHandle(STD_ERROR_HANDLE);
+    cmdx.win32_pipes.my_input_handle  = GetStdHandle(STD_INPUT_HANDLE);
     
     SetStdHandle(STD_OUTPUT_HANDLE, cmdx.win32_pipes.output_write_pipe);
     SetStdHandle(STD_ERROR_HANDLE, cmdx.win32_pipes.output_write_pipe);
@@ -110,6 +110,25 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
         cmdx.win32_pipes.child_closed_the_pipe = true;
 }
 
+try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
+    // Write the actual line to the pipe
+    if !WriteFile(cmdx.win32_pipes.input_write_pipe, xx data.data, data.count, null, null) {
+        print("Failed to write to child process :(\n");
+        cmdx.win32_pipes.child_closed_the_pipe = true;
+    }
+
+    new_line := "\n";
+    
+    // Append a new line to the pipe, since the user has finished his line of input
+    if !WriteFile(cmdx.win32_pipes.input_write_pipe, xx new_line.data, new_line.count, null, null) {
+        print("Failed to write to child process :(\n");
+        cmdx.win32_pipes.child_closed_the_pipe = true;
+    }
+    
+    // Flush the buffer so that the data is actually written into the pipe, and not just the internal process buffer.
+    FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
+}
+
 try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
     // Create a new pipe for this child process
     create_win32_pipes(cmdx);
@@ -143,6 +162,17 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
         
         // Render a single frame while waiting for the process to terminate
         single_cmdx_frame(cmdx);
+
+        // Handle potential input from the terminal to the child process
+        if cmdx.text_input.entered {
+            // The user has entered a string, add that to the backlog, clear the input and actually run
+            // the command.
+            input_string := get_string_view_from_text_input(*cmdx.text_input);
+            clear_text_input(*cmdx.text_input);
+            activate_text_input(*cmdx.text_input);
+
+            try_writing_to_child_process(cmdx, input_string);
+        }
         
         // Get the current process name and display that in the window title
         if cmdx.current_child_process_name.count   free_string(cmdx.current_child_process_name, *cmdx.global_allocator);
