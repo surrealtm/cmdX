@@ -92,6 +92,7 @@ get_next_word_in_input :: (input: string, start: *u32, end: *u32) {
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {    
+    // Parse the actual command name
     word_start, word_end: u32 = 0;
     get_next_word_in_input(input, *word_start, *word_end);
     command_name := substring(input, word_start, word_end);
@@ -100,6 +101,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
     command_arguments: [..]string;
     command_arguments.allocator = *cmdx.frame_allocator;
 
+    // Parse all the arguments
     get_next_word_in_input(input, *word_start, *word_end);
     while word_start < input.count {
         argument := substring(input, word_start, word_end);
@@ -121,7 +123,24 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         }
     }
 
-    if !command_found try_spawn_process_for_command(cmdx, command_name);
+    if !command_found {
+        // Join all the different arguments back together to make a command that can be supplied into the
+        // process creation. This may seem redundant, but this allows for custom argument management, instead
+        // of just passing the raw string along.
+        string_builder: String_Builder;
+        create_string_builder(*string_builder, *cmdx.frame_memory_arena);
+        append_string(*string_builder, command_name);
+
+        for i := 0; i < command_arguments.count; ++i {
+            argument := array_get_value(*command_arguments, i);
+            append_string(*string_builder, " ");
+            append_string(*string_builder, argument);
+        }
+
+        command_string := finish_string_builder(*string_builder);
+        
+        try_spawn_process_for_command(cmdx, command_string);
+    }
 }
 
 

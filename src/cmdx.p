@@ -8,6 +8,7 @@
 #load "text_input.p";
 #load "gl_context.p";
 #load "gl_layer.p";
+#load "string_builder.p";
 #load "math/v2f.p";
 #load "math/v3f.p";
 #load "math/v4f.p";

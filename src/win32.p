@@ -129,12 +129,12 @@ try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
     FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
 }
 
-try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
+try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Create a new pipe for this child process
     create_win32_pipes(cmdx);
 
     // Set up c strings for file paths
-    c_command_name := to_cstring(command_name, *cmdx.frame_allocator);
+    c_command_string := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
     
     // Spawn the actual process
@@ -145,7 +145,7 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_name: string) {
 
     // Actually create the process. If the process requests a console, it will take the std handles of this
     // process here, which are set to be the pipes.
-    result := CreateProcessA(null, c_command_name, null, null, false, 0, null, c_current_directory, *startup_info, *process);
+    result := CreateProcessA(null, c_command_string, null, null, false, 0, null, c_current_directory, *startup_info, *process);
     if !result {
         cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
         return;
