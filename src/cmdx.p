@@ -136,6 +136,19 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, curs
     return theme;
 }
 
+switch_to_theme :: (cmdx: *CmdX, theme_name: string) {
+    for i := 0; i < cmdx.themes.count; ++i {
+        t := array_get(*cmdx.themes, i);
+        if compare_strings(t.name, theme_name) {
+            cmdx.active_theme = t;
+            set_string_property(*cmdx.config, "theme", theme_name);
+            return;
+        }
+    }
+
+    cmdx_print(cmdx, "No loaded theme named '%' could be found.", theme_name);    
+}
+
 update_font_size :: (cmdx: *CmdX, new_font_size: u32) {
     cmdx.font_size = new_font_size;
     
@@ -144,6 +157,8 @@ update_font_size :: (cmdx: *CmdX, new_font_size: u32) {
         destroy_font(*theme.font, xx destroy_gl_texture_2d, null);
         load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
     }
+
+    set_integer_property(*cmdx.config, "font-size", new_font_size);
 }
 
 update_window_name :: (cmdx: *CmdX) {
@@ -229,7 +244,7 @@ main :: () -> s32 {
     set_working_directory(run_tree);
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
 
-    // Set up CmdX
+    // Set up memory management
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
@@ -239,23 +254,33 @@ main :: () -> s32 {
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
 
+    // Set up the command handling
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
 
-    // Load the config file or create a new default one
-    if !read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH) create_default_config(*cmdx.config);
-            
+    // Load the config file or just create a new default one
+    read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH);
+    cmdx.font_size = get_integer_property(*cmdx.config, "font-size");
+    
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
-    cmdx.active_theme =
-        create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 },  .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
+
+    // Create the builtin themes
+    create_theme(*cmdx, "light",   COURIER_NEW, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
     create_theme(*cmdx, "dark",    COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
     create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
-    create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255},  .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });;
+    create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
+    switch_to_theme(*cmdx, get_string_property(*cmdx.config, "theme"));
+
+    // After everything has been loaded, actually show the window. This will prevent a small time frame in
+    // which the window is just blank white, which does not seem very clean. Instead, the window takes a
+    // little longer to show up, but it immediatly gets filled with the first frame.
+    show_window(*cmdx.window);
     
+    // Main loop until the window gets closed
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
     }

@@ -5,7 +5,7 @@ Command_Handler :: (*CmdX, [..]string);
 
 Command_Argument_Type :: enum {
     String;
-    Int;
+    Integer;
 }
 
 Command_Argument :: struct {
@@ -27,7 +27,7 @@ command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
 
     switch type {
     case .String; result = "String";
-    case .Int; result = "Int";
+    case .Integer; result = "Integer";
     case; result = "Unknown Type";
     }
 
@@ -40,7 +40,7 @@ is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) 
     switch type {
     case .String; valid = true;
 
-    case .Int;
+    case .Integer;
         valid = true;
         for i := 0; i < value.count; ++i {
             valid &= is_digit_character(value[i]);
@@ -182,15 +182,7 @@ help :: (cmdx: *CmdX) {
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
-    for i := 0; i < cmdx.themes.count; ++i {
-        t := array_get(*cmdx.themes, i);
-        if compare_strings(t.name, theme_name) {
-            cmdx.active_theme = t;
-            return;
-        }
-    }
-
-    cmdx_print(cmdx, "No loaded theme named '%' could be found.", theme_name);
+    switch_to_theme(cmdx, theme_name);
 }
 
 theme_lister :: (cmdx: *CmdX) {

@@ -49,7 +49,7 @@ register_all_commands :: (cmdx: *CmdX) {
     font_size := array_push(*cmdx.commands);
     font_size.name = ":font-size";
     font_size.handler = font_size_handler;
-    register_command_argument(font_size, "size", .Int);
+    register_command_argument(font_size, "size", .Integer);
     
     ls := array_push(*cmdx.commands);
     ls.name = "ls";
