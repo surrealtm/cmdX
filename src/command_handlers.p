@@ -7,6 +7,10 @@ theme_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     theme(cmdx, theme_name);
 }
 
+theme_lister_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    theme_lister(cmdx);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
@@ -32,6 +36,10 @@ register_all_commands :: (cmdx: *CmdX) {
     theme.name = ":theme";
     theme.handler = theme_handler;
     register_command_argument(theme, "theme_name", .String);
+
+    theme_lister := array_push(*cmdx.commands);
+    theme_lister.name = ":theme-lister";
+    theme_lister.handler = theme_lister_handler;
     
     ls := array_push(*cmdx.commands);
     ls.name = "ls";

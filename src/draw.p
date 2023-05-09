@@ -102,7 +102,7 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, x: s
     
     if input.active {
         // Render the cursor if the text input is active
-        cursor_color := Color.{ theme.font_color.r, theme.font_color.g, theme.font_color.b, xx (input.cursor_alpha * 255) };
+        cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };
         draw_quad(renderer, x + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
     } else if text.count == 0 {
         // Render the tool tip if the text input is not active, and the no text is currently in the buffer

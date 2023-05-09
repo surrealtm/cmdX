@@ -169,6 +169,16 @@ theme :: (cmdx: *CmdX, theme_name: string) {
     cmdx_print(cmdx, "No loaded theme named '%' could be found.", theme_name);
 }
 
+theme_lister :: (cmdx: *CmdX) {
+    cmdx_print(cmdx, "List of available themes:");
+
+    for i := 0; i < cmdx.themes.count; ++i {
+        theme := array_get(*cmdx.themes, i);
+        cmdx_print(cmdx, " > %", theme.name);
+        if theme == cmdx.active_theme    append_string_to_backlog(cmdx, "   * Active");
+    }
+}
+
 ls :: (cmdx: *CmdX) {
     cmdx_print(cmdx, "Contents of folder '%':", cmdx.current_directory);
 

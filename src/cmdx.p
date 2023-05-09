@@ -34,8 +34,10 @@ EXPECTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / EXPECTED_FPS;
 // --- Styling
 Theme :: struct {
     name: string;
-    font_color: Color;
-    background_color: Color;
+    font_color: Color;       // The default color for text in the input and backlog
+    cursor_color: Color;     // The color for the text input cursor
+    accent_color: Color;     // The color for highlighted text, e.g. the current directory
+    background_color: Color; // The background color of the window
     font: Font;
 }
 
@@ -67,6 +69,20 @@ add_string_to_backlog :: (cmdx: *CmdX, message: string) {
     array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
 }
 
+remove_string_from_backlog :: (cmdx: *CmdX, index: s64) {
+    string := array_get_value(*cmdx.backlog, index);
+    free_string(string, *cmdx.global_allocator);
+    array_remove(*cmdx.backlog, index);
+}
+
+append_string_to_backlog :: (cmdx: *CmdX, message: string) {
+    assert(cmdx.backlog.count > 0, "Cannot append string to backlog; backlog is empty");
+    last_string := array_get(*cmdx.backlog, cmdx.backlog.count - 1);
+    new_message := concatenate_strings(~last_string, message, *cmdx.global_allocator);
+    remove_string_from_backlog(cmdx, cmdx.backlog.count - 1);
+    add_string_to_backlog(cmdx, new_message);
+}
+
 cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
     required_characters := query_required_print_buffer_size(format, ..args);
 
@@ -78,11 +94,13 @@ cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
     array_add(*cmdx.backlog, message);
 }
 
-create_theme :: (cmdx: *CmdX, name: string, font_path: string, font_color: Color, background_color: Color) -> *Theme {
+create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
-    theme.font_color = font_color;
-    theme.background_color = background_color;
+    theme.font_color = font;
+    theme.cursor_color = cursor;
+    theme.accent_color = accent;
+    theme.background_color = background;
     load_font(*theme.font, font_path, 15, xx create_gl_texture_2d, null);
     return theme;
 }
@@ -156,8 +174,11 @@ main :: () -> s32 {
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
-    cmdx.active_theme = create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 }, .{ 255, 255, 255, 255 });
-    create_theme(*cmdx, "dark", COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 0, 0, 0, 255 });
+    cmdx.active_theme =
+        create_theme(*cmdx, "light", COURIER_NEW, .{ 10, 10, 10, 255 },  .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
+    create_theme(*cmdx, "dark",    COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
+    create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
+    create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255},  .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });;
     
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
