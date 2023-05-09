@@ -58,14 +58,14 @@ CmdX :: struct {
 
     commands: [..]Command;
     current_directory: string;
-    current_child_process_name: string;
+    child_process_name: string;
+    child_process_running: bool;
 
     font_size: u32 = 15;
     active_theme: *Theme;
     themes: [..]Theme;
 
-    win32_pipes: Win32_Pipes;
-    child_process_running: bool;
+    win32: Win32;
 }
 
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
@@ -100,7 +100,7 @@ cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
     string_builder: String_Builder = ---;
     create_string_builder(*string_builder, arena);
-    append_string(*string_builder, cmdx.current_directory);
+    if !cmdx.child_process_running    append_string(*string_builder, cmdx.current_directory);
     append_string(*string_builder, "> ");
     return finish_string_builder(*string_builder);
 }
@@ -139,11 +139,11 @@ update_font_size :: (cmdx: *CmdX, new_font_size: u32) {
 update_window_name :: (cmdx: *CmdX) {
     window_name := concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator);
 
-    if cmdx.current_child_process_name.count {
+    if cmdx.child_process_name.count {
         // This is pretty bad... Should probably just use some kind of string builder for this, but that
         // does not exist yet.
         window_name = concatenate_strings(window_name, " (", *cmdx.frame_allocator);
-        window_name = concatenate_strings(window_name, cmdx.current_child_process_name, *cmdx.frame_allocator);
+        window_name = concatenate_strings(window_name, cmdx.child_process_name, *cmdx.frame_allocator);
         window_name = concatenate_strings(window_name, ")", *cmdx.frame_allocator);
     }
 
@@ -160,6 +160,12 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
 
+    // Check for potential control keys
+    if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
+        // Terminate the current running process
+        try_terminate_child_process(cmdx);
+    }
+    
     // Handle input for this frame
     if cmdx.text_input.entered {
         // The user has entered a string, add that to the backlog, clear the input and actually run
