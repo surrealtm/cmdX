@@ -34,6 +34,7 @@ EXPECTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / EXPECTED_FPS;
 // --- Styling
 Theme :: struct {
     name: string;
+    font_path: string; // Needed for reloading the font when the size changes
     font_color: Color;       // The default color for text in the input and backlog
     cursor_color: Color;     // The color for the text input cursor
     accent_color: Color;     // The color for highlighted text, e.g. the current directory
@@ -58,7 +59,8 @@ CmdX :: struct {
     commands: [..]Command;
     current_directory: string;
     current_child_process_name: string;
-    
+
+    font_size: u32 = 15;
     active_theme: *Theme;
     themes: [..]Theme;
 
@@ -97,12 +99,23 @@ cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
 create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
+    theme.font_path = font_path;
     theme.font_color = font;
     theme.cursor_color = cursor;
     theme.accent_color = accent;
     theme.background_color = background;
-    load_font(*theme.font, font_path, 15, xx create_gl_texture_2d, null);
+    load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
     return theme;
+}
+
+update_font_size :: (cmdx: *CmdX, new_font_size: u32) {
+    cmdx.font_size = new_font_size;
+    
+    for i := 0; i < cmdx.themes.count; ++i {
+        theme := array_get(*cmdx.themes, i);
+        destroy_font(*theme.font, xx destroy_gl_texture_2d, null);
+        load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
+    }
 }
 
 update_window_name :: (cmdx: *CmdX) {

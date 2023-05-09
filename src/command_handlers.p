@@ -3,7 +3,7 @@ help_handler :: (cmdx: *CmdX, argument_values: [..]string) {
 }
 
 theme_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    theme_name := array_get_value(*argument_values, 0);
+    theme_name := get_string_argument(*argument_values, 0);
     theme(cmdx, theme_name);
 }
 
@@ -11,12 +11,17 @@ theme_lister_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     theme_lister(cmdx);
 }
 
+font_size_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    size := get_int_argument(*argument_values, 0);
+    font_size(cmdx, size);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
 
 cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    new_directory := array_get_value(*argument_values, 0);
+    new_directory := get_string_argument(*argument_values, 0);
     cd(cmdx, new_directory);
 }
 
@@ -40,6 +45,11 @@ register_all_commands :: (cmdx: *CmdX) {
     theme_lister := array_push(*cmdx.commands);
     theme_lister.name = ":theme-lister";
     theme_lister.handler = theme_lister_handler;
+
+    font_size := array_push(*cmdx.commands);
+    font_size.name = ":font-size";
+    font_size.handler = font_size_handler;
+    register_command_argument(font_size, "size", .Int);
     
     ls := array_push(*cmdx.commands);
     ls.name = "ls";

@@ -5,6 +5,7 @@ Command_Handler :: (*CmdX, [..]string);
 
 Command_Argument_Type :: enum {
     String;
+    Int;
 }
 
 Command_Argument :: struct {
@@ -26,6 +27,7 @@ command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
 
     switch type {
     case .String; result = "String";
+    case .Int; result = "Int";
     case; result = "Unknown Type";
     }
 
@@ -33,7 +35,29 @@ command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
 }
 
 is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) -> bool {
-    return true;
+    valid := false;
+
+    switch type {
+    case .String; valid = true;
+
+    case .Int;
+        valid = true;
+        for i := 0; i < value.count; ++i {
+            valid &= is_digit_character(value[i]);
+        }
+    }
+    
+    return valid;
+}
+
+get_string_argument :: (argument_values: *[..]string, index: u32) -> string {
+    return array_get_value(argument_values, index);
+}
+
+get_int_argument :: (argument_values: *[..]string, index: u32) -> s64 {
+    string := array_get_value(argument_values, index);
+    int, valid := string_to_int(string);
+    return int;
 }
 
 dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
@@ -67,7 +91,7 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
 
     for i := 0; i < command.arguments.count; ++i {
         argument := array_get(*command.arguments, i);
-        internal_print(*print_buffer, " %: %", argument.name, command_argument_type_to_string(argument.type));
+        internal_print(*print_buffer, "   %: %", argument.name, command_argument_type_to_string(argument.type));
         if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
     }
 
@@ -177,6 +201,10 @@ theme_lister :: (cmdx: *CmdX) {
         cmdx_print(cmdx, " > %", theme.name);
         if theme == cmdx.active_theme    append_string_to_backlog(cmdx, "   * Active");
     }
+}
+
+font_size :: (cmdx: *CmdX, size: u32) {
+    update_font_size(cmdx, size);
 }
 
 ls :: (cmdx: *CmdX) {

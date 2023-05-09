@@ -1,6 +1,5 @@
 [ ] Handle enqouted arguments
 [ ] Execute command from current directory, not the own program's working directory
-[ ] Add :font-size command
 [ ] Add :quit command
 [ ] Add input history
 [ ] Add scrolling to background
@@ -10,3 +9,4 @@
 [ ] Add instanced rendering for text
 [ ] Deactivate cursor when window is not active
 [ ] Store active settings in a file
+[ ] Improve text input find_word_end for special chars, e.g. only delete actual letters and not the ':'
