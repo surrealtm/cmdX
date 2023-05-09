@@ -85,7 +85,7 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, x: s
     // Query the complete text to render
     text := get_string_view_from_text_input(input);
 
-    cursor_width: u32 = 8;
+    cursor_width: u32 = calculate_text_width(*theme.font, "M");
     cursor_height: u32 = theme.font.line_height;
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
 
@@ -97,9 +97,13 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, x: s
     set_text_input_target_position(input, xx text_until_cursor_width);
     update_text_input_rendering_data(input);
 
+    // Render the input sign
+    draw_text(renderer, theme, ">", x, y);
+    x += calculate_text_width(*theme.font, "> ");
+    
     // Render the actual text
     draw_text(renderer, theme, text, x, y);
-    
+
     if input.active {
         // Render the cursor if the text input is active
         cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };

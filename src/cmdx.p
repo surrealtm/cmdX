@@ -143,9 +143,10 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
     
     // Draw all the text in the terminal
-    draw_text(*cmdx.renderer, cmdx.active_theme, ">", 5, cmdx.window.height - 10);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 20, cmdx.window.height - 10);
-    draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, cmdx.window.height - 10 - cmdx.active_theme.font.line_height);
+    y := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 5, y);
+    y -= cmdx.active_theme.font.line_height;
+    draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, y);
 
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
