@@ -2,6 +2,14 @@ help_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     help(cmdx);
 }
 
+quit_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    quit(cmdx);
+}
+
+clear_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    clear(cmdx);
+}
+
 theme_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     theme_name := get_string_argument(*argument_values, 0);
     theme(cmdx, theme_name);
@@ -37,6 +45,14 @@ register_all_commands :: (cmdx: *CmdX) {
     help.name = ":help";
     help.handler = help_handler;
 
+    quit := array_push(*cmdx.commands);
+    quit.name = ":quit";
+    quit.handler = quit_handler;
+
+    clear := array_push(*cmdx.commands);
+    clear.name = ":clear";
+    clear.handler = clear_handler;
+    
     theme := array_push(*cmdx.commands);
     theme.name = ":theme";
     theme.handler = theme_handler;

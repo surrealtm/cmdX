@@ -181,6 +181,14 @@ help :: (cmdx: *CmdX) {
     cmdx_print(cmdx, "=== HELP ===");
 }
 
+quit :: (cmdx: *CmdX) {
+    cmdx.window.should_close = true;
+}
+
+clear :: (cmdx: *CmdX) {
+    array_clear(*cmdx.backlog);
+}
+
 theme :: (cmdx: *CmdX, theme_name: string) {
     switch_to_theme(cmdx, theme_name);
 }
