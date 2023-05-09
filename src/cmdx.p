@@ -65,6 +65,7 @@ CmdX :: struct {
     themes: [..]Theme;
 
     win32_pipes: Win32_Pipes;
+    child_process_running: bool;
 }
 
 add_string_to_backlog :: (cmdx: *CmdX, message: string) {
@@ -94,6 +95,23 @@ cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
 
     mprint(string_view(message.data, message.count), format, ..args);
     array_add(*cmdx.backlog, message);
+}
+
+get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
+    string_builder: String_Builder = ---;
+    create_string_builder(*string_builder, arena);
+    append_string(*string_builder, cmdx.current_directory);
+    append_string(*string_builder, "> ");
+    return finish_string_builder(*string_builder);
+}
+
+get_complete_input_string :: (cmdx: *CmdX, arena: *Memory_Arena, input_string: string) -> string {
+    string_builder: String_Builder = ---;
+    create_string_builder(*string_builder, arena);
+    append_string(*string_builder, cmdx.current_directory);
+    append_string(*string_builder, "> ");
+    append_string(*string_builder, input_string);
+    return finish_string_builder(*string_builder);
 }
 
 create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
@@ -141,12 +159,37 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
+
+    // Handle input for this frame
+    if cmdx.text_input.entered {
+        // The user has entered a string, add that to the backlog, clear the input and actually run
+        // the command.
+        input_string := get_string_view_from_text_input(*cmdx.text_input);
+        clear_text_input(*cmdx.text_input);
+        activate_text_input(*cmdx.text_input);
+
+        if cmdx.child_process_running {
+            try_writing_to_child_process(cmdx, input_string);
+        } else if input_string.count {
+            add_string_to_backlog(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
+            handle_input_string(cmdx, input_string);
+        }
+    }
     
     // Draw all the text in the terminal
     y := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, 5, y);
+    x := 5;
+    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, y);
     y -= cmdx.active_theme.font.line_height;
-    draw_backlog(*cmdx.renderer, cmdx.active_theme, *cmdx.backlog, 5, y);
+
+    backlog_index: s64 = cmdx.backlog.count - 1;
+    while y > 0 && backlog_index >= 0 {
+        log := array_get_value(*cmdx.backlog, backlog_index);
+        draw_text(*cmdx.renderer, cmdx.active_theme, log, x, y, cmdx.active_theme.font_color);
+        y -= cmdx.active_theme.font.line_height;
+        --backlog_index;
+    }
 
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
@@ -196,20 +239,6 @@ main :: () -> s32 {
     
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
-
-        if cmdx.text_input.entered {
-            // The user has entered a string, add that to the backlog, clear the input and actually run
-            // the command.
-            input_string := get_string_view_from_text_input(*cmdx.text_input);
-            clear_text_input(*cmdx.text_input);
-            activate_text_input(*cmdx.text_input);
-
-            if input_string.count {
-                feedback_string := concatenate_strings("> ", input_string, *cmdx.global_allocator);
-                add_string_to_backlog(*cmdx, feedback_string);
-                handle_input_string(*cmdx, input_string);
-            }
-        }
     }
 
     // Cleanup

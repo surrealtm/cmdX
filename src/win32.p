@@ -126,13 +126,13 @@ try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
     
     // Flush the buffer so that the data is actually written into the pipe, and not just the internal process
     // buffer.
-    FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
+    //FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
 }
 
 try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Create a new pipe for this child process
     create_win32_pipes(cmdx);
-
+    
     // Set up c strings for file paths
     c_command_string := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
@@ -148,8 +148,13 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     result := CreateProcessA(null, c_command_string, null, null, false, 0, null, c_current_directory, *startup_info, *process);
     if !result {
         cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
+        cmdx.child_process_running = false;
+        destroy_child_side_win32_pipes(cmdx);
+        destroy_parent_side_win32_pipes(cmdx);
         return;
     }
+
+    cmdx.child_process_running = true;
 
     // Close the child end pipes from this side, since they have been duplicated and the parent does not
     // need the handles.
@@ -162,17 +167,6 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         
         // Render a single frame while waiting for the process to terminate
         single_cmdx_frame(cmdx);
-
-        // Handle potential input from the terminal to the child process
-        if cmdx.text_input.entered {
-            // The user has entered a string, add that to the backlog, clear the input and actually run
-            // the command.
-            input_string := get_string_view_from_text_input(*cmdx.text_input);
-            clear_text_input(*cmdx.text_input);
-            activate_text_input(*cmdx.text_input);
-
-            try_writing_to_child_process(cmdx, input_string);
-        }
         
         // Get the current process name and display that in the window title
         if cmdx.current_child_process_name.count   free_string(cmdx.current_child_process_name, *cmdx.global_allocator);
@@ -193,6 +187,7 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     
     // Clear the current process name
     free_string(cmdx.current_child_process_name, *cmdx.global_allocator);
+    cmdx.child_process_running = false;
     cmdx.current_child_process_name = "";
     update_window_name(cmdx);
 }
