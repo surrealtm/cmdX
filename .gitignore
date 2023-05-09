@@ -54,4 +54,5 @@ dkms.conf
 # Local Program Stuff
 .emacs.desktop
 .emacs.desktop.lock
+*.cmdx-config
 *.rdbg

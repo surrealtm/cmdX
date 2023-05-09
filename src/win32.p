@@ -182,7 +182,6 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         
         // Get the current process name and display that in the window title
         if cmdx.child_process_name.count   free_string(cmdx.child_process_name, *cmdx.global_allocator);
-
         process_name: [MAX_PATH]s8 = ---;
         process_name_length := K32GetModuleBaseNameA(process.hProcess, null, process_name, MAX_PATH);
         cmdx.child_process_name = make_string(process_name, process_name_length, *cmdx.global_allocator);

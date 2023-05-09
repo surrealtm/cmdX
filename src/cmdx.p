@@ -17,6 +17,7 @@
 #load "math/linear.p";
 
 // --- Local files
+#load "config.p";
 #load "draw.p";
 #load "commands.p";
 #load "command_handlers.p";
@@ -31,7 +32,9 @@ COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 EXPECTED_FPS: f32 : 60;
 EXPECTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / EXPECTED_FPS;
 
-// --- Styling
+// --- Other global data
+CONFIG_FILE_PATH :: ".cmdx-config";
+
 Theme :: struct {
     name: string;
     font_path: string; // Needed for reloading the font when the size changes
@@ -43,28 +46,35 @@ Theme :: struct {
 }
 
 CmdX :: struct {
+    // Memory management
     global_memory_arena: Memory_Arena;
     global_memory_pool: Memory_Pool;
     global_allocator: Allocator;
 
     frame_memory_arena: Memory_Arena;
     frame_allocator: Allocator;
-    
+
+    // Output
     window: Window;
     renderer: Renderer;
 
+    // Text
     text_input: Text_Input;
     backlog: [..]string;
 
+    // Command handling
     commands: [..]Command;
     current_directory: string;
     child_process_name: string;
     child_process_running: bool;
 
+    // Styling
     font_size: u32 = 15;
     active_theme: *Theme;
     themes: [..]Theme;
+    config: Config;
 
+    // Platform data
     win32: Win32;
 }
 
@@ -212,6 +222,13 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 }
 
 main :: () -> s32 {
+    // Set the working directory of this program to where to executable file is, so that the data folder
+    // can always be accessed.
+    run_tree := get_module_path();
+    defer free_string(run_tree, *Default_Allocator);
+    set_working_directory(run_tree);
+    enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
+
     // Set up CmdX
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
@@ -225,14 +242,10 @@ main :: () -> s32 {
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
-    
-    // Set the working directory of this program to where to executable file is, so that the data folder
-    // can always be accessed.
-    run_tree := get_module_path();
-    defer free_string(run_tree, *Default_Allocator);
-    set_working_directory(run_tree);
-    enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
-        
+
+    // Load the config file or create a new default one
+    if !read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH) create_default_config(*cmdx.config);
+            
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
@@ -248,6 +261,7 @@ main :: () -> s32 {
     }
 
     // Cleanup
+    write_config_file(*cmdx.config, CONFIG_FILE_PATH);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);
