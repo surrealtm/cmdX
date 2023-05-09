@@ -126,13 +126,17 @@ try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
     
     // Flush the buffer so that the data is actually written into the pipe, and not just the internal process
     // buffer.
-    //FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
+    FlushFileBuffers(cmdx.win32_pipes.input_write_pipe);
 }
 
 try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Create a new pipe for this child process
     create_win32_pipes(cmdx);
     
+    // Save the actual working directory of cmdX to restore it later
+    working_directory := get_working_directory();
+    set_working_directory(cmdx.current_directory);
+
     // Set up c strings for file paths
     c_command_string := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
@@ -151,6 +155,7 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         cmdx.child_process_running = false;
         destroy_child_side_win32_pipes(cmdx);
         destroy_parent_side_win32_pipes(cmdx);
+        set_working_directory(working_directory);
         return;
     }
 
@@ -190,4 +195,5 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running = false;
     cmdx.current_child_process_name = "";
     update_window_name(cmdx);
+    set_working_directory(working_directory);
 }
