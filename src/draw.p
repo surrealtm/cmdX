@@ -34,17 +34,17 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
     renderer.width  = window.width;
     renderer.height = window.height;
     renderer.projection_matrix = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
-
+    glViewport(0, 0, renderer.width, renderer.height);
+    
     glClearColor(xx theme.background_color.r / 255.0,
                  xx theme.background_color.g / 255.0,
                  xx theme.background_color.b / 255.0,
                  xx theme.background_color.a / 255.0);
     glClear(GL_COLOR_BUFFER_BIT);
-    glViewport(0, 0, renderer.width, renderer.height);
 }
 
 draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, texture: u64, r: u8, g: u8, b: u8) {
-    position := v2f.{ xx (x - renderer.width / 2), xx (y - renderer.height / 2) };
+    position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     scale := v2f.{ xx w, xx h };
 
     glBindTexture(GL_TEXTURE_2D, texture);
@@ -68,7 +68,7 @@ draw_text :: (renderer: *Renderer, theme: *Theme, text: string, x: s32, y: s32) 
 }
 
 draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color) {
-    position := v2f.{ xx (x - renderer.width / 2), xx (y - renderer.height / 2) };
+    position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     scale := v2f.{ xx w, xx h };
 
     set_blending(.Normal);

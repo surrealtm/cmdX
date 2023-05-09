@@ -1,0 +1,12 @@
+[ ] Fix font rendering glitch when window is resized
+[ ] Handle enqouted arguments
+[ ] Add different color for cursor in themes
+[ ] Add more themes (blue, monokai)
+[ ] Add :font-size command
+[ ] Add :quit command
+[ ] Add input history
+[ ] Add scrolling to background
+[ ] Add rm / cat commands
+[ ] Add command aliases (dir -> ls)
+[ ] Add welcome screen
+[ ] Add instanced rendering for text
