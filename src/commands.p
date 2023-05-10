@@ -190,7 +190,8 @@ clear :: (cmdx: *CmdX) {
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
-    switch_to_theme(cmdx, theme_name);
+    cmdx.active_theme_name = copy_string(theme_name, *Default_Allocator);
+    update_active_theme_pointer(cmdx);
 }
 
 theme_lister :: (cmdx: *CmdX) {
@@ -204,7 +205,8 @@ theme_lister :: (cmdx: *CmdX) {
 }
 
 font_size :: (cmdx: *CmdX, size: u32) {
-    update_font_size(cmdx, size);
+    cmdx.font_size = size;
+    update_font_size(cmdx);
 }
 
 ls :: (cmdx: *CmdX) {

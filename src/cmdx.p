@@ -69,7 +69,8 @@ CmdX :: struct {
     child_process_running: bool;
 
     // Styling
-    font_size: u32 = 15;
+    font_size: s64;
+    active_theme_name: string;
     active_theme: *Theme;
     themes: [..]Theme;
     config: Config;
@@ -136,29 +137,29 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, curs
     return theme;
 }
 
-switch_to_theme :: (cmdx: *CmdX, theme_name: string) {
+update_active_theme_pointer :: (cmdx: *CmdX) {
+    // Try to find a theme in the list with the specified name
     for i := 0; i < cmdx.themes.count; ++i {
         t := array_get(*cmdx.themes, i);
-        if compare_strings(t.name, theme_name) {
+        if compare_strings(t.name, cmdx.active_theme_name) {
             cmdx.active_theme = t;
-            set_string_property(*cmdx.config, "theme", theme_name);
             return;
         }
     }
 
-    cmdx_print(cmdx, "No loaded theme named '%' could be found.", theme_name);    
+    // No theme with that name could be found, revert back to the default one
+    cmdx_print(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);    
+    cmdx.active_theme = *cmdx.themes.data[0];
+    cmdx.active_theme_name = cmdx.active_theme.name;
+
 }
 
-update_font_size :: (cmdx: *CmdX, new_font_size: u32) {
-    cmdx.font_size = new_font_size;
-    
+update_font_size :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
         destroy_font(*theme.font, xx destroy_gl_texture_2d, null);
         load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
     }
-
-    set_integer_property(*cmdx.config, "font-size", new_font_size);
 }
 
 update_window_name :: (cmdx: *CmdX) {
@@ -259,9 +260,10 @@ main :: () -> s32 {
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
 
-    // Load the config file or just create a new default one
+    // Set up all the required config properties, and read the config file if it exists
+    create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
+    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH);
-    cmdx.font_size = get_integer_property(*cmdx.config, "font-size");
     
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
@@ -273,8 +275,8 @@ main :: () -> s32 {
     create_theme(*cmdx, "dark",    COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
     create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
     create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
-    switch_to_theme(*cmdx, get_string_property(*cmdx.config, "theme"));
-
+    update_active_theme_pointer(*cmdx);
+    
     // After everything has been loaded, actually show the window. This will prevent a small time frame in
     // which the window is just blank white, which does not seem very clean. Instead, the window takes a
     // little longer to show up, but it immediatly gets filled with the first frame.
