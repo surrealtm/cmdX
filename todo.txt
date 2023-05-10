@@ -1,5 +1,4 @@
 [ ] Handle enqouted arguments
-[ ] Execute command from current directory, not the own program's working directory
 [ ] Add input history
 [ ] Add scrolling to background
 [ ] Add rm / cat commands

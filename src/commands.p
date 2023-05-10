@@ -22,6 +22,23 @@ Command :: struct {
 
 /* --- Command Handling --- */
 
+print_command_syntax :: (cmdx: *CmdX, command: *Command) {
+    print_buffer: Print_Buffer = ---;
+    print_buffer.size = 0;
+    print_buffer.output_handle = 0;
+
+    internal_print(*print_buffer, " > %", command.name);
+
+    for i := 0; i < command.arguments.count; ++i {
+        argument := array_get(*command.arguments, i);
+        internal_print(*print_buffer, "   %: %", argument.name, command_argument_type_to_string(argument.type));
+        if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
+    }
+
+    string := string_view(print_buffer.buffer, print_buffer.size);
+    add_string_to_backlog(cmdx, string);
+}
+
 command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
     result: string = ---;
 
@@ -80,59 +97,58 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
 }
 
 
-/* Input splitting */
+/* --- Input splitting --- */
 
-print_command_syntax :: (cmdx: *CmdX, command: *Command) {
-    print_buffer: Print_Buffer = ---;
-    print_buffer.size = 0;
-    print_buffer.output_handle = 0;
+get_next_word_in_input :: (input: *string) -> string {
+    // Eat empty characters before the word
+    argument_start: u32 = 0;
+    while argument_start < input.count && input.data[argument_start] == ' '    argument_start += 1;
 
-    internal_print(*print_buffer, " > %", command.name);
-
-    for i := 0; i < command.arguments.count; ++i {
-        argument := array_get(*command.arguments, i);
-        internal_print(*print_buffer, "   %: %", argument.name, command_argument_type_to_string(argument.type));
-        if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
+    if argument_start == input.count {
+        // There was no more word in the input string, set the start and end pointer to an invalid state
+        ~input = "";
+        return "";
     }
 
-    string := string_view(print_buffer.buffer, print_buffer.size);
-    add_string_to_backlog(cmdx, string);
+    argument: string = ---;
+    
+    // Read the input string until the end of the word.
+    if input.data[argument_start] == '"' {
+        // If the start of this word is a quotation mark, then the word end is marked by the next
+        // quotation mark. Spaces are ignored in this case.
+        argument_end := search_string_from(~input, '"', argument_start + 1);
+if argument_end == -1 {
+    // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
+    // assume that the argument is the rest of the input string.
+    argument = substring(~input, argument_start, input.count);
+    ~input = "";
+} else {
+    // Exclude the actual quote characters from the output string
+    argument = substring(~input, argument_start + 1, argument_end);
+    ~input = substring(~input, argument_end + 1, input.count);
+}
+} else {
+    // The word goes until the next encountered space character.
+    argument_end := search_string_from(~input, ' ', argument_start);
+    if argument_end == -1    argument_end = input.count;
+    argument = substring(~input, argument_start, argument_end);
+    ~input = substring(~input, argument_end, input.count);
 }
 
-get_next_word_in_input :: (input: string, start: *u32, end: *u32) {
-    // Eat empty characters before the word
-    while ~start < input.count && input[~start] == ' '    ~start += 1;
-
-    if ~start == input.count {
-        // There was no more word in the input string
-        ~start = input.count;
-        ~end = input.count;
-        return;
-    }
-    
-    // Get the length of the word
-    ~end = search_string_from(input, ' ', ~start);
-    if ~end == -1    ~end = input.count;
+return argument;
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {    
     // Parse the actual command name
-    word_start, word_end: u32 = 0;
-    get_next_word_in_input(input, *word_start, *word_end);
-    command_name := substring(input, word_start, word_end);
-    word_start = word_end;
-    
+    command_name := get_next_word_in_input(*input);
+
     command_arguments: [..]string;
     command_arguments.allocator = *cmdx.frame_allocator;
 
     // Parse all the arguments
-    get_next_word_in_input(input, *word_start, *word_end);
-    while word_start < input.count {
-        argument := substring(input, word_start, word_end);
-        array_add(*command_arguments, argument);
-
-        word_start = word_end;
-        get_next_word_in_input(input, *word_start, *word_end);
+    while input.count {
+        argument := get_next_word_in_input(*input);
+        if argument.count array_add(*command_arguments, argument);
     }
 
     command_found := false;
@@ -146,7 +162,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
             break;
         }
     }
-
+    
     if !command_found {
         // Join all the different arguments back together to make a command that can be supplied into the
         // process creation. This may seem redundant, but this allows for custom argument management, instead
@@ -157,8 +173,11 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
 
         for i := 0; i < command_arguments.count; ++i {
             argument := array_get_value(*command_arguments, i);
-            append_string(*string_builder, " ");
+            // Compiler does not support \" yet, so this thing has to happen here :(
+            append_character(*string_builder, ' ');
+            append_character(*string_builder, '"');
             append_string(*string_builder, argument);
+            append_character(*string_builder, '"');
         }
 
         command_string := finish_string_builder(*string_builder);
