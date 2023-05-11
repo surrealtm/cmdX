@@ -36,7 +36,7 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     }
 
     string := string_view(print_buffer.buffer, print_buffer.size);
-    add_string_to_backlog(cmdx, string);
+    cmdx_add_string(cmdx, string);
 }
 
 command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
@@ -79,7 +79,7 @@ get_int_argument :: (argument_values: *[..]string, index: u32) -> s64 {
 
 dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
     if argument_values.count != command.arguments.count {
-        cmdx_print(cmdx, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
+        cmdx_print_string(cmdx, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
         return false;
     }
 
@@ -87,7 +87,7 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
         argument := array_get(*command.arguments, i);
         argument_value := array_get_value(*argument_values, i);
         if !is_valid_command_argument_value(argument.type, argument_value) {
-            cmdx_print(cmdx, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
+            cmdx_print_string(cmdx, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
             return false;
         }
     }
@@ -138,7 +138,9 @@ if argument_end == -1 {
 return argument;
 }
 
-handle_input_string :: (cmdx: *CmdX, input: string) {    
+handle_input_string :: (cmdx: *CmdX, input: string) {
+    cmdx.number_of_current_child_process_messages = 0; // Reset the message count for the next command to be executed
+    
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
 
@@ -184,20 +186,22 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         try_spawn_process_for_command(cmdx, command_string);
     }
+
+    cmdx_finish_child_process(cmdx);
 }
 
 
 /* Builtin command behaviour */
 
 help :: (cmdx: *CmdX) {
-    cmdx_print(cmdx, "=== HELP ===");
+    cmdx_print_string(cmdx, "=== HELP ===");
 
     for i := 0; i < cmdx.commands.count; ++i {
         command := array_get(*cmdx.commands, i);
         print_command_syntax(cmdx, command);
     }
     
-    cmdx_print(cmdx, "=== HELP ===");
+    cmdx_print_string(cmdx, "=== HELP ===");
 }
 
 quit :: (cmdx: *CmdX) {
@@ -214,12 +218,12 @@ theme :: (cmdx: *CmdX, theme_name: string) {
 }
 
 theme_lister :: (cmdx: *CmdX) {
-    cmdx_print(cmdx, "List of available themes:");
+    cmdx_print_string(cmdx, "List of available themes:");
 
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
-        cmdx_print(cmdx, " > %", theme.name);
-        if theme == cmdx.active_theme    append_string_to_backlog(cmdx, "   * Active");
+        cmdx_print_string(cmdx, " > %", theme.name);
+        if theme == cmdx.active_theme    cmdx_append_string(cmdx, "   * Active");
     }
 }
 
@@ -229,7 +233,7 @@ font_size :: (cmdx: *CmdX, size: u32) {
 }
 
 ls :: (cmdx: *CmdX) {
-    cmdx_print(cmdx, "Contents of folder '%':", cmdx.current_directory);
+    cmdx_print_string(cmdx, "Contents of folder '%':", cmdx.current_directory);
 
     files: [..]string;
     files.allocator = *cmdx.frame_allocator;
@@ -237,7 +241,7 @@ ls :: (cmdx: *CmdX) {
 
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);
-        cmdx_print(cmdx, " > %", file_name);
+        cmdx_print_string(cmdx, " > %", file_name);
     }
 }
 
@@ -249,6 +253,6 @@ cd :: (cmdx: *CmdX, new_directory: string) {
         cmdx.current_directory = get_absolute_path(concat, *cmdx.global_allocator); // Remove any redundency in the path (e.g. parent/../parent)
         update_window_name(cmdx);
     } else {
-        cmdx_print(cmdx, "Cannot change directory: The folder '%' does not exists.", concat);
+        cmdx_print_string(cmdx, "Cannot change directory: The folder '%' does not exists.", concat);
     }
 }

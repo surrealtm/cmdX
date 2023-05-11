@@ -28,22 +28,22 @@ create_win32_pipes :: (cmdx: *CmdX) {
 
     // Create a pipe to read the output of the child process
     if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, *security_attributes, 0) {
-        cmdx_print(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
+        cmdx_print_string(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
     }
 
     // Do not inherit my side of the pipe
     if !SetHandleInformation(cmdx.win32.output_read_pipe, HANDLE_FLAG_INHERIT, 0) {
-        cmdx_print(cmdx, "Failed to set the output pipe handle information for the child process (Error: %).", GetLastError());
+        cmdx_print_string(cmdx, "Failed to set the output pipe handle information for the child process (Error: %).", GetLastError());
     }
 
     // Create a pipe to write input from this console to the child process
     if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, *security_attributes, 0) {
-        cmdx_print(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
+        cmdx_print_string(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
     }
 
     // Do not inherit my side of the pipe
     if !SetHandleInformation(cmdx.win32.input_write_pipe, HANDLE_FLAG_INHERIT, 0) {
-        cmdx_print(cmdx, "Failed to set the input pipe handle information for the child process (Error: %).", GetLastError());
+        cmdx_print_string(cmdx, "Failed to set the input pipe handle information for the child process (Error: %).", GetLastError());
     }
 
     cmdx.win32.my_output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -100,7 +100,7 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
             line := substring(string, 0, line_break);
             if line[line.count - 1] == 13   --line.count; // Cut the \r character
             
-            add_string_to_backlog(cmdx, line);
+            cmdx_add_string(cmdx, line);
             string = substring(string, line_break + 1, string.count);
             line_break = search_string(string, 10);
         }
@@ -157,7 +157,7 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // process here, which are set to be the pipes.
     result := CreateProcessA(null, c_command_string, null, null, false, 0, null, c_current_directory, *startup_info, *process);
     if !result {
-        cmdx_print(cmdx, "Unknown command. Try :help to see a list of all available commands.");
+        cmdx_print_string(cmdx, "Unknown command. Try :help to see a list of all available commands.");
         cmdx.child_process_running = false;
         destroy_child_side_win32_pipes(cmdx);
         destroy_parent_side_win32_pipes(cmdx);

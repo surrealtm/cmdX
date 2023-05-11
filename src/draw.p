@@ -146,6 +146,8 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     scale := v2f.{ xx w, xx h };
 
+    if color.a != 255 set_blending(.Normal);
+    
     set_shader(*renderer.quad_shader);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_position", position);
@@ -153,6 +155,15 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
     set_shader_uniform_m4f(*renderer.quad_shader, "u_projection", renderer.projection_matrix);
     set_vertex_buffer(*renderer.quad_vertex_buffer);
     draw_vertex_buffer(*renderer.quad_vertex_buffer);
+
+    if color.a != 255 set_blending(.None);
+}
+
+draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, border: u32, color: Color) {
+    draw_quad(renderer, x, y, w, border, color);
+    draw_quad(renderer, x, y, border, h, color);
+    draw_quad(renderer, x, y + h - border, w, border, color);
+    draw_quad(renderer, x + w - border, y, border, h, color);
 }
 
 draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
@@ -182,5 +193,11 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, pref
 
     // Render the cursor if the text input is active
     cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };
-    draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
+
+    if !input.active {
+        // If the text input is not active, render an outlined quad as the cursor
+        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, 1, cursor_color);
+    } else
+        // If the text input is active, render a filled quad
+        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
 }

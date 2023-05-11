@@ -67,6 +67,7 @@ CmdX :: struct {
     current_directory: string;
     child_process_name: string;
     child_process_running: bool;
+    number_of_current_child_process_messages: u32;
 
     // Styling
     font_size: s64;
@@ -79,25 +80,28 @@ CmdX :: struct {
     win32: Win32;
 }
 
-add_string_to_backlog :: (cmdx: *CmdX, message: string) {
-    array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
-}
-
-remove_string_from_backlog :: (cmdx: *CmdX, index: s64) {
+cmdx_remove_string :: (cmdx: *CmdX, index: s64) {
     string := array_get_value(*cmdx.backlog, index);
     free_string(string, *cmdx.global_allocator);
     array_remove(*cmdx.backlog, index);
+
+    --cmdx.number_of_current_child_process_messages;
 }
 
-append_string_to_backlog :: (cmdx: *CmdX, message: string) {
+cmdx_append_string :: (cmdx: *CmdX, message: string) {
     assert(cmdx.backlog.count > 0, "Cannot append string to backlog; backlog is empty");
     last_string := array_get(*cmdx.backlog, cmdx.backlog.count - 1);
     new_message := concatenate_strings(~last_string, message, *cmdx.global_allocator);
-    remove_string_from_backlog(cmdx, cmdx.backlog.count - 1);
-    add_string_to_backlog(cmdx, new_message);
+    cmdx_remove_string(cmdx, cmdx.backlog.count - 1);
+    cmdx_add_string(cmdx, new_message);
 }
 
-cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
+cmdx_add_string :: (cmdx: *CmdX, message: string) {
+    array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
+    ++cmdx.number_of_current_child_process_messages;
+}
+
+cmdx_print_string :: (cmdx: *CmdX, format: string, args: ..any) {
     required_characters := query_required_print_buffer_size(format, ..args);
 
     message: string = ---;
@@ -106,6 +110,20 @@ cmdx_print :: (cmdx: *CmdX, format: string, args: ..any) {
 
     mprint(string_view(message.data, message.count), format, ..args);
     array_add(*cmdx.backlog, message);
+
+    ++cmdx.number_of_current_child_process_messages;
+}
+
+cmdx_new_line :: (cmdx: *CmdX) {
+    message: string = "";
+    array_add(*cmdx.backlog, message);
+}
+
+cmdx_finish_child_process :: (cmdx: *CmdX) {
+    // After a command has successfully been executed, check to see how many messages have been pumped into
+    // the backlog. If there have been any, append a new line for better readability.
+    if cmdx.number_of_current_child_process_messages cmdx_new_line(cmdx);
+    cmdx.number_of_current_child_process_messages = 0;
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
@@ -148,7 +166,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     }
 
     // No theme with that name could be found, revert back to the default one
-    cmdx_print(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);    
+    cmdx_print_string(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);    
     cmdx.active_theme = *cmdx.themes.data[0];
     cmdx.active_theme_name = cmdx.active_theme.name;
 
@@ -182,6 +200,8 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     // Prepare the next frame
     update_window(*cmdx.window);
     prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);        
+
+    cmdx.text_input.active = cmdx.window.focused;
     
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
@@ -203,7 +223,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         if cmdx.child_process_running {
             try_writing_to_child_process(cmdx, input_string);
         } else if input_string.count {
-            add_string_to_backlog(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
+            cmdx_add_string(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
             handle_input_string(cmdx, input_string);
         }
     }
@@ -237,6 +257,15 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         time_to_sleep: f32 = REQUESTED_FRAME_TIME_MILLISECONDS - active_frame_time;
         Sleep(xx floorf(time_to_sleep) - 1);
     }
+}
+
+welcome_screen :: (cmdx: *CmdX, run_tree: string) {
+    config_location := concatenate_strings(run_tree, CONFIG_FILE_PATH, *cmdx.frame_allocator);
+
+    cmdx_print_string(cmdx, "Welcome to cmdX.");
+    cmdx_print_string(cmdx, "Use the :help command as a starting point.");
+    cmdx_print_string(cmdx, "The config file can be found under %.", config_location);
+    cmdx_new_line(cmdx);
 }
 
 main :: () -> s32 {
@@ -283,6 +312,9 @@ main :: () -> s32 {
     // which the window is just blank white, which does not seem very clean. Instead, the window takes a
     // little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
+
+    // Display the welcome message
+    welcome_screen(*cmdx, run_tree);
     
     // Main loop until the window gets closed
     while !cmdx.window.should_close {
