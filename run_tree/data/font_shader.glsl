@@ -2,16 +2,15 @@
 #version 330 core
 
 in vec2 in_position;
+in vec2 in_uv;
 
 out vec2 pass_uv;
 
-uniform vec2 u_scale;
-uniform vec2 u_position;
 uniform mat4 u_projection;
 
 void main(void) {
-    gl_Position = u_projection * vec4(in_position * u_scale + u_position, 0.0, 1.0);
-    pass_uv = in_position;
+    gl_Position = u_projection * vec4(in_position, 0.0, 1.0);
+    pass_uv = in_uv;
 }
 
 @fragment

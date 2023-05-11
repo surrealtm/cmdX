@@ -29,8 +29,8 @@ TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 
 // --- Timing
-EXPECTED_FPS: f32 : 60;
-EXPECTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / EXPECTED_FPS;
+REQUESTED_FPS: f32 : 30;
+REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 // --- Other global data
 CONFIG_FILE_PATH :: ".cmdx-config";
@@ -223,6 +223,9 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         --backlog_index;
     }
 
+    // Flush all text rendering
+    flush_font_buffer(*cmdx.renderer);
+    
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
     
@@ -231,8 +234,8 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
-    if active_frame_time < EXPECTED_FRAME_TIME_MILLISECONDS - 1 {
-        time_to_sleep: f32 = EXPECTED_FRAME_TIME_MILLISECONDS - active_frame_time;
+    if active_frame_time < REQUESTED_FRAME_TIME_MILLISECONDS - 1 {
+        time_to_sleep: f32 = REQUESTED_FRAME_TIME_MILLISECONDS - active_frame_time;
         Sleep(xx floorf(time_to_sleep) - 1);
     }
 }
