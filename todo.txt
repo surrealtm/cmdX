@@ -6,5 +6,3 @@
 [ ] Deactivate cursor when window is not active
 [ ] Improve text input find_word_end for special chars, e.g. only delete actual letters and not the ':'
 [ ] Add descriptions to builtin commands
-[ ] Flush font buffer when different color
-[ ] Render cursor after flushing all text buffers to fix depth ordering

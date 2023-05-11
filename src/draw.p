@@ -1,4 +1,4 @@
-GLYPH_BATCH_COUNT :: 1024;
+GLYPH_BATCH_COUNT :: 4096;
 GLYPH_BUFFER_SIZE :: GLYPH_BATCH_COUNT * 6 * 2; // 6 Vertices per glyph a 2 dimensions
 
 Color :: struct {
@@ -66,7 +66,6 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
 }
 
 flush_font_buffer :: (renderer: *Renderer) {
-    set_blending(.Normal);
     set_shader(*renderer.font_shader);
     set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix);
     set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{ xx renderer.background_color.r / 255.0,
@@ -89,11 +88,10 @@ flush_font_buffer :: (renderer: *Renderer) {
 }
 
 draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x: f32, uv_y: f32, uv_w: f32, uv_h: f32, texture: u64) {
+    if renderer.font_glyph_count == GLYPH_BATCH_COUNT flush_font_buffer(renderer);
+
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     size     := v2f.{ xx w, xx h };
-    uv_frame := v4f.{ uv_x, uv_y, uv_w, uv_h };
-
-    if renderer.font_glyph_count == GLYPH_BATCH_COUNT flush_font_buffer(renderer);
 
     buffer_offset := renderer.font_glyph_count * 12;
     renderer.font_vertices[buffer_offset + 0] = position.x;
@@ -114,28 +112,30 @@ draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x:
     renderer.font_vertices[buffer_offset + 10] = position.x + size.x;
     renderer.font_vertices[buffer_offset + 11] = position.y;
 
-    renderer.font_uvs[buffer_offset + 0] = uv_frame.x;
-    renderer.font_uvs[buffer_offset + 1] = uv_frame.y;
+    renderer.font_uvs[buffer_offset + 0] = uv_x;
+    renderer.font_uvs[buffer_offset + 1] = uv_y;
 
-    renderer.font_uvs[buffer_offset + 2] = uv_frame.x;
-    renderer.font_uvs[buffer_offset + 3] = uv_frame.y + uv_frame.w;
+    renderer.font_uvs[buffer_offset + 2] = uv_x;
+    renderer.font_uvs[buffer_offset + 3] = uv_y + uv_h;
 
-    renderer.font_uvs[buffer_offset + 4] = uv_frame.x + uv_frame.z;
-    renderer.font_uvs[buffer_offset + 5] = uv_frame.y + uv_frame.w;
+    renderer.font_uvs[buffer_offset + 4] = uv_x + uv_w;
+    renderer.font_uvs[buffer_offset + 5] = uv_y + uv_h;
 
-    renderer.font_uvs[buffer_offset + 6] = uv_frame.x;
-    renderer.font_uvs[buffer_offset + 7] = uv_frame.y;
+    renderer.font_uvs[buffer_offset + 6] = uv_x;
+    renderer.font_uvs[buffer_offset + 7] = uv_y;
 
-    renderer.font_uvs[buffer_offset + 8] = uv_frame.x + uv_frame.z;
-    renderer.font_uvs[buffer_offset + 9] = uv_frame.y + uv_frame.w;
+    renderer.font_uvs[buffer_offset + 8] = uv_x + uv_w;
+    renderer.font_uvs[buffer_offset + 9] = uv_y + uv_h;
 
-    renderer.font_uvs[buffer_offset + 10] = uv_frame.x + uv_frame.z;
-    renderer.font_uvs[buffer_offset + 11] = uv_frame.y;
+    renderer.font_uvs[buffer_offset + 10] = uv_x + uv_w;
+    renderer.font_uvs[buffer_offset + 11] = uv_y;
     
     ++renderer.font_glyph_count;
 }
 
-draw_text :: (renderer: *Renderer, theme: *Theme, text: string, x: s32, y: s32, color: Color) {    
+draw_text :: (renderer: *Renderer, theme: *Theme, text: string, x: s32, y: s32, color: Color) {
+    if renderer.foreground_color.r != color.r || renderer.foreground_color.g != color.g || renderer.foreground_color.b != color.b || renderer.foreground_color.a != color.a   flush_font_buffer(renderer); // Since the font buffer only supports a constant color, it needs to be flushed with the previous color to allow for the new color afterwards
+    
     renderer.foreground_color = color;
     renderer.background_color = theme.background_color;
     renderer.font_texture_handle = theme.font.texture.handle;
@@ -146,7 +146,6 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     scale := v2f.{ xx w, xx h };
 
-    set_blending(.Normal);
     set_shader(*renderer.quad_shader);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_position", position);
@@ -157,8 +156,10 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
 }
 
 draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
+    // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
-        
+    prefix_string_width := query_text_width(*theme.font, prefix_string);
+    
     // Update the internal text input rendering state
     text_until_cursor := get_string_view_until_cursor_from_text_input(input);
     text_until_cursor_width, text_until_cursor_height := query_text_size(*theme.font, text_until_cursor);
@@ -166,18 +167,20 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, pref
     update_text_input_rendering_data(input);
 
     // Render the input string
+    draw_text(renderer, theme, input_string, x + prefix_string_width, y, theme.font_color);
+
+    // Render the string prefix
     draw_text(renderer, theme, prefix_string, x, y, theme.accent_color);
-    x += query_text_width(*theme.font, prefix_string);
-    draw_text(renderer, theme, input_string, x, y, theme.font_color);
 
-    if input.active {
-        // Calculate the cursor size
-        cursor_width: u32 = query_text_width(*theme.font, "M");
-        cursor_height: u32 = theme.font.line_height;
-        if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
+    // Flush all text before rendering the cursor to make sure the cursor always gets rendered on top of the font
+    flush_font_buffer(renderer);
 
-        // Render the cursor if the text input is active
-        cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };
-        draw_quad(renderer, x + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
-    }
+    // Calculate the cursor size
+    cursor_width:  u32 = query_text_width(*theme.font, "M");
+    cursor_height: u32 = theme.font.line_height;
+    if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
+
+    // Render the cursor if the text input is active
+    cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };
+    draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
 }

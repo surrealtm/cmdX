@@ -29,7 +29,7 @@ TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 
 // --- Timing
-REQUESTED_FPS: f32 : 30;
+REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 // --- Other global data
@@ -208,23 +208,22 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         }
     }
     
-    // Draw all the text in the terminal
-    y := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
+    // Draw all messages in the backlog
     x := 5;
-    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, y);
-    y -= cmdx.active_theme.font.line_height;
+    input_y   := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
+    backlog_y := input_y - cmdx.active_theme.font.line_height;
 
     backlog_index: s64 = cmdx.backlog.count - 1;
-    while y > 0 && backlog_index >= 0 {
+    while backlog_y > 0 && backlog_index >= 0 {
         log := array_get_value(*cmdx.backlog, backlog_index);
-        draw_text(*cmdx.renderer, cmdx.active_theme, log, x, y, cmdx.active_theme.font_color);
-        y -= cmdx.active_theme.font.line_height;
+        draw_text(*cmdx.renderer, cmdx.active_theme, log, x, backlog_y, cmdx.active_theme.font_color);
+        backlog_y -= cmdx.active_theme.font.line_height;
         --backlog_index;
     }
 
-    // Flush all text rendering
-    flush_font_buffer(*cmdx.renderer);
+    // Draw the text input
+    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, input_y);
     
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
