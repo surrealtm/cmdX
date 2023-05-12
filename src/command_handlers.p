@@ -38,49 +38,45 @@ cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
 }
 
 
+register_command :: (cmdx: *CmdX, name: string, description: string, handler: Command_Handler) -> *Command{
+    cmd := array_push(*cmdx.commands);
+    cmd.name = name;
+    cmd.handler = handler;
+    cmd.description = description;
+    cmd.aliases.allocator = *cmdx.global_allocator;
+    cmd.arguments.allocator = *cmdx.global_allocator;
+    return cmd;
+}
+
 register_command_argument :: (command: *Command, name: string, type: Command_Argument_Type) {
     argument := array_push(*command.arguments);
     argument.name = name;
     argument.type = type;
 }
 
+register_command_alias :: (command: *Command, alias: string) {
+    array_add(*command.aliases, alias);
+}
+
 register_all_commands :: (cmdx: *CmdX) {
-    help := array_push(*cmdx.commands);
-    help.name = ":help";
-    help.handler = help_handler;
+    register_command(cmdx, ":help", "Displays this help message", help_handler);
+    register_command(cmdx, ":quit", "Terminates cmdX", quit_handler);
+    register_command(cmdx, ":clear", "Clears the backlog", clear_handler);
 
-    quit := array_push(*cmdx.commands);
-    quit.name = ":quit";
-    quit.handler = quit_handler;
-
-    clear := array_push(*cmdx.commands);
-    clear.name = ":clear";
-    clear.handler = clear_handler;
-    
-    theme := array_push(*cmdx.commands);
-    theme.name = ":theme";
-    theme.handler = theme_handler;
+    theme := register_command(cmdx, ":theme", "Switches to the specified theme", theme_handler);
     register_command_argument(theme, "theme_name", .String);
 
-    theme_lister := array_push(*cmdx.commands);
-    theme_lister.name = ":theme-lister";
-    theme_lister.handler = theme_lister_handler;
+    register_command(cmdx, ":theme-lister", "Lists all available themes", theme_lister_handler);
 
-    font_size := array_push(*cmdx.commands);
-    font_size.name = ":font-size";
-    font_size.handler = font_size_handler;
+    font_size := register_command(cmdx, ":font-size", "Updates the current font size", font_size_handler);
     register_command_argument(font_size, "size", .Integer);
 
-    debug := array_push(*cmdx.commands);
-    debug.name = ":debug";
-    debug.handler = debug_handler;
-    
-    ls := array_push(*cmdx.commands);
-    ls.name = "ls";
-    ls.handler = ls_handler;
+    register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
 
-    cd := array_push(*cmdx.commands);
-    cd.name = "cd";
-    cd.handler = cd_handler;
+    ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
+    register_command_alias(ls, "dir");
+
+    cd := register_command(cmdx, "cd", "Changes the current active directory to the specified relative path", cd_handler);
+    register_command_alias(cd, "change_directory");
     register_command_argument(cd, "new_directory", .String);
 }

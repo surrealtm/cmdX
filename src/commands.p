@@ -15,6 +15,8 @@ Command_Argument :: struct {
 
 Command :: struct {
     name: string;
+    aliases: [..]string;
+    description: string;
     handler: Command_Handler;
     arguments: [..]Command_Argument;
 }
@@ -31,10 +33,12 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
 
     for i := 0; i < command.arguments.count; ++i {
         argument := array_get(*command.arguments, i);
-        internal_print(*print_buffer, "   %: %", argument.name, command_argument_type_to_string(argument.type));
+        internal_print(*print_buffer, "   '%': %", argument.name, command_argument_type_to_string(argument.type));
         if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
     }
 
+    internal_print(*print_buffer, "      // %", command.description);
+    
     string := string_view(print_buffer.buffer, print_buffer.size);
     cmdx_add_string(cmdx, string);
 }
@@ -117,9 +121,9 @@ get_next_word_in_input :: (input: *string) -> string {
         // If the start of this word is a quotation mark, then the word end is marked by the next
         // quotation mark. Spaces are ignored in this case.
         argument_end := search_string_from(~input, '"', argument_start + 1);
-if argument_end == -1 {
-    // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
-    // assume that the argument is the rest of the input string.
+ if argument_end == -1 {
+     // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
+     // assume that the argument is the rest of the input string.
     argument = substring(~input, argument_start, input.count);
     ~input = "";
 } else {
@@ -136,6 +140,17 @@ if argument_end == -1 {
 }
 
 return argument;
+}
+
+compare_command_name :: (cmd: *Command, name: string) -> bool {
+    if compare_strings(cmd.name, name) return true;
+    
+    for i := 0; i < cmd.aliases.count; ++i {
+        alias := array_get_value(*cmd.aliases, i);
+        if compare_strings(alias, name) return true;
+    }
+    
+    return false;
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
@@ -158,7 +173,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
     // Search for a built-in command with that name, if one is found, run it.
     for i := 0; i < cmdx.commands.count; ++i {
         command := array_get(*cmdx.commands, i);
-        if compare_strings(command.name, command_name) {
+        if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
             command_found = true;
             break;
