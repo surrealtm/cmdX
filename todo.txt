@@ -1,6 +1,0 @@
-[ ] Add input history
-[ ] Add scrolling to background
-[ ] Add rm / cat commands
-[ ] Add command aliases (dir -> ls)
-[ ] Improve text input find_word_end for special chars, e.g. only delete actual letters and not the ':'
-[ ] Add descriptions to builtin commands

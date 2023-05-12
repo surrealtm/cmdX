@@ -80,6 +80,15 @@ CmdX :: struct {
     win32: Win32;
 }
 
+cmdx_clear_backlog :: (cmdx: *CmdX) {
+    for i := 0; i < cmdx.backlog.count; ++i {
+        string := array_get_value(*cmdx.backlog, i);
+        if string.count free_string(string, *cmdx.global_allocator);
+    }
+
+    array_clear(*cmdx.backlog);
+}
+
 cmdx_remove_string :: (cmdx: *CmdX, index: s64) {
     string := array_get_value(*cmdx.backlog, index);
     free_string(string, *cmdx.global_allocator);

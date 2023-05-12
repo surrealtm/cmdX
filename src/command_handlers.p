@@ -24,6 +24,10 @@ font_size_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     font_size(cmdx, size);
 }
 
+debug_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    debug(cmdx);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
@@ -66,6 +70,10 @@ register_all_commands :: (cmdx: *CmdX) {
     font_size.name = ":font-size";
     font_size.handler = font_size_handler;
     register_command_argument(font_size, "size", .Integer);
+
+    debug := array_push(*cmdx.commands);
+    debug.name = ":debug";
+    debug.handler = debug_handler;
     
     ls := array_push(*cmdx.commands);
     ls.name = "ls";

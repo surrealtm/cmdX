@@ -209,7 +209,7 @@ quit :: (cmdx: *CmdX) {
 }
 
 clear :: (cmdx: *CmdX) {
-    array_clear(*cmdx.backlog);
+    cmdx_clear_backlog(cmdx);
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
@@ -230,6 +230,18 @@ theme_lister :: (cmdx: *CmdX) {
 font_size :: (cmdx: *CmdX, size: u32) {
     cmdx.font_size = size;
     update_font_size(cmdx);
+}
+
+debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
+    working_set_size, working_set_unit := convert_to_biggest_memory_unit(allocator.stats.working_set);
+    peak_working_set_size, peak_working_set_unit := convert_to_biggest_memory_unit(allocator.stats.peak_working_set);
+    cmdx_print_string(cmdx, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % active allocations.", name, format_int(working_set_size, false, 4, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 4, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
+}
+
+debug :: (cmdx: *CmdX) {
+    debug_print_allocator(cmdx, "Heap  ", *Default_Allocator);
+    debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
+    debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 }
 
 ls :: (cmdx: *CmdX) {
