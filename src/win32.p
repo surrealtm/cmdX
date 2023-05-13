@@ -1,7 +1,3 @@
-PIPE_BUFFER_SIZE :: 1024;
-
-PIPE_NAME: cstring : "\\\\.\\Pipe\\cmdx";
-
 Win32 :: struct {
     // The pipes which are set as the std handles while the child process is running
     input_read_pipe:   HANDLE;
@@ -9,47 +5,50 @@ Win32 :: struct {
     output_read_pipe:  HANDLE;
     output_write_pipe: HANDLE;
     child_closed_the_pipe: bool;
-
+    
     // The actual std handles for cmdx, restored after the child process has shut down again
     my_output_handle: HANDLE;
     my_error_handle:  HANDLE;
     my_input_handle:  HANDLE;
-
+    
     child_process_handle: HANDLE;
 }
 
 create_win32_pipes :: (cmdx: *CmdX) {
     cmdx.win32.child_closed_the_pipe = false;
-
+    
     security_attributes: SECURITY_ATTRIBUTES;
     security_attributes.nLength = size_of(SECURITY_ATTRIBUTES);
     security_attributes.bInheritHandle = true;
     security_attributes.lpSecurityDescriptor = null; 
-
+    
     // Create a pipe to read the output of the child process
     if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, *security_attributes, 0) {
         cmdx_print_string(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
     }
-
+    
     // Do not inherit my side of the pipe
     if !SetHandleInformation(cmdx.win32.output_read_pipe, HANDLE_FLAG_INHERIT, 0) {
         cmdx_print_string(cmdx, "Failed to set the output pipe handle information for the child process (Error: %).", GetLastError());
     }
-
+    
     // Create a pipe to write input from this console to the child process
     if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, *security_attributes, 0) {
         cmdx_print_string(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
     }
-
+    
     // Do not inherit my side of the pipe
     if !SetHandleInformation(cmdx.win32.input_write_pipe, HANDLE_FLAG_INHERIT, 0) {
         cmdx_print_string(cmdx, "Failed to set the input pipe handle information for the child process (Error: %).", GetLastError());
     }
-
+    
+    // Save the std handles for cmdx itself, so they can be restored alter
     cmdx.win32.my_output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     cmdx.win32.my_error_handle  = GetStdHandle(STD_ERROR_HANDLE);
     cmdx.win32.my_input_handle  = GetStdHandle(STD_INPUT_HANDLE);
     
+    // Set the actual std handles to be forwarded to the pseudo console, so that the child
+    // process inherits and uses these.
     SetStdHandle(STD_OUTPUT_HANDLE, cmdx.win32.output_write_pipe);
     SetStdHandle(STD_ERROR_HANDLE, cmdx.win32.output_write_pipe);
     SetStdHandle(STD_INPUT_HANDLE, cmdx.win32.input_read_pipe);
@@ -58,22 +57,26 @@ create_win32_pipes :: (cmdx: *CmdX) {
 destroy_child_side_win32_pipes :: (cmdx: *CmdX) {
     CloseHandle(cmdx.win32.input_read_pipe);
     CloseHandle(cmdx.win32.output_write_pipe);
+
     cmdx.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
     cmdx.win32.output_write_pipe = INVALID_HANDLE_VALUE;
-}
 
-destroy_parent_side_win32_pipes :: (cmdx: *CmdX) {
-    CloseHandle(cmdx.win32.input_write_pipe);
-    CloseHandle(cmdx.win32.output_read_pipe);
-    cmdx.win32.input_write_pipe = INVALID_HANDLE_VALUE;
-    cmdx.win32.output_read_pipe = INVALID_HANDLE_VALUE;
-
+    // Reset the std handles to the previous handles which cmdx was launched with, so that
+    // the normal print() behaviour is restored.
     SetStdHandle(STD_OUTPUT_HANDLE, cmdx.win32.my_output_handle);
     SetStdHandle(STD_ERROR_HANDLE, cmdx.win32.my_error_handle);
     SetStdHandle(STD_INPUT_HANDLE, cmdx.win32.my_input_handle);
 }
 
-try_reading_from_child_process :: (cmdx: *CmdX) {
+destroy_parent_side_win32_pipes :: (cmdx: *CmdX) {
+    CloseHandle(cmdx.win32.input_write_pipe);
+    CloseHandle(cmdx.win32.output_read_pipe);
+    
+    cmdx.win32.input_write_pipe = INVALID_HANDLE_VALUE;
+    cmdx.win32.output_read_pipe = INVALID_HANDLE_VALUE;
+}
+
+win32_read_from_child_process :: (cmdx: *CmdX) {
     if cmdx.win32.child_closed_the_pipe return;
     
     total_bytes_available: u32 = ---;
@@ -84,12 +87,12 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
         cmdx.win32.child_closed_the_pipe = true;
         return;
     }
-        
+    
     if total_bytes_available == 0 return;
-
+    
     input_buffer := allocate(*cmdx.frame_allocator, total_bytes_available);
     bytes_read: u32 = ---;
-
+    
     if ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {
         // There are 'total_bytes_available' to be read in the pipe. Since this is a byte oriented pipe, more than
         // a single line may be read. However, since the client implementation (probably) only ever flushes after
@@ -104,15 +107,15 @@ try_reading_from_child_process :: (cmdx: *CmdX) {
             string = substring(string, line_break + 1, string.count);
             line_break = search_string(string, 10);
         }
-
-        assert(string.count == 0, "String read from child process did not end with a new_line (as expected).");
+        
+        //assert(string.count == 0, "String read from child process did not end with a new_line (as expected).");
     } else
         // If this read fails, the child closed the pipe. This case should probably be covered by the return value
         // of PeekNamedPipe, but safe is safe.
         cmdx.win32.child_closed_the_pipe = true;
 }
 
-try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
+win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
     // Append a new line character to the data so that the child process recognizes a complete line was
     // input from the terminal, since the actual new line character obviously does not get added to the
     // text input.
@@ -131,51 +134,51 @@ try_writing_to_child_process :: (cmdx: *CmdX, data: string) {
     FlushFileBuffers(cmdx.win32.input_write_pipe);
 }
 
-try_terminate_child_process :: (cmdx: *CmdX) {
+win32_terminate_child_process :: (cmdx: *CmdX) {
     TerminateProcess(cmdx.win32.child_process_handle, 0);
 }
 
-try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
+win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Create a new pipe for this child process
     create_win32_pipes(cmdx);
     
     // Save the actual working directory of cmdX to restore it later
     working_directory := get_working_directory();
     set_working_directory(cmdx.current_directory);
-
+    
     // Set up c strings for file paths
     c_command_string := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
     
-    // Spawn the actual process
-    startup_info: STARTUPINFO;
-    startup_info.cb = size_of(STARTUPINFO);
+    // Create the startup info for the child process.
+    extended_startup_info: STARTUPINFOEX;
+    extended_startup_info.StartupInfo.cb = size_of(STARTUPINFOEX);
 
+    // Launch the process with the attached information. The child process will inherit the current std handles,
+    // if it wants a console connection.
     process: PROCESS_INFORMATION;
-
-    // Actually create the process. If the process requests a console, it will take the std handles of this
-    // process here, which are set to be the pipes.
-    result := CreateProcessA(null, c_command_string, null, null, false, 0, null, c_current_directory, *startup_info, *process);
+    result := CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT, null, c_current_directory, *extended_startup_info.StartupInfo, *process);
     if !result {
-        cmdx_print_string(cmdx, "Unknown command. Try :help to see a list of all available commands.");
+        cmdx_print_string(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
         cmdx.child_process_running = false;
         destroy_child_side_win32_pipes(cmdx);
         destroy_parent_side_win32_pipes(cmdx);
         set_working_directory(working_directory);
         return;
     }
-
+    
     cmdx.child_process_running = true;
     cmdx.win32.child_process_handle = process.hProcess;
-    
+
     // Close the child end pipes from this side, since they have been duplicated and the parent does not
     // need the handles.
+    DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
     destroy_child_side_win32_pipes(cmdx);
     
     // Wait for the child process to terminate
     while !cmdx.win32.child_closed_the_pipe && !cmdx.window.should_close { // 0 is WAIT_OBJECT_0
         // Check if any data is available to be read in the pipe
-        try_reading_from_child_process(cmdx);
+        win32_read_from_child_process(cmdx);
         
         // Render a single frame while waiting for the process to terminate
         single_cmdx_frame(cmdx);
@@ -189,12 +192,12 @@ try_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     }
     
     // Do one final read from the child process
-    try_reading_from_child_process(cmdx);
-
+    win32_read_from_child_process(cmdx);
+    
     // Close all handles
+    destroy_parent_side_win32_pipes(cmdx);
     CloseHandle(process.hProcess);
     CloseHandle(process.hThread);
-    destroy_parent_side_win32_pipes(cmdx);
     cmdx.win32.child_process_handle = INVALID_HANDLE_VALUE;
     cmdx.child_process_running = false;
     

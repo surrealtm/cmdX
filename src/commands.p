@@ -38,7 +38,7 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     }
 
     internal_print(*print_buffer, "      // %", command.description);
-    
+
     string := string_view(print_buffer.buffer, print_buffer.size);
     cmdx_add_string(cmdx, string);
 }
@@ -67,7 +67,7 @@ is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) 
             valid &= is_digit_character(value[i]);
         }
     }
-    
+
     return valid;
 }
 
@@ -115,15 +115,15 @@ get_next_word_in_input :: (input: *string) -> string {
     }
 
     argument: string = ---;
-    
+
     // Read the input string until the end of the word.
     if input.data[argument_start] == '"' {
         // If the start of this word is a quotation mark, then the word end is marked by the next
         // quotation mark. Spaces are ignored in this case.
         argument_end := search_string_from(~input, '"', argument_start + 1);
- if argument_end == -1 {
-     // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
-     // assume that the argument is the rest of the input string.
+if argument_end == -1 {
+    // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
+    // assume that the argument is the rest of the input string.
     argument = substring(~input, argument_start, input.count);
     ~input = "";
 } else {
@@ -144,18 +144,18 @@ return argument;
 
 compare_command_name :: (cmd: *Command, name: string) -> bool {
     if compare_strings(cmd.name, name) return true;
-    
+
     for i := 0; i < cmd.aliases.count; ++i {
         alias := array_get_value(*cmd.aliases, i);
         if compare_strings(alias, name) return true;
     }
-    
+
     return false;
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
     cmdx.number_of_current_child_process_messages = 0; // Reset the message count for the next command to be executed
-    
+
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
 
@@ -179,7 +179,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
             break;
         }
     }
-    
+
     if !command_found {
         // Join all the different arguments back together to make a command that can be supplied into the
         // process creation. This may seem redundant, but this allows for custom argument management, instead
@@ -198,8 +198,8 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         }
 
         command_string := finish_string_builder(*string_builder);
-        
-        try_spawn_process_for_command(cmdx, command_string);
+
+        win32_spawn_process_for_command(cmdx, command_string);
     }
 
     cmdx_finish_child_process(cmdx);
@@ -215,7 +215,7 @@ help :: (cmdx: *CmdX) {
         command := array_get(*cmdx.commands, i);
         print_command_syntax(cmdx, command);
     }
-    
+
     cmdx_print_string(cmdx, "=== HELP ===");
 }
 
@@ -273,7 +273,7 @@ ls :: (cmdx: *CmdX) {
 }
 
 cd :: (cmdx: *CmdX, new_directory: string) {
-    cwd := concatenate_strings(cmdx.current_directory, "\\", *cmdx.frame_allocator);   
+    cwd := concatenate_strings(cmdx.current_directory, "\\", *cmdx.frame_allocator);
     concat := concatenate_strings(cwd, new_directory, *cmdx.frame_allocator);
     if folder_exists(concat) {
         free_string(cmdx.current_directory, *cmdx.global_allocator);

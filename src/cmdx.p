@@ -175,7 +175,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     }
 
     // No theme with that name could be found, revert back to the default one
-    cmdx_print_string(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);    
+    cmdx_print_string(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     cmdx.active_theme = *cmdx.themes.data[0];
     cmdx.active_theme_name = cmdx.active_theme.name;
 
@@ -208,19 +208,19 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 
     // Prepare the next frame
     update_window(*cmdx.window);
-    prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);        
+    prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
 
     cmdx.text_input.active = cmdx.window.focused;
-    
+
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
 
     // Check for potential control keys
     if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
         // Terminate the current running process
-        try_terminate_child_process(cmdx);
+        win32_terminate_child_process(cmdx);
     }
-    
+
     // Handle input for this frame
     if cmdx.text_input.entered {
         // The user has entered a string, add that to the backlog, clear the input and actually run
@@ -230,13 +230,13 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         activate_text_input(*cmdx.text_input);
 
         if cmdx.child_process_running {
-            try_writing_to_child_process(cmdx, input_string);
+            win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
             cmdx_add_string(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
             handle_input_string(cmdx, input_string);
         }
     }
-    
+
     // Draw all messages in the backlog
     x := 5;
     input_y   := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
@@ -253,10 +253,10 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, input_y);
-    
+
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
-    
+
     // Finish the frame, sleep until the next one
     swap_gl_buffers(*cmdx.window);
 
@@ -291,7 +291,7 @@ main :: () -> s32 {
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
     cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
     cmdx.backlog.allocator = *cmdx.global_allocator;
-    
+
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
 
@@ -304,7 +304,7 @@ main :: () -> s32 {
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH);
-    
+
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
@@ -316,7 +316,7 @@ main :: () -> s32 {
     create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
     create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
-    
+
     // After everything has been loaded, actually show the window. This will prevent a small time frame in
     // which the window is just blank white, which does not seem very clean. Instead, the window takes a
     // little longer to show up, but it immediatly gets filled with the first frame.
@@ -324,7 +324,7 @@ main :: () -> s32 {
 
     // Display the welcome message
     welcome_screen(*cmdx, run_tree);
-    
+
     // Main loop until the window gets closed
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
