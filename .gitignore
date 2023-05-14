@@ -56,3 +56,4 @@ dkms.conf
 .emacs.desktop.lock
 *.cmdx-config
 *.rdbg
+*.4coder

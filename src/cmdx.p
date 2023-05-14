@@ -50,32 +50,32 @@ CmdX :: struct {
     global_memory_arena: Memory_Arena;
     global_memory_pool: Memory_Pool;
     global_allocator: Allocator;
-
+    
     frame_memory_arena: Memory_Arena;
     frame_allocator: Allocator;
-
+    
     // Output
     window: Window;
     renderer: Renderer;
-
+    
     // Text
     text_input: Text_Input;
     backlog: [..]string;
-
+    
     // Command handling
     commands: [..]Command;
     current_directory: string;
     child_process_name: string;
     child_process_running: bool;
     number_of_current_child_process_messages: u32;
-
+    
     // Styling
     font_size: s64;
     active_theme_name: string;
     active_theme: *Theme;
     themes: [..]Theme;
     config: Config;
-
+    
     // Platform data
     win32: Win32;
 }
@@ -85,7 +85,7 @@ cmdx_clear_backlog :: (cmdx: *CmdX) {
         string := array_get_value(*cmdx.backlog, i);
         if string.count free_string(string, *cmdx.global_allocator);
     }
-
+    
     array_clear(*cmdx.backlog);
 }
 
@@ -93,7 +93,7 @@ cmdx_remove_string :: (cmdx: *CmdX, index: s64) {
     string := array_get_value(*cmdx.backlog, index);
     free_string(string, *cmdx.global_allocator);
     array_remove(*cmdx.backlog, index);
-
+    
     --cmdx.number_of_current_child_process_messages;
 }
 
@@ -112,14 +112,14 @@ cmdx_add_string :: (cmdx: *CmdX, message: string) {
 
 cmdx_print_string :: (cmdx: *CmdX, format: string, args: ..any) {
     required_characters := query_required_print_buffer_size(format, ..args);
-
+    
     message: string = ---;
     message.count = required_characters;
     message.data  = xx allocate(*cmdx.global_allocator, required_characters);
-
+    
     mprint(string_view(message.data, message.count), format, ..args);
     array_add(*cmdx.backlog, message);
-
+    
     ++cmdx.number_of_current_child_process_messages;
 }
 
@@ -173,12 +173,12 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
             return;
         }
     }
-
+    
     // No theme with that name could be found, revert back to the default one
     cmdx_print_string(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     cmdx.active_theme = *cmdx.themes.data[0];
     cmdx.active_theme_name = cmdx.active_theme.name;
-
+    
 }
 
 update_font_size :: (cmdx: *CmdX) {
@@ -189,9 +189,15 @@ update_font_size :: (cmdx: *CmdX) {
     }
 }
 
+update_active_process_name :: (cmdx: *CmdX, name: string) {
+    if cmdx.child_process_name.count   free_string(cmdx.child_process_name, *cmdx.global_allocator);
+    cmdx.child_process_name = name;
+    update_window_name(cmdx);
+}
+
 update_window_name :: (cmdx: *CmdX) {
     window_name := concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator);
-
+    
     if cmdx.child_process_name.count {
         // This is pretty bad... Should probably just use some kind of string builder for this, but that
         // does not exist yet.
@@ -199,28 +205,28 @@ update_window_name :: (cmdx: *CmdX) {
         window_name = concatenate_strings(window_name, cmdx.child_process_name, *cmdx.frame_allocator);
         window_name = concatenate_strings(window_name, ")", *cmdx.frame_allocator);
     }
-
+    
     set_window_name(*cmdx.window, window_name);
 }
 
 single_cmdx_frame :: (cmdx: *CmdX) {
     frame_start := get_hardware_time();
-
+    
     // Prepare the next frame
     update_window(*cmdx.window);
     prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
-
+    
     cmdx.text_input.active = cmdx.window.focused;
-
+    
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
-
+    
     // Check for potential control keys
     if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
         // Terminate the current running process
         win32_terminate_child_process(cmdx);
     }
-
+    
     // Handle input for this frame
     if cmdx.text_input.entered {
         // The user has entered a string, add that to the backlog, clear the input and actually run
@@ -228,7 +234,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         input_string := get_string_view_from_text_input(*cmdx.text_input);
         clear_text_input(*cmdx.text_input);
         activate_text_input(*cmdx.text_input);
-
+        
         if cmdx.child_process_running {
             win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
@@ -236,12 +242,12 @@ single_cmdx_frame :: (cmdx: *CmdX) {
             handle_input_string(cmdx, input_string);
         }
     }
-
+    
     // Draw all messages in the backlog
     x := 5;
     input_y   := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
     backlog_y := input_y - cmdx.active_theme.font.line_height;
-
+    
     backlog_index: s64 = cmdx.backlog.count - 1;
     while backlog_y > 0 && backlog_index >= 0 {
         log := array_get_value(*cmdx.backlog, backlog_index);
@@ -249,17 +255,17 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         backlog_y -= cmdx.active_theme.font.line_height;
         --backlog_index;
     }
-
+    
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, input_y);
-
+    
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
-
+    
     // Finish the frame, sleep until the next one
     swap_gl_buffers(*cmdx.window);
-
+    
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
     if active_frame_time < REQUESTED_FRAME_TIME_MILLISECONDS - 1 {
@@ -270,7 +276,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_PATH, *cmdx.frame_allocator);
-
+    
     cmdx_print_string(cmdx, "Welcome to cmdX.");
     cmdx_print_string(cmdx, "Use the :help command as a starting point.");
     cmdx_print_string(cmdx, "The config file can be found under %.", config_location);
@@ -284,52 +290,52 @@ main :: () -> s32 {
     defer free_string(run_tree, *Default_Allocator);
     set_working_directory(run_tree);
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
-
+    
     // Set up memory management
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
     cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
     cmdx.backlog.allocator = *cmdx.global_allocator;
-
+    
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
-
+    
     // Set up the command handling
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
-
+    
     // Set up all the required config properties, and read the config file if it exists
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH);
-
+    
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
-
+    
     // Create the builtin themes
     create_theme(*cmdx, "light",   COURIER_NEW, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
     create_theme(*cmdx, "dark",    COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
     create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
     create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
-
+    
     // After everything has been loaded, actually show the window. This will prevent a small time frame in
     // which the window is just blank white, which does not seem very clean. Instead, the window takes a
     // little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
-
+    
     // Display the welcome message
     welcome_screen(*cmdx, run_tree);
-
+    
     // Main loop until the window gets closed
     while !cmdx.window.should_close {
         single_cmdx_frame(*cmdx);
     }
-
+    
     // Cleanup
     write_config_file(*cmdx.config, CONFIG_FILE_PATH);
     destroy_renderer(*cmdx.renderer);
