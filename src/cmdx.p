@@ -61,6 +61,7 @@ CmdX :: struct {
     // Text
     text_input: Text_Input;
     backlog: [..]string;
+    backlog_scroll_offset: s32; // In indices to the backlog array
     
     // Command handling
     commands: [..]Command;
@@ -237,10 +238,17 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         
         if cmdx.child_process_running {
             win32_write_to_child_process(cmdx, input_string);
+            cmdx.backlog_scroll_offset = 0;
         } else if input_string.count {
             cmdx_add_string(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
             handle_input_string(cmdx, input_string);
+            cmdx.backlog_scroll_offset = 0;
         }
+    }
+
+    // Handle mouse input for scrolling
+    if cmdx.window.mouse_wheel_turns != 0 {
+        cmdx.backlog_scroll_offset = clamp(cmdx.window.mouse_wheel_turns + cmdx.backlog_scroll_offset, 0, cmdx.backlog.count - 1);
     }
     
     // Draw all messages in the backlog
@@ -248,7 +256,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     input_y   := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
     backlog_y := input_y - cmdx.active_theme.font.line_height;
     
-    backlog_index: s64 = cmdx.backlog.count - 1;
+    backlog_index: s64 = cmdx.backlog.count - 1 - cmdx.backlog_scroll_offset;
     while backlog_y > 0 && backlog_index >= 0 {
         log := array_get_value(*cmdx.backlog, backlog_index);
         draw_text(*cmdx.renderer, cmdx.active_theme, log, x, backlog_y, cmdx.active_theme.font_color);

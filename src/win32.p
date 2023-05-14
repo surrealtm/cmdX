@@ -16,6 +16,8 @@ Win32 :: struct {
     
     pseudo_console_handle: HPCON;
     child_process_handle: HANDLE;
+
+    inside_output_line: bool; // If the last ReadFile did not end with a line delimiter, the next data read from the output pipe should be appended
 }
 
 win32_read_from_child_process :: (cmdx: *CmdX) {
@@ -43,15 +45,20 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
         line_break := search_string(string, 10);
         while line_break != -1 {
             line := substring(string, 0, line_break);
-            if line[line.count - 1] == 13   --line.count; // Cut the \r character
-            
-            cmdx_add_string(cmdx, line);
+            if cmdx.win32.inside_output_line {
+                cmdx_append_string(cmdx, line);
+                cmdx.win32.inside_output_line = false;
+            } else cmdx_add_string(cmdx, line);
+
             string = substring(string, line_break + 1, string.count);
             line_break = search_string(string, 10);
         }
-        
-        // @Cleanup start handling this shit right here
-        //assert(string.count == 0, "String read from child process did not end with a new_line (as expected).");
+
+        if string.count {
+            cmdx.win32.inside_output_line = true;
+            cmdx_add_string(cmdx, string);
+        } else
+            cmdx.win32.inside_output_line = false;
     } else
         // If this read fails, the child closed the pipe. This case should probably be covered by the return value
         // of PeekNamedPipe, but safe is safe.
@@ -136,8 +143,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         cmdx_print_string(cmdx, "Failed to set the pseudo console handle for the child process (Error: %).", GetLastError());
         return;
     }
-    
-    
+        
     // Launch the process with the attached information. The child process will inherit the current 
     // std handles if it wants a console connection.
     process: PROCESS_INFORMATION;
@@ -160,9 +166,10 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
     
     // Prepare the cmdx internal state
-    cmdx.child_process_running = true;
+    cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
-    cmdx.win32.child_process_handle = process.hProcess;
+    cmdx.win32.child_process_handle  = process.hProcess;
+    cmdx.win32.inside_output_line    = false;
     
     // Wait for the child process to close his side of the pipes, so that we know the console
     // connection can be terminated.
