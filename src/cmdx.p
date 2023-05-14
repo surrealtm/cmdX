@@ -95,7 +95,7 @@ cmdx_remove_string :: (cmdx: *CmdX, index: s64) {
     free_string(string, *cmdx.global_allocator);
     array_remove(*cmdx.backlog, index);
     
-    --cmdx.number_of_current_child_process_messages;
+    if cmdx.child_process_running --cmdx.number_of_current_child_process_messages;
 }
 
 cmdx_append_string :: (cmdx: *CmdX, message: string) {
@@ -108,7 +108,7 @@ cmdx_append_string :: (cmdx: *CmdX, message: string) {
 
 cmdx_add_string :: (cmdx: *CmdX, message: string) {
     array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
-    ++cmdx.number_of_current_child_process_messages;
+    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
 cmdx_print_string :: (cmdx: *CmdX, format: string, args: ..any) {
@@ -121,19 +121,19 @@ cmdx_print_string :: (cmdx: *CmdX, format: string, args: ..any) {
     mprint(string_view(message.data, message.count), format, ..args);
     array_add(*cmdx.backlog, message);
     
-    ++cmdx.number_of_current_child_process_messages;
+    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
 cmdx_new_line :: (cmdx: *CmdX) {
     message: string = "";
     array_add(*cmdx.backlog, message);
+    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
 cmdx_finish_child_process :: (cmdx: *CmdX) {
-    // After a command has successfully been executed, check to see how many messages have been pumped into
-    // the backlog. If there have been any, append a new line for better readability.
+    // After a command has successfully been executed, check to see how many messages have been 
+    // pumped into the backlog. If there have been any, append a new line for better readability.
     if cmdx.number_of_current_child_process_messages cmdx_new_line(cmdx);
-    cmdx.number_of_current_child_process_messages = 0;
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
@@ -245,7 +245,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
             cmdx.backlog_scroll_offset = 0;
         }
     }
-
+    
     // Handle mouse input for scrolling
     if cmdx.window.mouse_wheel_turns != 0 {
         cmdx.backlog_scroll_offset = clamp(cmdx.backlog_scroll_offset + cmdx.window.mouse_wheel_turns, 0, cmdx.backlog.count - 1);
@@ -292,13 +292,6 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
 }
 
 main :: () -> s32 {
-    // Set the working directory of this program to where to executable file is, so that the data folder
-    // can always be accessed.
-    run_tree := get_module_path();
-    defer free_string(run_tree, *Default_Allocator);
-    set_working_directory(run_tree);
-    enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
-    
     // Set up memory management
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
@@ -313,6 +306,13 @@ main :: () -> s32 {
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     cmdx.text_input.active = true;
     register_all_commands(*cmdx);
+    
+    // Set the working directory of this program to where to executable file is, so that the data 
+    // folder can always be accessed.
+    run_tree := get_module_path();
+    defer free_string(run_tree, *Default_Allocator);
+    set_working_directory(run_tree);
+    enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
     
     // Set up all the required config properties, and read the config file if it exists
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
@@ -331,9 +331,9 @@ main :: () -> s32 {
     create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
     
-    // After everything has been loaded, actually show the window. This will prevent a small time frame in
-    // which the window is just blank white, which does not seem very clean. Instead, the window takes a
-    // little longer to show up, but it immediatly gets filled with the first frame.
+    // After everything has been loaded, actually show the window. This will prevent a small time 
+    // frame in which the window is just blank white, which does not seem very clean. Instead, the 
+    // window takes a little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
     
     // Display the welcome message

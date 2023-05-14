@@ -16,15 +16,177 @@ Win32 :: struct {
     
     pseudo_console_handle: HPCON;
     child_process_handle: HANDLE;
-    
-    incomplete_line: string; // If the last call to ReadFile() did end on a new-line character, the beginning of that line is saved until the next call to ReadFile(), so that the complete line can then be processed as one and sent to the backlog
+    append_to_previous_line: bool;
 }
 
-win32_process_raw_line :: (cmdx: *CmdX, line: string) {
-    // For now, simply forward the complete string to the output. Later on,
-    // we want to parse the different virtual terminal sequences here, and
-    // act upon them accordingly.
-    cmdx_add_string(cmdx, line);
+Win32_Input_Parser :: struct {
+    cmdx: *CmdX;
+    input: string;
+    line: string;
+    last_text_start: s64;
+    index: s64;
+    
+    parameters: [8]u32;
+    parameter_count: u32;
+}
+
+win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
+    end := parser.index + 1;
+    
+    if parser.input[parser.index] == '?' {
+        // If a question mark is the first character to read, it is followed by a numeric and one
+        // final character code.
+        end = search_string_for_character_types(parser.input, ^.Digit, parser.index + 1) + 1;
+    } else if parser.input[parser.index] == ' ' {
+        // If the first character is a space, it will be followed by a 'q' and be used to define
+        // the cursor shape.
+        end = parser.index + 2;
+    }
+    
+    return end;
+}
+
+win32_flush_input_parser :: (parser: *Win32_Input_Parser, advance: s64) {
+    win32_interrupt_input_parser(parser);
+    
+    if parser.cmdx.win32.append_to_previous_line {
+        cmdx_append_string(parser.cmdx, parser.line);
+        parser.cmdx.win32.append_to_previous_line = false;
+    } else
+        cmdx_add_string(parser.cmdx, parser.line);
+    
+    parser.index += advance; // Skip over \r\n
+    parser.line = string_view(*parser.input[parser.index], 0);
+    parser.last_text_start = parser.index;
+}
+
+win32_maybe_flush_input_parser :: (parser: *Win32_Input_Parser, advance: s64) {
+    if parser.index > parser.last_text_start || parser.line.count
+        win32_flush_input_parser(parser, advance); 
+}
+
+win32_interrupt_input_parser :: (parser: *Win32_Input_Parser) {
+    parser.line = concatenate_strings(parser.line, substring(parser.input, parser.last_text_start, parser.index), *parser.cmdx.frame_allocator);
+}
+
+win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, default: u32) -> u32 {
+    if index >= parser.parameter_count return default;
+    return parser.parameters[index];
+}
+
+win32_make_repeated_string :: (character: s8, count: u32, allocator: *Allocator) -> string {
+    string := allocate_string(count, allocator);
+    for i := 0; i < count; ++i   string[i] = character;
+    return string;
+}
+
+win32_process_input_string :: (cmdx: *CmdX, input: string) {
+    parser: Win32_Input_Parser = ---;
+    parser.cmdx  = cmdx;
+    parser.input = input;
+    parser.line  = string_view(input.data, 0);
+    parser.last_text_start = 0;
+    parser.index = 0;
+    
+    while parser.index < parser.input.count {
+        if parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5b { // 0x1b is 'ESCAPE',0x5b is '['
+            // Parse an escape sequence. An escape sequence is a number [0,n] of parameters,
+            // seperated by semicolons, followed by the actual command string.
+            win32_interrupt_input_parser(*parser);
+            
+            parser.index += 2;
+            parser.parameter_count = 0;
+            
+            while is_digit_character(parser.input[parser.index]) && parser.parameter_count < parser.parameters.count {
+                parameter_end := search_string_for_character_types(parser.input, ^.Digit, parser.index);
+                value, valid := string_to_int(substring(parser.input, parser.index, parameter_end));
+                parser.parameters[parser.parameter_count] = value;
+                ++parser.parameter_count;
+                parser.index = parameter_end;
+                
+                if parser.input[parser.index] == ';' ++parser.index; // Skip over a potential parameter seperator
+            }
+            
+            command_end := win32_find_sequence_command_end(*parser); // For now, only ever read one character. There are some sequences which have more than one character
+            command := substring(parser.input, parser.index, command_end);
+            parser.index = command_end;
+            parser.last_text_start = command_end;
+            
+            if compare_strings(command, "H") {
+                // Position the cursor at new coordinates. This is pretty scuffed, since this console
+                // works in cooked mode (lines, and not just a big ass table of characters), so for now
+                // assert that this is only used as a smarter "insert new lines here", and then do
+                // exactly that.
+                win32_maybe_flush_input_parser(*parser, 0);
+                
+                y := win32_get_input_parser_parameter(*parser, 0, 1);
+                x := win32_get_input_parser_parameter(*parser, 1, 1);
+                assert(x == 1, "Invalid PositionCursor Virtual Terminal Sequence");
+                assert(y >= cmdx.number_of_current_child_process_messages, "Invalid PositionCursor Virtual Terminal Sequence");
+                
+                if y == cmdx.number_of_current_child_process_messages {
+                    // This acts similarly to the \r character, just restart the current line, for
+                    // WHATEVER FUCKING REASON SOMEONE WOULD THINK THIS IS A GOOD IDEA
+                    cmdx_remove_string(cmdx, cmdx.backlog.count - 1);
+                } else {
+                    newline_count := y - cmdx.number_of_current_child_process_messages - 1;
+                    for i := 0; i < newline_count; ++i cmdx_add_string(cmdx, "");
+                }
+            } else if compare_strings(command, "C") {
+                // Move the cursor to the right. Apparently this also produces white spaces while
+                // moving the cursor, and unfortunately the C runtime makes use of this feature...
+                string := win32_make_repeated_string(' ', win32_get_input_parser_parameter(*parser, 0, 1), *cmdx.frame_allocator);
+                parser.line = concatenate_strings(parser.line, string, *cmdx.frame_allocator);
+            } else {
+                //print("Unhandled command: %\n", command);
+            }
+        } else if parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5d {
+            win32_interrupt_input_parser(*parser);
+            
+            // Window title, skip until the string terminator, which is marked as either
+            // as 'ESCAPE' ']'  (0x1b, 0x5c), or as 'BEL' (0x7)
+            parser.index += 2;
+            while (parser.input[parser.index - 1] != 0x1b || parser.input[parser.index] != 0x5c) && parser.input[parser.index] != 0x7 {
+                ++parser.index;
+            }
+            
+            ++parser.index; // Skip over the final character which was the terminator
+            parser.last_text_start = parser.index;
+        } else if parser.input[parser.index] == 13 {
+            // Carriage return. Often this will be followed by a new-line character, which is just
+            // the windows way of marking a line break. If it is not followed by the normal
+            // new-line character though, then the current line should simply be restarted...
+            // For whatever fucking reason the C runtime actually uses this...
+            if parser.input[parser.index + 1] == 10 {
+                win32_flush_input_parser(*parser, 2);
+            } else {
+                if cmdx.win32.append_to_previous_line {
+                    // If the previous line was started, but the C runtime library decided to send
+                    // it again after flushing the first time, we need to erase the part we already
+                    // wrote to the backlog, just to rewrite it again... This is a fucking disaster
+                    cmdx_remove_string(cmdx, cmdx.backlog.count - 1);
+                    cmdx.win32.append_to_previous_line = false;
+                }
+                
+                ++parser.index;
+                parser.last_text_start = parser.index;
+                parser.line = string_view(*parser.input[parser.last_text_start], 0);
+            }
+        } else if parser.input[parser.index] == 10 {
+            // Normal single new line character, not sure if that actually ever happens...
+            win32_flush_input_parser(*parser, 1);
+        } else {
+            // If this was just a normal character, skip it.
+            ++parser.index;
+        }
+    }
+    
+    if parser.last_text_start < parser.index || parser.line.count {
+        // The read buffer from the pipe did not end with on a end-of-line, so remember to only
+        // append the next buffer part from the pipe to this message.
+        win32_flush_input_parser(*parser, 0);
+        cmdx.win32.append_to_previous_line = true;
+    }
 }
 
 win32_read_from_child_process :: (cmdx: *CmdX) {
@@ -33,8 +195,8 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     total_bytes_available: u32 = ---;
     
     if !PeekNamedPipe(cmdx.win32.output_read_pipe, null, 0, null, *total_bytes_available, null) {
-        // If the pipe on the child side has been closed, PeekNamedPipe will fail. At this point, the console
-        // connection should be terminated.
+        // If the pipe on the child side has been closed, PeekNamedPipe will fail. At this point, the 
+        // console connection should be terminated.
         cmdx.win32.child_closed_the_pipe = true;
         return;
     }
@@ -45,31 +207,15 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     bytes_read: u32 = ---;
     
     if ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {
-        // There are 'total_bytes_available' to be read in the pipe. Since this is a byte oriented pipe, more than
-        // a single line may be read. However, since the client implementation (probably) only ever flushes after
-        // a new-line, the read buffer should always end on a new-line.
+        // There are 'total_bytes_available' to be read in the pipe. Since this is a byte 
+        // oriented pipe, more than a single line may be read. However, since the client 
+        // implementation (probably) only ever flushes after a new-line, the read buffer should 
+        // always end on a new-line.
         string := string_view(xx input_buffer, bytes_read);
-        line_break := search_string(string, 10);
-        while line_break != -1 {
-            line := substring(string, 0, line_break);
-            
-            if cmdx.win32.incomplete_line.count {
-                line = concatenate_strings(cmdx.win32.incomplete_line, line, *cmdx.frame_allocator);
-                free_string(cmdx.win32.incomplete_line, *cmdx.global_allocator);
-                cmdx.win32.incomplete_line = "";
-            }
-            
-            win32_process_raw_line(cmdx, line);
-            
-            string = substring(string, line_break + 1, string.count);
-            line_break = search_string(string, 10);
-        }
-        
-        if string.count
-            cmdx.win32.incomplete_line = concatenate_strings(cmdx.win32.incomplete_line, string, *cmdx.global_allocator);
+        win32_process_input_string(cmdx, string);
     } else
-        // If this read fails, the child closed the pipe. This case should probably be covered by the return value
-        // of PeekNamedPipe, but safe is safe.
+        // If this read fails, the child closed the pipe. This case should probably be covered by 
+        // the return value of PeekNamedPipe, but safe is safe.
         cmdx.win32.child_closed_the_pipe = true;
 }
 
@@ -180,7 +326,6 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
     cmdx.win32.child_process_handle  = process.hProcess;
-    cmdx.win32.incomplete_line       = copy_string("", *cmdx.global_allocator);
     
     // Wait for the child process to close his side of the pipes, so that we know the console
     // connection can be terminated.
