@@ -248,7 +248,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 
     // Handle mouse input for scrolling
     if cmdx.window.mouse_wheel_turns != 0 {
-        cmdx.backlog_scroll_offset = clamp(cmdx.window.mouse_wheel_turns + cmdx.backlog_scroll_offset, 0, cmdx.backlog.count - 1);
+        cmdx.backlog_scroll_offset = clamp(cmdx.backlog_scroll_offset + cmdx.window.mouse_wheel_turns, 0, cmdx.backlog.count - 1);
     }
     
     // Draw all messages in the backlog

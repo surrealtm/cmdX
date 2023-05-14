@@ -16,8 +16,15 @@ Win32 :: struct {
     
     pseudo_console_handle: HPCON;
     child_process_handle: HANDLE;
+    
+    incomplete_line: string; // If the last call to ReadFile() did end on a new-line character, the beginning of that line is saved until the next call to ReadFile(), so that the complete line can then be processed as one and sent to the backlog
+}
 
-    inside_output_line: bool; // If the last ReadFile did not end with a line delimiter, the next data read from the output pipe should be appended
+win32_process_raw_line :: (cmdx: *CmdX, line: string) {
+    // For now, simply forward the complete string to the output. Later on,
+    // we want to parse the different virtual terminal sequences here, and
+    // act upon them accordingly.
+    cmdx_add_string(cmdx, line);
 }
 
 win32_read_from_child_process :: (cmdx: *CmdX) {
@@ -45,20 +52,21 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
         line_break := search_string(string, 10);
         while line_break != -1 {
             line := substring(string, 0, line_break);
-            if cmdx.win32.inside_output_line {
-                cmdx_append_string(cmdx, line);
-                cmdx.win32.inside_output_line = false;
-            } else cmdx_add_string(cmdx, line);
-
+            
+            if cmdx.win32.incomplete_line.count {
+                line = concatenate_strings(cmdx.win32.incomplete_line, line, *cmdx.frame_allocator);
+                free_string(cmdx.win32.incomplete_line, *cmdx.global_allocator);
+                cmdx.win32.incomplete_line = "";
+            }
+            
+            win32_process_raw_line(cmdx, line);
+            
             string = substring(string, line_break + 1, string.count);
             line_break = search_string(string, 10);
         }
-
-        if string.count {
-            cmdx.win32.inside_output_line = true;
-            cmdx_add_string(cmdx, string);
-        } else
-            cmdx.win32.inside_output_line = false;
+        
+        if string.count
+            cmdx.win32.incomplete_line = concatenate_strings(cmdx.win32.incomplete_line, string, *cmdx.global_allocator);
     } else
         // If this read fails, the child closed the pipe. This case should probably be covered by the return value
         // of PeekNamedPipe, but safe is safe.
@@ -107,12 +115,16 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         cmdx_print_string(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
     }
     
-    // Create the actual pseudo console, using the pipe handles that were just created
+    // Create the actual pseudo console, using the pipe handles that were just created.
+    // Since the pseudo console apparently has no way of actually disabling the automatic
+    // line wrapping, the size of this buffer is set to some ridiculous value, so that
+    // essentially no line wrapping happens...
     console_size: COORD;
-    console_size.X = 80;
-    console_size.Y = 32;
-    if CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 0, *cmdx.win32.pseudo_console_handle) != S_OK {
-        cmdx_print_string(cmdx, "Failed to create pseudo console for the child process (Error: %).", GetLastError());
+    console_size.X = 512;
+    console_size.Y = 512;
+    error_code:= CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 6, *cmdx.win32.pseudo_console_handle);
+    if error_code!= S_OK {
+        cmdx_print_string(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
     }
     
     pseudo_console: *PseudoConsole = cast(*PseudoConsole) cmdx.win32.pseudo_console_handle;
@@ -143,12 +155,11 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         cmdx_print_string(cmdx, "Failed to set the pseudo console handle for the child process (Error: %).", GetLastError());
         return;
     }
-        
+    
     // Launch the process with the attached information. The child process will inherit the current 
     // std handles if it wants a console connection.
     process: PROCESS_INFORMATION;
-    result := CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT, null, c_current_directory, *extended_startup_info.StartupInfo, *process);
-    if !result {
+    if !CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
         cmdx_print_string(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
         cmdx.child_process_running = false;
         set_working_directory(working_directory);
@@ -169,7 +180,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
     cmdx.win32.child_process_handle  = process.hProcess;
-    cmdx.win32.inside_output_line    = false;
+    cmdx.win32.incomplete_line       = copy_string("", *cmdx.global_allocator);
     
     // Wait for the child process to close his side of the pipes, so that we know the console
     // connection can be terminated.
