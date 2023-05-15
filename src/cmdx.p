@@ -33,7 +33,7 @@ REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 // --- Other global data
-CONFIG_FILE_PATH :: ".cmdx-config";
+CONFIG_FILE_NAME :: ".cmdx-config";
 
 Theme :: struct {
     name: string;
@@ -43,6 +43,11 @@ Theme :: struct {
     accent_color: Color;     // The color for highlighted text, e.g. the current directory
     background_color: Color; // The background color of the window
     font: Font;
+}
+
+Message :: struct {
+    text:  string;
+    color: Color;
 }
 
 CmdX :: struct {
@@ -60,7 +65,7 @@ CmdX :: struct {
     
     // Text
     text_input: Text_Input;
-    backlog: [..]string;
+    backlog: [..]Message;
     backlog_scroll_offset: s32; // In indices to the backlog array
     
     // Command handling
@@ -83,50 +88,49 @@ CmdX :: struct {
 
 cmdx_clear_backlog :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.backlog.count; ++i {
-        string := array_get_value(*cmdx.backlog, i);
-        if string.count free_string(string, *cmdx.global_allocator);
+        message := array_get_value(*cmdx.backlog, i);
+        if message.text.count free_string(message.text, *cmdx.global_allocator);
     }
     
     array_clear(*cmdx.backlog);
 }
 
-cmdx_remove_string :: (cmdx: *CmdX, index: s64) {
-    string := array_get_value(*cmdx.backlog, index);
-    free_string(string, *cmdx.global_allocator);
+cmdx_remove_message :: (cmdx: *CmdX, index: s64) {
+    message := array_get(*cmdx.backlog, index);
+    free_string(message.text, *cmdx.global_allocator);
     array_remove(*cmdx.backlog, index);
     
     if cmdx.child_process_running --cmdx.number_of_current_child_process_messages;
 }
 
-cmdx_append_string :: (cmdx: *CmdX, message: string) {
-    assert(cmdx.backlog.count > 0, "Cannot append string to backlog; backlog is empty");
-    last_string := array_get(*cmdx.backlog, cmdx.backlog.count - 1);
-    new_message := concatenate_strings(~last_string, message, *cmdx.global_allocator);
-    cmdx_remove_string(cmdx, cmdx.backlog.count - 1);
-    cmdx_add_string(cmdx, new_message);
-}
-
-cmdx_add_string :: (cmdx: *CmdX, message: string) {
-    array_add(*cmdx.backlog, copy_string(message, *cmdx.global_allocator));
+cmdx_add_message :: (cmdx: *CmdX, color: Color, text: string) {
+    array_add(*cmdx.backlog, .{ copy_string(text, *cmdx.global_allocator), color });
     if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
-cmdx_print_string :: (cmdx: *CmdX, format: string, args: ..any) {
+cmdx_append_message :: (cmdx: *CmdX, text: string) {
+    assert(cmdx.backlog.count > 0, "Cannot append string to backlog; backlog is empty");
+    last_message := array_get(*cmdx.backlog, cmdx.backlog.count - 1);
+    concatenated_strings := concatenate_strings(last_message.text, text, *cmdx.global_allocator);
+    free_string(last_message.text, *cmdx.global_allocator);
+    last_message.text = concatenated_strings;
+}
+
+cmdx_print_message :: (cmdx: *CmdX, color: Color, format: string, args: ..any) {
     required_characters := query_required_print_buffer_size(format, ..args);
     
-    message: string = ---;
-    message.count = required_characters;
-    message.data  = xx allocate(*cmdx.global_allocator, required_characters);
+    text: string = ---;
+    text.count = required_characters;
+    text.data  = xx allocate(*cmdx.global_allocator, required_characters);
     
-    mprint(string_view(message.data, message.count), format, ..args);
-    array_add(*cmdx.backlog, message);
+    mprint(string_view(text.data, text.count), format, ..args);
     
+    array_add(*cmdx.backlog, .{ text, color });    
     if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
 cmdx_new_line :: (cmdx: *CmdX) {
-    message: string = "";
-    array_add(*cmdx.backlog, message);
+    array_add(*cmdx.backlog, .{ "", .{ 255, 255, 255, 255 }});
     if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
 }
 
@@ -176,7 +180,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     }
     
     // No theme with that name could be found, revert back to the default one
-    cmdx_print_string(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     cmdx.active_theme = *cmdx.themes.data[0];
     cmdx.active_theme_name = cmdx.active_theme.name;
     
@@ -240,7 +244,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
             win32_write_to_child_process(cmdx, input_string);
             cmdx.backlog_scroll_offset = 0;
         } else if input_string.count {
-            cmdx_add_string(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
+            cmdx_add_message(cmdx, cmdx.active_theme.accent_color, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
             handle_input_string(cmdx, input_string);
             cmdx.backlog_scroll_offset = 0;
         }
@@ -259,7 +263,7 @@ single_cmdx_frame :: (cmdx: *CmdX) {
     backlog_index: s64 = cmdx.backlog.count - 1 - cmdx.backlog_scroll_offset;
     while backlog_y > 0 && backlog_index >= 0 {
         log := array_get_value(*cmdx.backlog, backlog_index);
-        draw_text(*cmdx.renderer, cmdx.active_theme, log, x, backlog_y, cmdx.active_theme.font_color);
+        draw_text(*cmdx.renderer, cmdx.active_theme, log.text, x, backlog_y, log.color);
         backlog_y -= cmdx.active_theme.font.line_height;
         --backlog_index;
     }
@@ -283,11 +287,11 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 }
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {
-    config_location := concatenate_strings(run_tree, CONFIG_FILE_PATH, *cmdx.frame_allocator);
+    config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     
-    cmdx_print_string(cmdx, "Welcome to cmdX.");
-    cmdx_print_string(cmdx, "Use the :help command as a starting point.");
-    cmdx_print_string(cmdx, "The config file can be found under %.", config_location);
+    cmdx_print_message(cmdx, cmdx.active_theme.accent_color, "Welcome to cmdX.");
+    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Use the :help command as a starting point.");
+    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "The config file can be found under %.", config_location);
     cmdx_new_line(cmdx);
 }
 
@@ -317,7 +321,7 @@ main :: () -> s32 {
     // Set up all the required config properties, and read the config file if it exists
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
-    read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_PATH);
+    read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
@@ -345,7 +349,7 @@ main :: () -> s32 {
     }
     
     // Cleanup
-    write_config_file(*cmdx.config, CONFIG_FILE_PATH);
+    write_config_file(*cmdx.config, CONFIG_FILE_NAME);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);

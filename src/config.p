@@ -78,8 +78,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
 
         space := search_string(line, ' ');
         if space == -1 {
-            cmdx_print_string(cmdx, "Malformed config property in line %:", line_count);
-            cmdx_print_string(cmdx, "   Expected syntax 'name value', no space found in the line.");
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Expected syntax 'name value', no space found in the line.");
             continue;
         }
         
@@ -88,8 +88,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
 
         property := find_property(config, name);
         if !property {
-            cmdx_print_string(cmdx, "Malformed config property in line %:", line_count);
-            cmdx_print_string(cmdx, "   Property name '%' is unknown.", name);
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Property name '%' is unknown.", name);
             continue;
         }
 
@@ -110,8 +110,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         }
 
         if !valid {
-            cmdx_print_string(cmdx, "Malformed config property in line %:", line_count);
-            cmdx_print_string(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
+            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
         }
     }
     
