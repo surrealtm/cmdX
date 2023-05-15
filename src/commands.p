@@ -1,6 +1,6 @@
-// A command handler takes in the actual name of the command, as well as all the arguments parsed from the input.
-// If the command has been parsed successfully (no syntax errors), the handler returns true. If the handler
-// returns false, the custom help message for the command will be displayed.
+// A command handler takes in the actual name of the command, as well as all the arguments parsed from
+// the input. If the command has been parsed successfully (no syntax errors), the handler returns true. 
+// If the handler returns false, the custom help message for the command will be displayed.
 Command_Handler :: (*CmdX, [..]string);
 
 Command_Argument_Type :: enum {
@@ -31,14 +31,18 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     
     internal_print(*print_buffer, " > %", command.name);
     
+    builder: String_Builder;
+    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    append_format(*builder, " > %", command.name);
+    
     for i := 0; i < command.arguments.count; ++i {
         argument := array_get(*command.arguments, i);
-        internal_print(*print_buffer, "   '%': %", argument.name, command_argument_type_to_string(argument.type));
-        if i + 1 < command.arguments.count internal_print(*print_buffer, ",");
+        append_format(*builder, "    '%': '%'", argument.name, command_argument_type_to_string(argument.type));
+        if i + 1 < command.arguments.count append_string(*builder, ",");
     }
     
-    internal_print(*print_buffer, "      // %", command.description);
-    cmdx_add_message(cmdx, cmdx.active_theme.font_color, string_view(print_buffer.buffer, print_buffer.size));
+    append_format(*builder, "      // %", command.description);
+    add_line(cmdx, finish_string_builder(*builder));
 }
 
 command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
@@ -81,7 +85,7 @@ get_int_argument :: (argument_values: *[..]string, index: u32) -> s64 {
 
 dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
     if argument_values.count != command.arguments.count {
-        cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
+        add_formatted_line(cmdx, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
         return false;
     }
     
@@ -89,7 +93,7 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
         argument := array_get(*command.arguments, i);
         argument_value := array_get_value(*argument_values, i);
         if !is_valid_command_argument_value(argument.type, argument_value) {
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
+            add_formatted_line(cmdx, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
             return false;
         }
     }
@@ -152,8 +156,6 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
-    cmdx.number_of_current_child_process_messages = 0; // Reset the message count for the next command to be executed
-    
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
     
@@ -199,22 +201,20 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         win32_spawn_process_for_command(cmdx, command_string);
     }
-    
-    cmdx_finish_child_process(cmdx);
 }
 
 
 /* Builtin command behaviour */
 
 help :: (cmdx: *CmdX) {
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "=== HELP ===");
+    add_line(cmdx, "=== HELP ===");
     
     for i := 0; i < cmdx.commands.count; ++i {
         command := array_get(*cmdx.commands, i);
         print_command_syntax(cmdx, command);
     }
     
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "=== HELP ===");
+    add_line(cmdx, "=== HELP ===");
 }
 
 quit :: (cmdx: *CmdX) {
@@ -222,7 +222,7 @@ quit :: (cmdx: *CmdX) {
 }
 
 clear :: (cmdx: *CmdX) {
-    cmdx_clear_backlog(cmdx);
+    clear_backlog(cmdx);
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
@@ -231,12 +231,13 @@ theme :: (cmdx: *CmdX, theme_name: string) {
 }
 
 theme_lister :: (cmdx: *CmdX) {
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "List of available themes:");
+    add_line(cmdx, "List of available themes:");
     
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
-        cmdx_print_message(cmdx, cmdx.active_theme.font_color, " > %", theme.name);
-        if theme == cmdx.active_theme    cmdx_append_message(cmdx, "   * Active");
+        add_formatted_text(cmdx, " > %", theme.name);
+        if theme == cmdx.active_theme    add_text(cmdx, "   * Active");
+        new_line(cmdx);
     }
 }
 
@@ -248,7 +249,7 @@ font_size :: (cmdx: *CmdX, size: u32) {
 debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
     working_set_size, working_set_unit := convert_to_biggest_memory_unit(allocator.stats.working_set);
     peak_working_set_size, peak_working_set_unit := convert_to_biggest_memory_unit(allocator.stats.peak_working_set);
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % active allocations.", name, format_int(working_set_size, false, 4, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 4, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
+    add_formatted_line(cmdx, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % active allocations.", name, format_int(working_set_size, false, 4, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 4, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
 }
 
 debug :: (cmdx: *CmdX) {
@@ -258,7 +259,7 @@ debug :: (cmdx: *CmdX) {
 }
 
 ls :: (cmdx: *CmdX) {
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Contents of folder '%':", cmdx.current_directory);
+    add_formatted_line(cmdx, "Contents of folder '%':", cmdx.current_directory);
     
     files: [..]string;
     files.allocator = *cmdx.frame_allocator;
@@ -266,7 +267,7 @@ ls :: (cmdx: *CmdX) {
     
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);
-        cmdx_print_message(cmdx, cmdx.active_theme.font_color, " > %", file_name);
+        add_formatted_line(cmdx, " > %", file_name);
     }
 }
 
@@ -278,6 +279,6 @@ cd :: (cmdx: *CmdX, new_directory: string) {
         cmdx.current_directory = get_absolute_path(concat, *cmdx.global_allocator); // Remove any redundency in the path (e.g. parent/../parent)
         update_window_name(cmdx);
     } else {
-        cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Cannot change directory: The folder '%' does not exists.", concat);
+        add_formatted_line(cmdx, "Cannot change directory: The folder '%' does not exists.", concat);
     }
 }

@@ -23,17 +23,16 @@
 #load "command_handlers.p";
 #load "win32.p";
 
-// --- Fonts
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 
-// --- Timing
 REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
-// --- Other global data
 CONFIG_FILE_NAME :: ".cmdx-config";
+
+BACKLOG_SIZE :: 8129;
 
 Theme :: struct {
     name: string;
@@ -43,11 +42,6 @@ Theme :: struct {
     accent_color: Color;     // The color for highlighted text, e.g. the current directory
     background_color: Color; // The background color of the window
     font: Font;
-}
-
-Message :: struct {
-    text:  string;
-    color: Color;
 }
 
 CmdX :: struct {
@@ -60,20 +54,21 @@ CmdX :: struct {
     frame_allocator: Allocator;
     
     // Output
-    window: Window;
-    renderer: Renderer;
+    window: Window = ---;
+    renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...
     
     // Text
     text_input: Text_Input;
-    backlog: [..]Message;
-    backlog_scroll_offset: s32; // In indices to the backlog array
+    backlog: [BACKLOG_SIZE]s8 = ---;
+    backlog_line_start: s64; // The last registered line start, used for resetting the cursor
+    backlog_start:      s64; // The first (inclusive) character in the ringbuffer backlog
+    backlog_end:        s64; // One after (exclusive) the last character in the ringbuffer backlog
     
     // Command handling
     commands: [..]Command;
     current_directory: string;
     child_process_name: string;
     child_process_running: bool;
-    number_of_current_child_process_messages: u32;
     
     // Styling
     font_size: s64;
@@ -83,61 +78,92 @@ CmdX :: struct {
     config: Config;
     
     // Platform data
-    win32: Win32;
+    win32: Win32 = ---;
 }
 
-cmdx_clear_backlog :: (cmdx: *CmdX) {
-    for i := 0; i < cmdx.backlog.count; ++i {
-        message := array_get_value(*cmdx.backlog, i);
-        if message.text.count free_string(message.text, *cmdx.global_allocator);
+clear_backlog :: (cmdx: *CmdX) {
+    cmdx.backlog_line_start = 0;
+    cmdx.backlog_start      = 0;
+    cmdx.backlog_end        = 0;
+}
+
+reset_cursor :: (cmdx: *CmdX) {
+    cmdx.backlog_end = cmdx.backlog_line_start;
+}
+
+new_line :: (cmdx: *CmdX) {
+    add_text(cmdx, "\n");
+    cmdx.backlog_line_start = cmdx.backlog_end;
+}
+
+add_character :: (cmdx: *CmdX, character: s8) {
+    character_copy := character; // Since character is a register parameter, we probably cannot take the pointer to that directly...
+    string: string = ---;
+    string.data = *character_copy;
+    string.count = 1;;
+    add_text(cmdx, string);
+}
+
+add_text :: (cmdx: *CmdX, text: string) {
+    // Copy the data given in string into the actual backlog
+    if cmdx.backlog_end + text.count > BACKLOG_SIZE {
+        // If the backlog does not have enough space for the entire text left, then just fill up the
+        // entire space left first, then wrap the text around the buffer end back into the start.
+        first_pass_count := BACKLOG_SIZE - cmdx.backlog_end;
+        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, first_pass_count);
+        
+        second_pass_count := text.count - first_pass_count;
+        copy_memory(xx *cmdx.backlog[0], xx *text.data[first_pass_count], second_pass_count);
+        
+        cmdx.backlog_end   = second_pass_count;
+        cmdx.backlog_start = cmdx.backlog_end + 1;
+    } else if cmdx.backlog_end < cmdx.backlog_start && cmdx.backlog_end + text.count >= cmdx.backlog_start {
+        // If there is no wrapping required, but there is not enough space to fit the new text
+        // between the end and the start of the backlog, the start needs to be pushed back.
+        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, text.count);
+        cmdx.backlog_end   += text.count;
+        cmdx.backlog_start += text.count;
+    } else {
+        // If the backlog can fit the entire text into it still, then just copy the characters to
+        // the back of the backlog.
+        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, text.count);
+        cmdx.backlog_end += text.count;
+    }
+}
+
+add_formatted_text :: (cmdx: *CmdX, format: string, args: ..any) {
+    required_characters := query_required_print_buffer_size(format, ..args);
+    string := allocate_string(required_characters, *cmdx.frame_allocator);
+    mprint(string, format, ..args);
+    add_text(cmdx, string);
+}
+
+add_line :: (cmdx: *CmdX, text: string) {
+    add_text(cmdx, text);
+    new_line(cmdx);
+}
+
+add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
+    add_formatted_text(cmdx, format, ..args);
+    new_line(cmdx);
+}
+
+find_line_in_backlog_reverse :: (cmdx: *CmdX, cursor: s64) -> s64, string {
+    line_end := cursor;
+    
+    while cursor > cmdx.backlog_start && cmdx.backlog[cursor] != '\n' {
+        --cursor;
     }
     
-    array_clear(*cmdx.backlog);
-}
-
-cmdx_remove_message :: (cmdx: *CmdX, index: s64) {
-    message := array_get(*cmdx.backlog, index);
-    free_string(message.text, *cmdx.global_allocator);
-    array_remove(*cmdx.backlog, index);
+    line_start := cursor;
+    if cmdx.backlog[cursor] == '\n'   {
+        ++line_start;
+        --cursor;
+    }
     
-    if cmdx.child_process_running --cmdx.number_of_current_child_process_messages;
-}
-
-cmdx_add_message :: (cmdx: *CmdX, color: Color, text: string) {
-    array_add(*cmdx.backlog, .{ copy_string(text, *cmdx.global_allocator), color });
-    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
-}
-
-cmdx_append_message :: (cmdx: *CmdX, text: string) {
-    assert(cmdx.backlog.count > 0, "Cannot append string to backlog; backlog is empty");
-    last_message := array_get(*cmdx.backlog, cmdx.backlog.count - 1);
-    concatenated_strings := concatenate_strings(last_message.text, text, *cmdx.global_allocator);
-    free_string(last_message.text, *cmdx.global_allocator);
-    last_message.text = concatenated_strings;
-}
-
-cmdx_print_message :: (cmdx: *CmdX, color: Color, format: string, args: ..any) {
-    required_characters := query_required_print_buffer_size(format, ..args);
+    line := string_view(*cmdx.backlog[line_start], line_end - line_start);
     
-    text: string = ---;
-    text.count = required_characters;
-    text.data  = xx allocate(*cmdx.global_allocator, required_characters);
-    
-    mprint(string_view(text.data, text.count), format, ..args);
-    
-    array_add(*cmdx.backlog, .{ text, color });    
-    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
-}
-
-cmdx_new_line :: (cmdx: *CmdX) {
-    array_add(*cmdx.backlog, .{ "", .{ 255, 255, 255, 255 }});
-    if cmdx.child_process_running ++cmdx.number_of_current_child_process_messages;
-}
-
-cmdx_finish_child_process :: (cmdx: *CmdX) {
-    // After a command has successfully been executed, check to see how many messages have been 
-    // pumped into the backlog. If there have been any, append a new line for better readability.
-    if cmdx.number_of_current_child_process_messages cmdx_new_line(cmdx);
+    return cursor, line;
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
@@ -180,7 +206,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     }
     
     // No theme with that name could be found, revert back to the default one
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+    add_formatted_line(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     cmdx.active_theme = *cmdx.themes.data[0];
     cmdx.active_theme_name = cmdx.active_theme.name;
     
@@ -242,35 +268,38 @@ single_cmdx_frame :: (cmdx: *CmdX) {
         
         if cmdx.child_process_running {
             win32_write_to_child_process(cmdx, input_string);
-            cmdx.backlog_scroll_offset = 0;
         } else if input_string.count {
-            cmdx_add_message(cmdx, cmdx.active_theme.accent_color, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
+            add_line(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
             handle_input_string(cmdx, input_string);
-            cmdx.backlog_scroll_offset = 0;
         }
     }
     
-    // Handle mouse input for scrolling
-    if cmdx.window.mouse_wheel_turns != 0 {
-        cmdx.backlog_scroll_offset = clamp(cmdx.backlog_scroll_offset + cmdx.window.mouse_wheel_turns, 0, cmdx.backlog.count - 1);
-    }
-    
-    // Draw all messages in the backlog
-    x := 5;
-    input_y   := cmdx.window.height - cmdx.active_theme.font.line_height / 2;
-    backlog_y := input_y - cmdx.active_theme.font.line_height;
-    
-    backlog_index: s64 = cmdx.backlog.count - 1 - cmdx.backlog_scroll_offset;
-    while backlog_y > 0 && backlog_index >= 0 {
-        log := array_get_value(*cmdx.backlog, backlog_index);
-        draw_text(*cmdx.renderer, cmdx.active_theme, log.text, x, backlog_y, log.color);
-        backlog_y -= cmdx.active_theme.font.line_height;
-        --backlog_index;
-    }
+    // Set up coordinates for rendering
+    x: s64 = 5;
+    y: s64 = cmdx.window.height - cmdx.active_theme.font.line_height / 2;
     
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, input_y);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, y);
+    
+    // Draw all messages in the backlog
+    if cmdx.backlog_start != cmdx.backlog_end {
+        y -= cmdx.active_theme.font.line_height;
+        cursor := cmdx.backlog_end - 1;
+        if cmdx.backlog[cursor] == '\n'
+            // If the backlog end is actually a new line, then that would imply an empty line
+            // between the input and the first rendered backlog line, which we probably don't
+            // want? So for now, skip over that newline character.
+            --cursor;
+        
+        line: string = ---;
+        
+        while y > 0 && cursor >= cmdx.backlog_start {
+            cursor, line = find_line_in_backlog_reverse(cmdx, cursor);
+            draw_text(*cmdx.renderer, cmdx.active_theme, line, x, y, cmdx.active_theme.font_color);
+            y -= cmdx.active_theme.font.line_height;
+        }
+    }
     
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
@@ -289,10 +318,10 @@ single_cmdx_frame :: (cmdx: *CmdX) {
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     
-    cmdx_print_message(cmdx, cmdx.active_theme.accent_color, "Welcome to cmdX.");
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Use the :help command as a starting point.");
-    cmdx_print_message(cmdx, cmdx.active_theme.font_color, "The config file can be found under %.", config_location);
-    cmdx_new_line(cmdx);
+    add_line(cmdx, "Welcome to cmdX.");
+    add_line(cmdx, "Use the :help command as a starting point.");
+    add_formatted_line(cmdx, "The config file can be found under %.", config_location);
+    new_line(cmdx);
 }
 
 main :: () -> s32 {
@@ -301,7 +330,6 @@ main :: () -> s32 {
     create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
     cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
-    cmdx.backlog.allocator = *cmdx.global_allocator;
     
     create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);

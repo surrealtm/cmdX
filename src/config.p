@@ -21,13 +21,13 @@ Config :: struct {
 
 property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
-
+    
     switch type {
-    case .String; result = "String";
-    case .Integer; result = "Integer";
-    case; result = "UnknownPropertyType";
+        case .String; result = "String";
+        case .Integer; result = "Integer";
+        case; result = "UnknownPropertyType";
     }
-
+    
     return result;
 }
 
@@ -62,56 +62,56 @@ find_property :: (config: *Config, name: string) -> *Property {
 read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
-
+    
     original_file_data := file_data;
     defer free_file_data(original_file_data);
-
+    
     version_line := get_first_line(*file_data);
-
+    
     line_count := 1; // Version line was already read
     
     while file_data.count {
         ++line_count;
-
+        
         line := get_first_line(*file_data);
         if line[0] == ':' continue; // Section line, ignore for now
-
+        
         space := search_string(line, ' ');
         if space == -1 {
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Expected syntax 'name value', no space found in the line.");
+            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+            add_formatted_line(cmdx, "   Expected syntax 'name value', no space found in the line.");
             continue;
         }
         
         name  := trim_string_right(substring(line, 0, space));
         value := trim_string(substring(line, space + 1, line.count));
-
+        
         property := find_property(config, name);
         if !property {
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Property name '%' is unknown.", name);
+            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+            add_formatted_line(cmdx, "   Property name '%' is unknown.", name);
             continue;
         }
-
+        
         valid := false;
         
         switch property.type {
-        case .String;
+            case .String;
             valid = true;
             ~property.value._string = copy_string(value, config.allocator);
             
-        case .Integer;
+            case .Integer;
             valid = true;
             for i := 0; i < value.count; ++i {
                 valid &= is_digit_character(value[i]);
             }            
-
+            
             if valid ~property.value._integer = string_to_int(value);
         }
-
+        
         if !valid {
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "Malformed config property in line %:", line_count);
-            cmdx_print_message(cmdx, cmdx.active_theme.font_color, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+            add_formatted_line(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
         }
     }
     
@@ -120,21 +120,21 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
 
 write_config_file :: (config: *Config, file_path: string) {
     delete_file(file_path); // Delete the file to write a fresh version of the config into it
-
+    
     file_printer: Print_Buffer = ---;
     create_file_printer(*file_printer, file_path);
-
+    
     internal_print(*file_printer, "[1] # version number, do not change\n");
     internal_print(*file_printer, ":/general\n", file_path);
-
+    
     for i := 0; i < config.properties.count; ++i {
         // Write property to file
         property := array_get(*config.properties, i);
         internal_print(*file_printer, "% ", property.name);
-
+        
         switch property.type {
-        case .String;  internal_print(*file_printer, ~property.value._string);
-        case .Integer; internal_print(*file_printer, "%", ~property.value._integer);
+            case .String;  internal_print(*file_printer, ~property.value._string);
+            case .Integer; internal_print(*file_printer, "%", ~property.value._integer);
         }
         
         internal_print(*file_printer, "\n");
