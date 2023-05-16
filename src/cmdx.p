@@ -45,7 +45,7 @@ Theme :: struct {
 }
 
 Color_Range :: struct {
-    begin: s64;
+    end: s64;
     color: Color;
 }
 
@@ -172,35 +172,34 @@ add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
 
 set_color :: (cmdx: *CmdX, color: Color) {
     if cmdx.colors.count == 0 {
-        array_add(*cmdx.colors, .{ 0, color });
+        array_add(*cmdx.colors, .{ -1, color });
         return;
     }
     
     
-    head := array_get_value(*cmdx.colors, cmdx.colors.count - 1);
+    head := array_get(*cmdx.colors, cmdx.colors.count - 1);
     if !compare_colors(head.color, color) {
-        array_add(*cmdx.colors, .{ cmdx.backlog_end, color });
+        head.end = cmdx.backlog_end;
+        array_add(*cmdx.colors, .{ -1, color });
     }
 }
 
-find_next_draw_batch_in_backlog_reverse :: (cmdx: *CmdX, cursor: s64, color_range: *Color_Range) -> s64, bool, string {
+find_next_line_in_backlog_reverse :: (cmdx: *CmdX, cursor: s64) -> s64, s64, s64 {
     line_end := cursor;
     
-    while cursor > cmdx.backlog_start && cursor >= color_range.begin && cmdx.backlog[cursor] != '\n' {
+    while cursor > cmdx.backlog_start && cmdx.backlog[cursor] != '\n' {
         --cursor;
     }
     
-    line_break := false;
     line_start := cursor;
     if cmdx.backlog[cursor] == '\n' {
+        // If this was in fact a new line, and not simply the beginning of the buffer, skip over the actual
+        // new line character to both ends.
         ++line_start;
         --cursor;
-        line_break = true;
     }
     
-    line := string_view(*cmdx.backlog[line_start], line_end - line_start + 1);
-    
-    return cursor, line_break, line;
+    return cursor, line_start, line_end;
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
@@ -312,55 +311,43 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
     
     // Set up coordinates for rendering
-    x: s64 = 5;
-    y: s64 = cmdx.window.height - cmdx.active_theme.font.line_height / 2;
-    
-    // Draw the text input
-    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, x, y);
-    
+    cursor_x: s32 = 5;
+    cursor_y: s32 = cmdx.active_theme.font.line_height;
+        
     // Draw all messages in the backlog
     if cmdx.backlog_start != cmdx.backlog_end {
-        y -= cmdx.active_theme.font.line_height;
-        cursor := cmdx.backlog_end - 1;
-        if cmdx.backlog[cursor] == '\n'
-            // If the backlog end is actually a new line, then that would imply an empty line
-            // between the input and the first rendered backlog line, which we probably don't
-            // want? So for now, skip over that newline character.
-            --cursor;
+        cursor := 0;
         
-        color_range: Color_Range = ---;
-        color_range_index: s64 = 0;
-        if cmdx.colors.count {
-            color_range_index = cmdx.colors.count - 1;
-            color_range = array_get_value(*cmdx.colors, cmdx.colors.count - 1);
-        } else
-            color_range = .{ 0, cmdx.active_theme.font_color };
+        color_range_index: s64 = -1;
+        color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
         
-        line: string = ---;
-        line_break: bool = ---;
-        
-        while y > 0 && cursor > cmdx.backlog_start {
-            cursor, line_break, line = find_next_draw_batch_in_backlog_reverse(cmdx, cursor, *color_range);
-            
-            draw_text(*cmdx.renderer, cmdx.active_theme, line, x, y, color_range.color);
-            
-            if cursor < color_range.begin && color_range_index {
-                // If this draw batch has ended on a color change, then go to the next lower
-                // color range.
-                --color_range_index;
+        while cursor < cmdx.backlog_end {
+            character := cmdx.backlog[cursor];
+
+            if color_range.end != -1 && cursor >= color_range.end {
+                flush_font_buffer(*cmdx.renderer);
+                ++color_range_index;
                 color_range = array_get_value(*cmdx.colors, color_range_index);
+                cmdx.renderer.foreground_color = color_range.color;
             }
             
-            // Adjust the cursor position after the rendered batch
-            if line_break {
-                x = 5;
-                y -= cmdx.active_theme.font.line_height;
-            } else
-                x += query_text_width(*cmdx.active_theme.font, line);
+            if character == '\n' {
+                // Line break, reposition the cursor
+                cursor_x = 5;
+                cursor_y += cmdx.active_theme.font.line_height;
+            } else {
+                cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
+                if cursor + 1 < cmdx.backlog_end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
+            }
+
+            ++cursor;
         }
     }
     
+    // Draw the text input
+    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
+
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
     
@@ -377,6 +364,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
+    set_color(cmdx, cmdx.active_theme.font_color); // Set the basic font color so there is always one
     
     /*
     set_color(cmdx, cmdx.active_theme.accent_color);

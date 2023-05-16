@@ -59,7 +59,10 @@ destroy_renderer :: (renderer: *Renderer) {
 prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
     renderer.width  = window.width;
     renderer.height = window.height;
-    renderer.projection_matrix = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
+    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
+    renderer.background_color    = theme.background_color;
+    renderer.font_texture_handle = theme.font.texture.handle;
+
     glViewport(0, 0, renderer.width, renderer.height);
     
     glClearColor(xx theme.background_color.r / 255.0,
@@ -91,7 +94,7 @@ flush_font_buffer :: (renderer: *Renderer) {
     renderer.font_glyph_count = 0;
 }
 
-draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x: f32, uv_y: f32, uv_w: f32, uv_h: f32, texture: u64) {
+draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x: f32, uv_y: f32, uv_w: f32, uv_h: f32) {
     if renderer.font_glyph_count == GLYPH_BATCH_COUNT flush_font_buffer(renderer);
     
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
@@ -141,8 +144,6 @@ draw_text :: (renderer: *Renderer, theme: *Theme, text: string, x: s32, y: s32, 
     if renderer.foreground_color.r != color.r || renderer.foreground_color.g != color.g || renderer.foreground_color.b != color.b || renderer.foreground_color.a != color.a   flush_font_buffer(renderer); // Since the font buffer only supports a constant color, it needs to be flushed with the previous color to allow for the new color afterwards
     
     renderer.foreground_color = color;
-    renderer.background_color = theme.background_color;
-    renderer.font_texture_handle = theme.font.texture.handle;
     render_text_with_font(*theme.font, text, x, y, .Left, xx draw_single_glyph, xx renderer);
 }
 
@@ -170,7 +171,7 @@ draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, bord
     draw_quad(renderer, x + w - border, y, border, h, color);
 }
 
-draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
+draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s64, y: s64) {
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
     prefix_string_width := query_text_width(*theme.font, prefix_string);
