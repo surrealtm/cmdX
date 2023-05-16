@@ -92,6 +92,7 @@ clear_backlog :: (cmdx: *CmdX) {
     cmdx.backlog_line_start = 0;
     cmdx.backlog_start      = 0;
     cmdx.backlog_end        = 0;
+    array_clear(*cmdx.colors);
 }
 
 prepare_viewport :: (cmdx: *CmdX) {
@@ -106,6 +107,12 @@ close_viewport :: (cmdx: *CmdX) {
 
 reset_cursor :: (cmdx: *CmdX) {
     cmdx.backlog_end = cmdx.backlog_line_start;
+
+    if cmdx.colors.count {
+        // If part of the backlog just got erased, the end of the color range must be updated too.
+        head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+        head.end = cmdx.backlog_end;
+    }
 }
 
 new_line :: (cmdx: *CmdX) {
@@ -366,18 +373,9 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     set_color(cmdx, cmdx.active_theme.font_color); // Set the basic font color so there is always one
     
-    /*
     set_color(cmdx, cmdx.active_theme.accent_color);
-    add_line(cmdx, "Welcome to cmdX.");
+    add_line(cmdx, "    Welcome to cmdX.");
     set_color(cmdx, cmdx.active_theme.font_color);
-    */
-    
-    add_text(cmdx, "    ");
-    set_color(cmdx, cmdx.active_theme.accent_color);
-    add_text(cmdx, "Welcome");
-    set_color(cmdx, cmdx.active_theme.font_color);
-    add_text(cmdx, " to cmdX.");
-    new_line(cmdx);
     
     add_line(cmdx, "Use the :help command as a starting point.");
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);

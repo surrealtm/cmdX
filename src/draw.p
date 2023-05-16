@@ -171,7 +171,7 @@ draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, bord
     draw_quad(renderer, x + w - border, y, border, h, color);
 }
 
-draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s64, y: s64) {
+draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
     prefix_string_width := query_text_width(*theme.font, prefix_string);

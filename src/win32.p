@@ -31,38 +31,39 @@ Win32_Input_Parser :: struct {
     parameter_count: u32;
 }
 
-win32_get_color_for_code :: (cmdx: *CmdX, code: u32) -> Color {
+win32_get_color_for_code :: (cmdx: *CmdX, code: u32) -> Color, bool {
     color: Color = ---;
+    actually_changed_color := true;
     
     switch code {
         // Reset all attributes, reset foreground / background colors, reset foreground color
-        case 0, 27, 39; color = cmdx.active_theme.font_color;
+    case 0, 27, 39; color = cmdx.active_theme.font_color;
         
         // Default foreground colors
-        case 30; color = .{   0,   0,   0, 255 };
-        case 31; color = .{ 255,   0,   0, 255 };
-        case 32; color = .{   0, 255,   0, 255 };
-        case 33; color = .{ 255, 255,   0, 255 };
-        case 34; color = .{   0,   0, 255, 255 };
-        case 35; color = .{ 255,   0, 255, 255 };
-        case 36; color = .{   0, 255, 255, 255 };
-        case 37; color = .{ 255, 255, 255, 255 };
+    case 30; color = .{   0,   0,   0, 255 };
+    case 31; color = .{ 255,   0,   0, 255 };
+    case 32; color = .{   0, 255,   0, 255 };
+    case 33; color = .{ 255, 255,   0, 255 };
+    case 34; color = .{   0,   0, 255, 255 };
+    case 35; color = .{ 255,   0, 255, 255 };
+    case 36; color = .{   0, 255, 255, 255 };
+    case 37; color = .{ 255, 255, 255, 255 };
         
         // Bright/Bold foreground colors
-        case 90; color = .{  20,  20,  20, 255 };
-        case 91; color = .{ 255,  20,  20, 255 };
-        case 92; color = .{  20, 255,  20, 255 };
-        case 93; color = .{ 255, 255,  20, 255 };
-        case 94; color = .{  20,  20, 255, 255 };
-        case 95; color = .{ 255,  20, 255, 255 };
-        case 96; color = .{  20, 255, 255, 255 };
-        case 97; color = .{ 255, 255, 255, 255 };
+    case 90; color = .{  20,  20,  20, 255 };
+    case 91; color = .{ 255,  20,  20, 255 };
+    case 92; color = .{  20, 255,  20, 255 };
+    case 93; color = .{ 255, 255,  20, 255 };
+    case 94; color = .{  20,  20, 255, 255 };
+    case 95; color = .{ 255,  20, 255, 255 };
+    case 96; color = .{  20, 255, 255, 255 };
+    case 97; color = .{ 255, 255, 255, 255 };
         
-        // Reset to the default if no valid code mapping could be found
-        case; color = cmdx.active_theme.font_color;
+        // If the foreground color did not change (or we do not support that operation), don't do anything
+    case; actually_changed_color = false;
     }
     
-    return color;
+    return color, actually_changed_color;
 }
 
 win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
@@ -137,8 +138,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 for i := 0; i < count; ++i    add_character(cmdx, ' ');
             } else if compare_strings(command, "m") {
                 color_code := win32_get_input_parser_parameter(*parser, 0, 0);
-                color := win32_get_color_for_code(cmdx, color_code);
-                set_color(cmdx, color);
+                color, actually_change := win32_get_color_for_code(cmdx, color_code);
+                if actually_change set_color(cmdx, color);
             } else {
                 //print("Unhandled command: %\n", command);
             }
