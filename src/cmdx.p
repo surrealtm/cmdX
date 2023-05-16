@@ -105,14 +105,18 @@ close_viewport :: (cmdx: *CmdX) {
     new_line(cmdx);
 }
 
-reset_cursor :: (cmdx: *CmdX) {
-    cmdx.backlog_end = cmdx.backlog_line_start;
-
+set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
+    cmdx.backlog_end = cmdx.backlog_line_start + x;
+    
     if cmdx.colors.count {
         // If part of the backlog just got erased, the end of the color range must be updated too.
         head := array_get(*cmdx.colors, cmdx.colors.count - 1);
         head.end = cmdx.backlog_end;
     }
+}
+
+set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
+    set_cursor_position_in_line(cmdx, 0);
 }
 
 new_line :: (cmdx: *CmdX) {
@@ -182,7 +186,6 @@ set_color :: (cmdx: *CmdX, color: Color) {
         array_add(*cmdx.colors, .{ -1, color });
         return;
     }
-    
     
     head := array_get(*cmdx.colors, cmdx.colors.count - 1);
     if !compare_colors(head.color, color) {
@@ -320,7 +323,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
     cursor_y: s32 = cmdx.active_theme.font.line_height;
-        
+    
     // Draw all messages in the backlog
     if cmdx.backlog_start != cmdx.backlog_end {
         cursor := 0;
@@ -330,8 +333,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         while cursor < cmdx.backlog_end {
             character := cmdx.backlog[cursor];
-
-            if color_range.end != -1 && cursor >= color_range.end {
+            
+            if color_range_index + 1 < cmdx.colors.count && cursor >= color_range.end {
                 flush_font_buffer(*cmdx.renderer);
                 ++color_range_index;
                 color_range = array_get_value(*cmdx.colors, color_range_index);
@@ -346,7 +349,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
                 cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
                 if cursor + 1 < cmdx.backlog_end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
             }
-
+            
             ++cursor;
         }
     }
@@ -354,7 +357,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
-
+    
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
     

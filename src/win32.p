@@ -37,30 +37,30 @@ win32_get_color_for_code :: (cmdx: *CmdX, code: u32) -> Color, bool {
     
     switch code {
         // Reset all attributes, reset foreground / background colors, reset foreground color
-    case 0, 27, 39; color = cmdx.active_theme.font_color;
+        case 0, 27, 39; color = cmdx.active_theme.font_color;
         
         // Default foreground colors
-    case 30; color = .{   0,   0,   0, 255 };
-    case 31; color = .{ 255,   0,   0, 255 };
-    case 32; color = .{   0, 255,   0, 255 };
-    case 33; color = .{ 255, 255,   0, 255 };
-    case 34; color = .{   0,   0, 255, 255 };
-    case 35; color = .{ 255,   0, 255, 255 };
-    case 36; color = .{   0, 255, 255, 255 };
-    case 37; color = .{ 255, 255, 255, 255 };
+        case 30; color = .{   0,   0,   0, 255 };
+        case 31; color = .{ 255,   0,   0, 255 };
+        case 32; color = .{   0, 255,   0, 255 };
+        case 33; color = .{ 255, 255,   0, 255 };
+        case 34; color = .{   0,   0, 255, 255 };
+        case 35; color = .{ 255,   0, 255, 255 };
+        case 36; color = .{   0, 255, 255, 255 };
+        case 37; color = .{ 255, 255, 255, 255 };
         
         // Bright/Bold foreground colors
-    case 90; color = .{  20,  20,  20, 255 };
-    case 91; color = .{ 255,  20,  20, 255 };
-    case 92; color = .{  20, 255,  20, 255 };
-    case 93; color = .{ 255, 255,  20, 255 };
-    case 94; color = .{  20,  20, 255, 255 };
-    case 95; color = .{ 255,  20, 255, 255 };
-    case 96; color = .{  20, 255, 255, 255 };
-    case 97; color = .{ 255, 255, 255, 255 };
+        case 90; color = .{  20,  20,  20, 255 };
+        case 91; color = .{ 255,  20,  20, 255 };
+        case 92; color = .{  20, 255,  20, 255 };
+        case 93; color = .{ 255, 255,  20, 255 };
+        case 94; color = .{  20,  20, 255, 255 };
+        case 95; color = .{ 255,  20, 255, 255 };
+        case 96; color = .{  20, 255, 255, 255 };
+        case 97; color = .{ 255, 255, 255, 255 };
         
         // If the foreground color did not change (or we do not support that operation), don't do anything
-    case; actually_changed_color = false;
+        case; actually_changed_color = false;
     }
     
     return color, actually_changed_color;
@@ -127,10 +127,17 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 horizontal_offset := x - (cmdx.backlog_end - cmdx.backlog_line_start) - 1;
                 vertical_offset   := y - cmdx.viewport_height - 1;
                 
-                assert(vertical_offset > 0 || (vertical_offset == 0 && horizontal_offset >= 0), "Invalid Cursor Position");
+                assert(vertical_offset >= 0, "Invalid Cursor Position");
                 
                 for i := 0; i < vertical_offset; ++i   new_line(cmdx);
-                for i := 0; i < horizontal_offset; ++i add_character(cmdx, ' ');
+                
+                if horizontal_offset >= 0 {
+                    // If the cursor moves to the right of the current cursor position, then
+                    // just append spaces to the current text.
+                    for i := 0; i < horizontal_offset; ++i add_character(cmdx, ' ');
+                } else {
+                    set_cursor_position_in_line(cmdx, x);
+                }
             } else if compare_strings(command, "C") {
                 // Move the cursor to the right. Apparently this also produces white spaces while
                 // moving the cursor, and unfortunately the C runtime makes use of this feature...
@@ -162,7 +169,7 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 // If the next character is not the actual new line character, then just reset
                 // the cursor to the beginning of the line. I do not understand why the C runtime
                 // actually does this, but for some god forsaken reason I have to deal with it.
-                reset_cursor(cmdx);
+                set_cursor_position_to_beginning_of_line(cmdx);
                 ++parser.index;
             }
         } else if parser.input[parser.index] == '\n' {
