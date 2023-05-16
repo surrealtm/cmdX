@@ -114,14 +114,22 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             parser.index = command_end;
             
             if compare_strings(command, "H") {
-                // Position the cursor at new coordinates. This is pretty scuffed, since this console
-                // works in cooked mode (lines, and not just a big ass table of characters), so for now
-                // assert that this is only used as a smarter "insert new lines here", and then do
-                // exactly that.
+                // Position the cursor. We can only really advance the cursor forward, so make sure
+                // that it only gets moved forward, either vertically (by inserting new lines), or
+                // horizontally (by inserting spaces).
                 y := win32_get_input_parser_parameter(*parser, 0, 1);
                 x := win32_get_input_parser_parameter(*parser, 1, 1);
                 
-                // TODO(Victor): Actually move the cursor (the construct of which does not yet exist in the cmdx backlog)
+                // The horizontal offset is the defined X position minus the amount of characters 
+                // in the current line (- 1, since X,Y are starting off at one, but the backlog starts
+                // of at 0).
+                horizontal_offset := x - (cmdx.backlog_end - cmdx.backlog_line_start) - 1;
+                vertical_offset   := y - cmdx.viewport_height - 1;
+                
+                assert(vertical_offset > 0 || (vertical_offset == 0 && horizontal_offset >= 0), "Invalid Cursor Position");
+                
+                for i := 0; i < vertical_offset; ++i   new_line(cmdx);
+                for i := 0; i < horizontal_offset; ++i add_character(cmdx, ' ');
             } else if compare_strings(command, "C") {
                 // Move the cursor to the right. Apparently this also produces white spaces while
                 // moving the cursor, and unfortunately the C runtime makes use of this feature...

@@ -63,6 +63,7 @@ CmdX :: struct {
     backlog_line_start: s64; // The last registered line start, used for resetting the cursor
     backlog_start:      s64; // The first (inclusive) character in the ringbuffer backlog
     backlog_end:        s64; // One after (exclusive) the last character in the ringbuffer backlog
+    viewport_height: s64; // The amount of lines sent since the current viewport was opened, which usually means since the last command has been entered
     
     // Command handling
     commands: [..]Command;
@@ -87,6 +88,16 @@ clear_backlog :: (cmdx: *CmdX) {
     cmdx.backlog_end        = 0;
 }
 
+prepare_viewport :: (cmdx: *CmdX) {
+    cmdx.viewport_height = 0;
+    cmdx.backlog_line_start = cmdx.backlog_end;
+}
+
+close_viewport :: (cmdx: *CmdX) {
+    // When the last command finishes, append another new line for more clarity
+    new_line(cmdx);
+}
+
 reset_cursor :: (cmdx: *CmdX) {
     cmdx.backlog_end = cmdx.backlog_line_start;
 }
@@ -94,6 +105,7 @@ reset_cursor :: (cmdx: *CmdX) {
 new_line :: (cmdx: *CmdX) {
     add_text(cmdx, "\n");
     cmdx.backlog_line_start = cmdx.backlog_end;
+    ++cmdx.viewport_height;
 }
 
 add_character :: (cmdx: *CmdX, character: s8) {

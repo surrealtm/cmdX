@@ -156,6 +156,9 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 }
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
+    // Prepare the viewport for the next command, no matter what actually happens
+    prepare_viewport(cmdx);
+    
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
     
@@ -201,6 +204,8 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         win32_spawn_process_for_command(cmdx, command_string);
     }
+    
+    close_viewport(cmdx);
 }
 
 
