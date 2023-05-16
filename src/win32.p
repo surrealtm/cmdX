@@ -14,13 +14,13 @@ Win32 :: struct {
     output_write_pipe: HANDLE;
     child_closed_the_pipe: bool;
     
+    // The actual pseudo console and the child handle.
     pseudo_console_handle: HPCON;
     child_process_handle: HANDLE;
-    append_to_previous_line: bool;
-    
-    active_font_color: Color;
 }
 
+// This little helper struct is used for parsing Virtual Terminal Sequences in the output read from
+// the child process.
 Win32_Input_Parser :: struct {
     cmdx: *CmdX;
     
@@ -137,7 +137,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 for i := 0; i < count; ++i    add_character(cmdx, ' ');
             } else if compare_strings(command, "m") {
                 color_code := win32_get_input_parser_parameter(*parser, 0, 0);
-                cmdx.win32.active_font_color = win32_get_color_for_code(cmdx, color_code);
+                color := win32_get_color_for_code(cmdx, color_code);
+                set_color(cmdx, color);
             } else {
                 //print("Unhandled command: %\n", command);
             }
@@ -166,6 +167,10 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
         } else if parser.input[parser.index] == '\n' {
             // Normal single new line character, not sure if that actually ever happens...
             new_line(cmdx);
+            ++parser.index;
+        } else if parser.input[parser.index] == '\t' {
+            // If the child outputted tabs, translate them to spaces for better consistency.
+            for i := 0; i < 4; ++i add_character(cmdx, ' ');
             ++parser.index;
         } else {
             // If this was just a normal character, skip it.
@@ -312,7 +317,6 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
     cmdx.win32.child_process_handle  = process.hProcess;
-    cmdx.win32.active_font_color     = cmdx.active_theme.font_color;
     
     // Wait for the child process to close his side of the pipes, so that we know the console
     // connection can be terminated.
@@ -321,7 +325,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         win32_read_from_child_process(cmdx);
         
         // Render a single frame while waiting for the process to terminate
-        single_cmdx_frame(cmdx);
+        one_cmdx_frame(cmdx);
         
         // Get the current process name and display that in the window title
         process_name: [MAX_PATH]s8 = ---;
