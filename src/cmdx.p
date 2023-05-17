@@ -49,6 +49,11 @@ Color_Range :: struct {
     color: Color;
 }
 
+Backlog_Line :: struct {
+    start: s64;
+    end: s64;
+}
+
 CmdX :: struct {
     // Memory management
     global_memory_arena: Memory_Arena;
@@ -65,11 +70,9 @@ CmdX :: struct {
     // Text
     text_input: Text_Input;
     backlog: [BACKLOG_SIZE]s8 = ---;
-    backlog_line_start: s64; // The last registered line start, used for resetting the cursor
-    backlog_start:      s64; // The first (inclusive) character in the ringbuffer backlog
-    backlog_end:        s64; // One after (exclusive) the last character in the ringbuffer backlog
-    viewport_height: s64; // The amount of lines sent since the current viewport was opened, which usually means since the last command has been entered
-    colors: [..]Color_Range; // Wraps around the backlog exactly like the actual messages do
+    colors: [..]Color_Range;
+    lines: [..]Backlog_Line;
+    viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
     
     // Command handling
     commands: [..]Command;
@@ -89,15 +92,14 @@ CmdX :: struct {
 }
 
 clear_backlog :: (cmdx: *CmdX) {
-    cmdx.backlog_line_start = 0;
-    cmdx.backlog_start      = 0;
-    cmdx.backlog_end        = 0;
+    array_clear(*cmdx.lines);
     array_clear(*cmdx.colors);
+    new_line(cmdx);
+    set_color(cmdx, cmdx.active_theme.font_color);
 }
 
 prepare_viewport :: (cmdx: *CmdX) {
     cmdx.viewport_height = 0;
-    cmdx.backlog_line_start = cmdx.backlog_end;
 }
 
 close_viewport :: (cmdx: *CmdX) {
@@ -105,14 +107,19 @@ close_viewport :: (cmdx: *CmdX) {
     new_line(cmdx);
 }
 
+get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
+    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    return line_head.end - line_head.start + 1; // The current cursor position is considered to be at the end of the current line
+}
+
 set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
-    cmdx.backlog_end = cmdx.backlog_line_start + x;
+    // Remove part of the backlog line
+    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    line_head.end = line_head.start + x;
     
-    if cmdx.colors.count {
-        // If part of the backlog just got erased, the end of the color range must be updated too.
-        head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-        head.end = cmdx.backlog_end;
-    }
+    // If part of the backlog just got erased, the end of the color range must be updated too.
+    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+    color_head.end = line_head.start + x;
 }
 
 set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
@@ -120,13 +127,27 @@ set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
 }
 
 new_line :: (cmdx: *CmdX) {
-    character: s8 = '\n';
-    string: string = ---;
-    string.data = *character;
-    string.count = 1;
-    add_text(cmdx, string);
-    cmdx.backlog_line_start = cmdx.backlog_end;
+    // Add a new line to the backlog
+    new_line_head := array_push(*cmdx.lines);
+
+    if cmdx.lines.count > 1 {
+        // If there was a previous line, set the start of the new line in the backlog buffer to point just
+        // after the previous line
+        old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
+        new_line_head.start = old_line_head.end;
+        new_line_head.end   = new_line_head.start;
+    }
+
     ++cmdx.viewport_height;
+}
+
+add_text :: (cmdx: *CmdX, text: string) {
+    line_head  := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+    assert(line_head.end + text.count <= BACKLOG_SIZE, "Backlog buffer ran out of space");
+    copy_memory(xx *cmdx.backlog[line_head.end], xx text.data, text.count);
+    line_head.end  += text.count;
+    color_head.end += text.count;
 }
 
 add_character :: (cmdx: *CmdX, character: s8) {
@@ -135,33 +156,6 @@ add_character :: (cmdx: *CmdX, character: s8) {
     string.data = *character_copy;
     string.count = 1;
     add_text(cmdx, string);
-}
-
-add_text :: (cmdx: *CmdX, text: string) {
-    // Copy the data given in string into the actual backlog
-    if cmdx.backlog_end + text.count > BACKLOG_SIZE {
-        // If the backlog does not have enough space for the entire text left, then just fill up the
-        // entire space left first, then wrap the text around the buffer end back into the start.
-        first_pass_count := BACKLOG_SIZE - cmdx.backlog_end;
-        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, first_pass_count);
-        
-        second_pass_count := text.count - first_pass_count;
-        copy_memory(xx *cmdx.backlog[0], xx *text.data[first_pass_count], second_pass_count);
-        
-        cmdx.backlog_end   = second_pass_count;
-        cmdx.backlog_start = cmdx.backlog_end + 1;
-    } else if cmdx.backlog_end < cmdx.backlog_start && cmdx.backlog_end + text.count >= cmdx.backlog_start {
-        // If there is no wrapping required, but there is not enough space to fit the new text
-        // between the end and the start of the backlog, the start needs to be pushed back.
-        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, text.count);
-        cmdx.backlog_end   += text.count;
-        cmdx.backlog_start += text.count;
-    } else {
-        // If the backlog can fit the entire text into it still, then just copy the characters to
-        // the back of the backlog.
-        copy_memory(xx *cmdx.backlog[cmdx.backlog_end], xx text.data, text.count);
-        cmdx.backlog_end += text.count;
-    }
 }
 
 add_formatted_text :: (cmdx: *CmdX, format: string, args: ..any) {
@@ -181,51 +175,26 @@ add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
     new_line(cmdx);
 }
 
+
 set_color :: (cmdx: *CmdX, color: Color) {
     if cmdx.colors.count == 0 {
-        array_add(*cmdx.colors, .{ -1, color });
+        array_add(*cmdx.colors, .{ 0, color });
         return;
     }
     
-    head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-    if !compare_colors(head.color, color) {
-        head.end = cmdx.backlog_end;
-        array_add(*cmdx.colors, .{ -1, color });
+    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+    if !compare_colors(color_head.color, color) {
+        line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+        color_head.end = line_head.end;
+        array_add(*cmdx.colors, .{ 0, color });
     }
 }
-
-find_next_line_in_backlog_reverse :: (cmdx: *CmdX, cursor: s64) -> s64, s64, s64 {
-    line_end := cursor;
     
-    while cursor > cmdx.backlog_start && cmdx.backlog[cursor] != '\n' {
-        --cursor;
-    }
-    
-    line_start := cursor;
-    if cmdx.backlog[cursor] == '\n' {
-        // If this was in fact a new line, and not simply the beginning of the buffer, skip over the actual
-        // new line character to both ends.
-        ++line_start;
-        --cursor;
-    }
-    
-    return cursor, line_start, line_end;
-}
-
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
     string_builder: String_Builder = ---;
     create_string_builder(*string_builder, arena);
     if !cmdx.child_process_running    append_string(*string_builder, cmdx.current_directory);
     append_string(*string_builder, "> ");
-    return finish_string_builder(*string_builder);
-}
-
-get_complete_input_string :: (cmdx: *CmdX, arena: *Memory_Arena, input_string: string) -> string {
-    string_builder: String_Builder = ---;
-    create_string_builder(*string_builder, arena);
-    append_string(*string_builder, cmdx.current_directory);
-    append_string(*string_builder, "> ");
-    append_string(*string_builder, input_string);
     return finish_string_builder(*string_builder);
 }
 
@@ -313,51 +282,56 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         activate_text_input(*cmdx.text_input);
         
         if cmdx.child_process_running {
+            // Send the input to the child process
             win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
-            add_line(cmdx, get_complete_input_string(cmdx, *cmdx.global_memory_arena, input_string));
+            // Print the complete input line into the backlog
+            set_color(cmdx, cmdx.active_theme.accent_color);
+            add_text(cmdx, cmdx.current_directory);
+            add_text(cmdx, "> ");    
+            set_color(cmdx, cmdx.active_theme.font_color);
+            add_line(cmdx, input_string);
+            // Actually launch the command
             handle_input_string(cmdx, input_string);
         }
     }
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.active_theme.font.line_height;
+    cursor_y: s32 = 0; //cmdx.window.height - cmdx.active_theme.font.line_height;
     
     // Draw all messages in the backlog
-    if cmdx.backlog_start != cmdx.backlog_end {
-        cursor := 0;
+    line_index: s64 = 0;
+    
+    color_range_index: s64 = -1;
+    color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
+    
+    while line_index < cmdx.lines.count {
+        cursor_y += cmdx.active_theme.font.line_height;
+        cursor_x = 5;
         
-        color_range_index: s64 = -1;
-        color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
-        
-        while cursor < cmdx.backlog_end {
+        line := array_get(*cmdx.lines, line_index);
+        for cursor := line.start; cursor < line.end; ++cursor {
             character := cmdx.backlog[cursor];
-            
-            if color_range_index + 1 < cmdx.colors.count && cursor >= color_range.end {
+
+            while cursor >= color_range.end && color_range_index + 1 < cmdx.colors.count {
                 flush_font_buffer(*cmdx.renderer);
                 ++color_range_index;
                 color_range = array_get_value(*cmdx.colors, color_range_index);
                 cmdx.renderer.foreground_color = color_range.color;
             }
             
-            if character == '\n' {
-                // Line break, reposition the cursor
-                cursor_x = 5;
-                cursor_y += cmdx.active_theme.font.line_height;
-            } else {
-                cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-                if cursor + 1 < cmdx.backlog_end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
-            }
-            
-            ++cursor;
+            cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
+            if cursor + 1 < line.end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
         }
-    }
-    
+
+        ++line_index;        
+    }        
+
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
-    
+
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
     
@@ -373,14 +347,15 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 }
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {
-    config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
-    set_color(cmdx, cmdx.active_theme.font_color); // Set the basic font color so there is always one
+    clear_backlog(cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
     
     set_color(cmdx, cmdx.active_theme.accent_color);
     add_line(cmdx, "    Welcome to cmdX.");
     set_color(cmdx, cmdx.active_theme.font_color);
     
     add_line(cmdx, "Use the :help command as a starting point.");
+
+    config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
 }

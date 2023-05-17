@@ -124,7 +124,7 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 // The horizontal offset is the defined X position minus the amount of characters 
                 // in the current line (- 1, since X,Y are starting off at one, but the backlog starts
                 // of at 0).
-                horizontal_offset := x - (cmdx.backlog_end - cmdx.backlog_line_start) - 1;
+                horizontal_offset := x - get_cursor_position_in_line(cmdx);
                 vertical_offset   := y - cmdx.viewport_height - 1;
                 
                 assert(vertical_offset >= 0, "Invalid Cursor Position");
@@ -135,9 +135,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                     // If the cursor moves to the right of the current cursor position, then
                     // just append spaces to the current text.
                     for i := 0; i < horizontal_offset; ++i add_character(cmdx, ' ');
-                } else {
+                } else
                     set_cursor_position_in_line(cmdx, x);
-                }
             } else if compare_strings(command, "C") {
                 // Move the cursor to the right. Apparently this also produces white spaces while
                 // moving the cursor, and unfortunately the C runtime makes use of this feature...
