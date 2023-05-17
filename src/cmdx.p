@@ -109,7 +109,7 @@ close_viewport :: (cmdx: *CmdX) {
 
 get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    return line_head.end - line_head.start + 1; // The current cursor position is considered to be at the end of the current line
+    return line_head.end - line_head.start; // The current cursor position is considered to be at the end of the current line
 }
 
 set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
@@ -246,7 +246,7 @@ update_window_name :: (cmdx: *CmdX) {
     
     if cmdx.child_process_name.count {
         // This is pretty bad... Should probably just use some kind of string builder for this, but that
-        // does not exist yet.
+        // does not exist yet.   @Cleanup it now does idiot, so fix this shit
         window_name = concatenate_strings(window_name, " (", *cmdx.frame_allocator);
         window_name = concatenate_strings(window_name, cmdx.child_process_name, *cmdx.frame_allocator);
         window_name = concatenate_strings(window_name, ")", *cmdx.frame_allocator);
@@ -324,7 +324,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
             if cursor + 1 < line.end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
         }
-
+        
         ++line_index;        
     }        
 
@@ -346,9 +346,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
 }
 
-welcome_screen :: (cmdx: *CmdX, run_tree: string) {
-    clear_backlog(cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
-    
+welcome_screen :: (cmdx: *CmdX, run_tree: string) {    
     set_color(cmdx, cmdx.active_theme.accent_color);
     add_line(cmdx, "    Welcome to cmdX.");
     set_color(cmdx, cmdx.active_theme.font_color);
@@ -405,6 +403,7 @@ main :: () -> s32 {
     show_window(*cmdx.window);
     
     // Display the welcome message
+    clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
     welcome_screen(*cmdx, run_tree);
     
     // Main loop until the window gets closed

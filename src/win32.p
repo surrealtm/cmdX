@@ -27,7 +27,7 @@ Win32_Input_Parser :: struct {
     input: string;
     index: s64;
     
-    parameters: [8]u32;
+    parameters: [8]s32;
     parameter_count: u32;
 }
 
@@ -82,7 +82,7 @@ win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
     return end;
 }
 
-win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, default: u32) -> u32 {
+win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, default: s64) -> s64 {
     if index >= parser.parameter_count return default;
     return parser.parameters[index];
 }
@@ -115,21 +115,17 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             parser.index = command_end;
             
             if compare_strings(command, "H") {
-                // Position the cursor. We can only really advance the cursor forward, so make sure
-                // that it only gets moved forward, either vertically (by inserting new lines), or
-                // horizontally (by inserting spaces).
-                y := win32_get_input_parser_parameter(*parser, 0, 1);
-                x := win32_get_input_parser_parameter(*parser, 1, 1);
+                // Position the cursor. If the cursor gets advanced by this, insert new-lines or spaces. If the
+                // cursor reverts inside the current line, delete the part to the right of the line. We currently
+                // do not support going backwards in the Y direction.
+                y := win32_get_input_parser_parameter(*parser, 0, 1) - 1;
+                x := win32_get_input_parser_parameter(*parser, 1, 1) - 1;
                 
-                // The horizontal offset is the defined X position minus the amount of characters 
-                // in the current line (- 1, since X,Y are starting off at one, but the backlog starts
-                // of at 0).
-                horizontal_offset := x - get_cursor_position_in_line(cmdx);
-                vertical_offset   := y - cmdx.viewport_height - 1;
-                
-                assert(vertical_offset >= 0, "Invalid Cursor Position");
-                
+                vertical_offset := y - cmdx.viewport_height;
+                assert(vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
                 for i := 0; i < vertical_offset; ++i   new_line(cmdx);
+                                
+                horizontal_offset := x - get_cursor_position_in_line(cmdx);
                 
                 if horizontal_offset >= 0 {
                     // If the cursor moves to the right of the current cursor position, then
@@ -204,17 +200,19 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     input_buffer := allocate(*cmdx.frame_allocator, total_bytes_available);
     bytes_read: u32 = ---;
     
-    if ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {
-        // There are 'total_bytes_available' to be read in the pipe. Since this is a byte 
-        // oriented pipe, more than a single line may be read. However, since the client 
-        // implementation (probably) only ever flushes after a new-line, the read buffer should 
-        // always end on a new-line.
-        string := string_view(xx input_buffer, bytes_read);
-        win32_process_input_string(cmdx, string);
-    } else
+    if !ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {
         // If this read fails, the child closed the pipe. This case should probably be covered by 
         // the return value of PeekNamedPipe, but safe is safe.
         cmdx.win32.child_closed_the_pipe = true;
+        return;
+    }
+
+    // There are 'total_bytes_available' to be read in the pipe. Since this is a byte 
+    // oriented pipe, more than a single line may be read. However, since the client 
+    // implementation (probably) only ever flushes after a new-line, the read buffer should 
+    // always end on a new-line.
+    string := string_view(xx input_buffer, bytes_read);
+    win32_process_input_string(cmdx, string);
 }
 
 win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
