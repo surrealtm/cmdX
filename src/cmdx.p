@@ -65,13 +65,14 @@ CmdX :: struct {
     
     // Output
     window: Window = ---;
-    renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...
+    renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
     
     // Text
     text_input: Text_Input;
     backlog: [BACKLOG_SIZE]s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Backlog_Line;
+    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
     
     // Command handling
@@ -129,16 +130,17 @@ set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
 new_line :: (cmdx: *CmdX) {
     // Add a new line to the backlog
     new_line_head := array_push(*cmdx.lines);
-
+    
     if cmdx.lines.count > 1 {
-        // If there was a previous line, set the start of the new line in the backlog buffer to point just
-        // after the previous line
+        // If there was a previous line, set the start of the new line in the backlog buffer to point 
+        // just after the previous line
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
         new_line_head.start = old_line_head.end;
         new_line_head.end   = new_line_head.start;
     }
-
+    
     ++cmdx.viewport_height;
+    cmdx.scroll_offset = cmdx.lines.count;
 }
 
 add_text :: (cmdx: *CmdX, text: string) {
@@ -189,7 +191,7 @@ set_color :: (cmdx: *CmdX, color: Color) {
         array_add(*cmdx.colors, .{ 0, color });
     }
 }
-    
+
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
     string_builder: String_Builder = ---;
     create_string_builder(*string_builder, arena);
@@ -296,24 +298,31 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
     }
     
+    // The amount of visible lines on screen this frame
+    visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
+    if cmdx.scroll_offset <= visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height;
+    
+    // The amount of lines that fully fit into the screen space, without having to cut off the upper part of the line
+    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count);
+    
+    // Handle scrolling with the mouse wheel
+    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns, drawn_line_count - 1, cmdx.lines.count);
+    
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
-    cursor_y: s32 = 0; //cmdx.window.height - cmdx.active_theme.font.line_height;
+    cursor_y: s32 = cmdx.window.height - (drawn_line_count - 1) * cmdx.active_theme.font.line_height - 5;
     
     // Draw all messages in the backlog
-    line_index: s64 = 0;
+    line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
     
     color_range_index: s64 = -1;
     color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
     
-    while line_index < cmdx.lines.count {
-        cursor_y += cmdx.active_theme.font.line_height;
-        cursor_x = 5;
-        
+    while line_index < cmdx.lines.count { // @Cleanup only actually render drawn_line_count lines, this should currently build up wayyy to many lines to render...
         line := array_get(*cmdx.lines, line_index);
         for cursor := line.start; cursor < line.end; ++cursor {
             character := cmdx.backlog[cursor];
-
+            
             while cursor >= color_range.end && color_range_index + 1 < cmdx.colors.count {
                 flush_font_buffer(*cmdx.renderer);
                 ++color_range_index;
@@ -325,13 +334,16 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             if cursor + 1 < line.end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
         }
         
+        if line_index + 1 < cmdx.lines.count   cursor_y += cmdx.active_theme.font.line_height;
+        cursor_x = 5;
+        
         ++line_index;        
     }        
-
+    
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
-
+    
     // Reset the frame arena
     reset_memory_arena(*cmdx.frame_memory_arena);
     
@@ -352,7 +364,7 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     set_color(cmdx, cmdx.active_theme.font_color);
     
     add_line(cmdx, "Use the :help command as a starting point.");
-
+    
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
