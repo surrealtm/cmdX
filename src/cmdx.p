@@ -345,7 +345,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
     
     // Reset the frame arena
-    reset_memory_arena(*cmdx.frame_memory_arena);
+    reset_allocator(*cmdx.frame_allocator);
     
     // Finish the frame, sleep until the next one
     swap_gl_buffers(*cmdx.window);
@@ -373,12 +373,18 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
 main :: () -> s32 {
     // Set up memory management
     cmdx: CmdX;
-    create_memory_arena(*cmdx.global_memory_arena, 4 * GIGABYTES);
+    create_memory_arena(*cmdx.global_memory_arena, 1 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
     cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
     
-    create_memory_arena(*cmdx.frame_memory_arena, 512 * MEGABYTES);
+    create_memory_arena(*cmdx.frame_memory_arena, 16 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
+
+    // Link the allocators to all important data structures
+    cmdx.colors.allocator   = *cmdx.global_allocator;
+    cmdx.lines.allocator    = *cmdx.global_allocator;
+    cmdx.commands.allocator = *cmdx.global_allocator;
+    cmdx.themes.allocator   = *cmdx.global_allocator;
     
     // Set up the command handling
     cmdx.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
@@ -388,7 +394,7 @@ main :: () -> s32 {
     // Set the working directory of this program to where to executable file is, so that the data 
     // folder can always be accessed.
     run_tree := get_module_path();
-    defer free_string(run_tree, *Default_Allocator);
+    defer free_string(run_tree, Default_Allocator);
     set_working_directory(run_tree);
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
     
@@ -422,11 +428,16 @@ main :: () -> s32 {
     while !cmdx.window.should_close {
         one_cmdx_frame(*cmdx);
     }
-    
+        
     // Cleanup
     write_config_file(*cmdx.config, CONFIG_FILE_NAME);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);
+
+    free_memory_pool(*cmdx.global_memory_pool);
+    free_memory_arena(*cmdx.global_memory_arena);
+    free_memory_arena(*cmdx.frame_memory_arena);
+    
     return 0;
 }

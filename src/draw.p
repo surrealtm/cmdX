@@ -42,8 +42,8 @@ create_renderer :: (renderer: *Renderer) {
     allocate_vertex_data(*renderer.font_vertex_buffer, GLYPH_BUFFER_SIZE, 2);
     allocate_vertex_data(*renderer.font_vertex_buffer, GLYPH_BUFFER_SIZE, 2);
     
-    renderer.font_vertices = xx allocate(*Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
-    renderer.font_uvs = xx allocate(*Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
+    renderer.font_vertices = xx allocate(Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
+    renderer.font_uvs = xx allocate(Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
 }
 
 destroy_renderer :: (renderer: *Renderer) {
@@ -52,8 +52,8 @@ destroy_renderer :: (renderer: *Renderer) {
     destroy_vertex_buffer(*renderer.quad_vertex_buffer);
     destroy_vertex_buffer(*renderer.font_vertex_buffer);
     
-    deallocate(*Default_Allocator, xx renderer.font_vertices);
-    deallocate(*Default_Allocator, xx renderer.font_uvs);
+    deallocate(Default_Allocator, xx renderer.font_vertices);
+    deallocate(Default_Allocator, xx renderer.font_uvs);
 }
 
 prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {

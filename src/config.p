@@ -15,7 +15,7 @@ Property :: struct {
 }
 
 Config :: struct {
-    allocator: *Allocator = *Default_Allocator;
+    allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
 }
 
@@ -41,7 +41,7 @@ create_property :: (config: *Config, name: string, type: Property_Type) -> *Prop
 create_string_property :: (config: *Config, name: string, value: *string, default: string) {
     property := create_property(config, name, .String);
     property.value._string = value;
-    ~property.value._string = copy_string(default, *Default_Allocator);
+    ~property.value._string = copy_string(default, Default_Allocator);
 }
 
 create_integer_property :: (config: *Config, name: string, value: *s64, default: s64) {

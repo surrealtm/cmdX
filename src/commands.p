@@ -231,7 +231,7 @@ clear :: (cmdx: *CmdX) {
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
-    cmdx.active_theme_name = copy_string(theme_name, *Default_Allocator);
+    cmdx.active_theme_name = copy_string(theme_name, Default_Allocator);
     update_active_theme_pointer(cmdx);
 }
 
@@ -258,7 +258,7 @@ debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
 }
 
 debug :: (cmdx: *CmdX) {
-    debug_print_allocator(cmdx, "Heap  ", *Default_Allocator);
+    debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 }
