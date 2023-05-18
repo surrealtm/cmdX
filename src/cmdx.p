@@ -148,7 +148,7 @@ new_line :: (cmdx: *CmdX) {
     }
     
     ++cmdx.viewport_height;
-    cmdx.scroll_offset = cmdx.lines.count;
+    cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 }
 
 add_text :: (cmdx: *CmdX, text: string) {
@@ -323,9 +323,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // The amount of visible lines on screen this frame
     visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
     if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
-    
+
+    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    line_head_is_empty: bool = line_head.end == line_head.start;
+
     // The amount of lines that fully fit into the screen space, without having to cut off the upper part of the line
-    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count) - 1;
+    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count) - line_head_is_empty;
     
     // Handle scrolling with the mouse wheel
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
@@ -363,15 +366,21 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             if cursor + 1 < line.end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
         }
         
-        if line_index + 1 < cmdx.lines.count   cursor_y += cmdx.active_theme.font.line_height;
-        cursor_x = 5;
-        
+        if line_index + 1 < cmdx.lines.count {
+            // If there is another line after this, reset the cursor position. If there isnt, then
+            // leave the cursor as is so that the actual text input can be rendered at the correct position
+            cursor_y += cmdx.active_theme.font.line_height;
+            cursor_x = 5;
+        }
+            
         ++line_index;        
     }        
     
     // Draw the text input
+    if !cmdx.child_process_running cursor_y = cmdx.window.height - 5;
+    
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, 5, cmdx.window.height - 5);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
     
     // Reset the frame arena
     reset_allocator(*cmdx.frame_allocator);
@@ -452,7 +461,7 @@ main :: () -> s32 {
     // Display the welcome message
     clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
     welcome_screen(*cmdx, run_tree);
-    
+
     // Main loop until the window gets closed
     while !cmdx.window.should_close {
         one_cmdx_frame(*cmdx);
