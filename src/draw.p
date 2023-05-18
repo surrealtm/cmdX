@@ -57,18 +57,20 @@ destroy_renderer :: (renderer: *Renderer) {
 }
 
 prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
+    background_color := theme.colors[Color_Index.Background];
+
     renderer.width  = window.width;
     renderer.height = window.height;
     renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
-    renderer.background_color    = theme.background_color;
+    renderer.background_color    = background_color;
     renderer.font_texture_handle = theme.font.texture.handle;
 
     glViewport(0, 0, renderer.width, renderer.height);
-    
-    glClearColor(xx theme.background_color.r / 255.0,
-                 xx theme.background_color.g / 255.0,
-                 xx theme.background_color.b / 255.0,
-                 xx theme.background_color.a / 255.0);
+
+    glClearColor(xx background_color.r / 255.0,
+                 xx background_color.g / 255.0,
+                 xx background_color.b / 255.0,
+                 xx background_color.a / 255.0);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -185,10 +187,10 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, pref
     update_text_input_rendering_data(input);
     
     // Render the input string
-    draw_text(renderer, theme, input_string, x + prefix_string_width, y, theme.font_color);
+    draw_text(renderer, theme, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default]);
     
     // Render the string prefix
-    draw_text(renderer, theme, prefix_string, x, y, theme.accent_color);
+    draw_text(renderer, theme, prefix_string, x, y, theme.colors[Color_Index.Accent]);
     
     // Flush all text before rendering the cursor to make sure the cursor always gets rendered on top of the font
     flush_font_buffer(renderer);
@@ -199,12 +201,13 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, pref
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
     
     // Render the cursor if the text input is active
-    cursor_color := Color.{ theme.cursor_color.r, theme.cursor_color.g, theme.cursor_color.b, xx (input.cursor_alpha * 255) };
+    cursor_color_raw := theme.colors[Color_Index.Cursor];
+    cursor_color_blended := Color.{ cursor_color_raw.r, cursor_color_raw.g, cursor_color_raw.b, xx (input.cursor_alpha * 255) };
     
     if !input.active {
         // If the text input is not active, render an outlined quad as the cursor
-        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, 1, cursor_color);
+        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, 1, cursor_color_blended);
     } else
         // If the text input is active, render a filled quad
-        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color);
+        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color_blended);
 }

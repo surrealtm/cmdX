@@ -37,19 +37,24 @@ CONFIG_FILE_NAME :: ".cmdx-config";
 BACKLOG_SIZE :: 8129;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
+Color_Index :: enum {
+    Default;
+    Cursor;
+    Accent;
+    Background;
+}
+
 Theme :: struct {
     name: string;
     font_path: string; // Needed for reloading the font when the size changes
-    font_color: Color;       // The default color for text in the input and backlog
-    cursor_color: Color;     // The color for the text input cursor
-    accent_color: Color;     // The color for highlighted text, e.g. the current directory
-    background_color: Color; // The background color of the window
     font: Font;
+    colors: [Color_Index.count]Color;
 }
 
 Color_Range :: struct {
     end: s64;
-    color: Color;
+    color_index: Color_Index; // If this is a valid value (not -1), then the color from the active theme gets used.
+    true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
 Backlog_Line :: struct {
@@ -99,7 +104,7 @@ clear_backlog :: (cmdx: *CmdX) {
     array_clear(*cmdx.lines);
     array_clear(*cmdx.colors);
     new_line(cmdx);
-    set_color(cmdx, cmdx.active_theme.font_color);
+    set_themed_color(cmdx, .Default);
 }
 
 prepare_viewport :: (cmdx: *CmdX) {
@@ -183,15 +188,29 @@ add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
 
 set_color :: (cmdx: *CmdX, color: Color) {
     if cmdx.colors.count == 0 {
-        array_add(*cmdx.colors, .{ 0, color });
+        array_add(*cmdx.colors, .{ 0, -1, color });
         return;
     }
     
     color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-    if !compare_colors(color_head.color, color) {
+    if color_head.color_index != -1 || !compare_colors(color_head.true_color, color) {
         line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
         color_head.end = line_head.end;
-        array_add(*cmdx.colors, .{ 0, color });
+        array_add(*cmdx.colors, .{ 0, -1, color });
+    }
+}
+
+set_themed_color :: (cmdx: *CmdX, index: Color_Index) {
+    if cmdx.colors.count == 0 {
+        array_add(*cmdx.colors, .{ 0, index, .{} });
+        return;
+    }
+
+    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+    if color_head.color_index != index  {
+        line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+        color_head.end = line_head.end;
+        array_add(*cmdx.colors, .{ 0, index, .{} });
     }
 }
 
@@ -203,14 +222,14 @@ get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
     return finish_string_builder(*string_builder);
 }
 
-create_theme :: (cmdx: *CmdX, name: string, font_path: string, font: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
+create_theme :: (cmdx: *CmdX, name: string, font_path: string, default: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
     theme.font_path = font_path;
-    theme.font_color = font;
-    theme.cursor_color = cursor;
-    theme.accent_color = accent;
-    theme.background_color = background;
+    theme.colors[Color_Index.Default] = default;
+    theme.colors[Color_Index.Cursor]  = cursor;
+    theme.colors[Color_Index.Accent]  = accent;
+    theme.colors[Color_Index.Background] = background;
     load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
     return theme;
 }
@@ -291,10 +310,10 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
             // Print the complete input line into the backlog
-            set_color(cmdx, cmdx.active_theme.accent_color);
+            set_themed_color(cmdx, .Accent);
             add_text(cmdx, cmdx.current_directory);
             add_text(cmdx, "> ");    
-            set_color(cmdx, cmdx.active_theme.font_color);
+            set_themed_color(cmdx, .Default);
             add_line(cmdx, input_string);
             // Actually launch the command
             handle_input_string(cmdx, input_string);
@@ -328,10 +347,16 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             character := cmdx.backlog[cursor];
             
             while cursor >= color_range.end && color_range_index + 1 < cmdx.colors.count {
+                // The renderer right now only supports one color per draw call
                 flush_font_buffer(*cmdx.renderer);
+
+                // Increase the current color range
                 ++color_range_index;
                 color_range = array_get_value(*cmdx.colors, color_range_index);
-                cmdx.renderer.foreground_color = color_range.color;
+
+                // Set the actual foreground color. If the color range has a 
+                if color_range.color_index != -1 cmdx.renderer.foreground_color = cmdx.active_theme.colors[color_range.color_index];
+                else cmdx.renderer.foreground_color = color_range.true_color;
             }
             
             cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
@@ -363,9 +388,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 }
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {    
-    set_color(cmdx, cmdx.active_theme.accent_color);
+    set_themed_color(cmdx, .Accent);
     add_line(cmdx, "    Welcome to cmdX.");
-    set_color(cmdx, cmdx.active_theme.font_color);
+    set_themed_color(cmdx, .Default);
     
     add_line(cmdx, "Use the :help command as a starting point.");
     
