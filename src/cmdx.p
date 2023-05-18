@@ -34,7 +34,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 8129;
+BACKLOG_SIZE :: 128;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
 Color_Index :: enum {
@@ -52,8 +52,9 @@ Theme :: struct {
 }
 
 Color_Range :: struct {
+    start: s64;
     end: s64;
-    color_index: Color_Index; // If this is a valid value (not -1), then the color from the active theme gets used.
+    color_index: Color_Index; // If this is a valid value (not -1), then the color from the active theme gets used
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
@@ -100,6 +101,31 @@ CmdX :: struct {
     win32: Win32 = ---;
 }
 
+debug_print_lines :: (cmdx: *CmdX, location: string) {
+    print("=== LINES (%) ===\n", location);
+
+    for i := 0; i < cmdx.lines.count; ++i {
+        line := array_get(*cmdx.lines, i);
+        print("I %: % -> % ", i, line.start, line.end);
+        print("     '%'", string_view(*cmdx.backlog[line.start], line.end - line.start));
+        print("\n");
+    }
+
+    print("=== LINES (%) ===\n", location);
+}
+
+debug_print_colors :: (cmdx: *CmdX) {
+    print("=== COLORS ===\n");
+
+    for i := 0; i < cmdx.colors.count; ++i {
+        range := array_get(*cmdx.colors, i);
+        print("C %: % -> % (% | %, %, %) ", i, range.start, range.end, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
+        print("\n");
+    }
+
+    print("=== COLORS ===\n");
+}
+
 clear_backlog :: (cmdx: *CmdX) {
     array_clear(*cmdx.lines);
     array_clear(*cmdx.colors);
@@ -113,7 +139,7 @@ prepare_viewport :: (cmdx: *CmdX) {
 
 close_viewport :: (cmdx: *CmdX) {
     // When the last command finishes, append another new line for more clarity
-    new_line(cmdx);
+    //new_line(cmdx); @nocheckin
 }
 
 get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
@@ -151,13 +177,62 @@ new_line :: (cmdx: *CmdX) {
     cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 }
 
+remove_overlapping_lines :: (cmdx: *CmdX, line_start: s64, line_end: s64) -> *Backlog_Line {
+    while cmdx.lines.count - 1 {
+        line := array_get(*cmdx.lines, 0);
+
+        if line.start < line_end && line.end > line_start     array_remove(*cmdx.lines, 0);
+        else break;
+    }
+
+    return array_get(*cmdx.lines, cmdx.lines.count - 1);
+}
+
+remove_overlapping_color_ranges :: (cmdx: *CmdX, range_start: s64, range_end: s64) -> *Color_Range {
+    while cmdx.colors.count - 1 {
+        range := array_get(*cmdx.colors, 0);
+
+        if range.start < range_start && range.end > range_end    array_remove(*cmdx.colors, 0);
+        else break;
+    }
+    
+    return array_get(*cmdx.colors, cmdx.colors.count - 1);
+}
+
 add_text :: (cmdx: *CmdX, text: string) {
-    line_head  := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-    assert(line_head.end + text.count <= BACKLOG_SIZE, "Backlog buffer ran out of space");
-    copy_memory(xx *cmdx.backlog[line_head.end], xx text.data, text.count);
-    line_head.end  += text.count;
-    color_head.end += text.count;
+    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    
+    if line_head.end + text.count >= BACKLOG_SIZE {
+        // If the text does not fit into the remaining space of the backlog, restart this line at the
+        // beginning of the backlog again. To keep the system simple, do not try to wrap around the backlog
+        // end, as the space saving isnt even worth it (the empty space will instead be somewhere else, if
+        // not at the end...). Also create a new color range at the beginning, so that these do not need
+        // wrapping as well.
+        previous_line_length := line_head.end - line_head.start;
+        new_line_length      := previous_line_length + text.count;
+        line_head = remove_overlapping_lines(cmdx, 0, new_line_length);
+
+        // Copy the existing line data to the beginning of the backlog
+        copy_memory(xx cmdx.backlog, xx *cmdx.backlog[line_head.start], previous_line_length);
+
+        // Append the new text to the new line
+        copy_memory(xx *cmdx.backlog[previous_line_length], xx text.data, text.count);
+        
+        // Set the new source range for the line
+        line_head.start = 0;
+        line_head.end   = new_line_length;
+    } else {
+        // If the line still fits into the backlog, just append it to the current head.
+        line_head = remove_overlapping_lines(cmdx, line_head.start, line_head.end + text.count);
+        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+        
+        copy_memory(xx *cmdx.backlog[line_head.end], xx text.data, text.count);
+        line_head.end += text.count;
+        color_head.end = max(color_head.end, line_head.end);
+    }
+
+    debug_print_lines(cmdx, "add_text");
+    debug_print_colors(cmdx);
 }
 
 add_character :: (cmdx: *CmdX, character: s8) {
@@ -178,6 +253,7 @@ add_formatted_text :: (cmdx: *CmdX, format: string, args: ..any) {
 add_line :: (cmdx: *CmdX, text: string) {
     add_text(cmdx, text);
     new_line(cmdx);
+    //debug_print_lines(cmdx, "add_line");
 }
 
 add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
@@ -186,31 +262,57 @@ add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
 }
 
 
+set_color_internal :: (cmdx: *CmdX, true_color: Color, color_index: Color_Index) {
+    range: Color_Range = ---;
+    range.start = 0;
+    range.end   = 0;
+    range.color_index = color_index;
+    range.true_color  = true_color;
+
+    if cmdx.colors.count {
+        // If there is already a color set up, then this color starts just after the previous one
+        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+        range.start = color_head.end;
+        range.end   = color_head.end;
+        array_add(*cmdx.colors, range);
+    } else {
+        // If this is the first color to be set, it obviously starts at the beginning of the backlog
+        array_add(*cmdx.colors, range);
+    }
+}
+
 set_color :: (cmdx: *CmdX, color: Color) {
+    range: Color_Range;
+    range.color_index = -1;
+    range.true_color = color;
+
     if cmdx.colors.count == 0 {
-        array_add(*cmdx.colors, .{ 0, -1, color });
+        array_add(*cmdx.colors, range);
         return;
     }
     
     color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
     if color_head.color_index != -1 || !compare_colors(color_head.true_color, color) {
         line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-        color_head.end = line_head.end;
-        array_add(*cmdx.colors, .{ 0, -1, color });
+        range.end = line_head.end;
+        array_add(*cmdx.colors, range);
     }
 }
 
 set_themed_color :: (cmdx: *CmdX, index: Color_Index) {
+    range: Color_Range;
+    range.color_index = index;
+
     if cmdx.colors.count == 0 {
-        array_add(*cmdx.colors, .{ 0, index, .{} });
+        array_add(*cmdx.colors, range);
         return;
     }
 
     color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
     if color_head.color_index != index  {
         line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-        color_head.end = line_head.end;
-        array_add(*cmdx.colors, .{ 0, index, .{} });
+        range.end = line_head.end;
+        array_add(*cmdx.colors, range);
     }
 }
 
@@ -279,6 +381,30 @@ update_window_name :: (cmdx: *CmdX) {
     set_window_name(*cmdx.window, window_name);
 }
 
+draw_backlog_split :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64) -> s64, s64 {   
+    for cursor := start; cursor < end; ++cursor {
+        character := cmdx.backlog[cursor];
+        
+        while cursor >= color_range.end && ~color_range_index + 1 < cmdx.colors.count {
+            // The renderer right now only supports one color per draw call
+            flush_font_buffer(*cmdx.renderer);
+
+            // Increase the current color range
+            ~color_range_index += 1;
+            ~color_range = array_get_value(*cmdx.colors, ~color_range_index);
+
+            // Set the actual foreground color. If the color range has a 
+            if color_range.color_index != -1 cmdx.renderer.foreground_color = cmdx.active_theme.colors[color_range.color_index];
+            else cmdx.renderer.foreground_color = color_range.true_color;
+        }
+        
+        cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
+        if cursor + 1 < end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
+    }
+
+    return cursor_x, cursor_y;
+}
+
 one_cmdx_frame :: (cmdx: *CmdX) {
     frame_start := get_hardware_time();
     
@@ -310,12 +436,14 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
             // Print the complete input line into the backlog
+/* @nochecking
             set_themed_color(cmdx, .Accent);
             add_text(cmdx, cmdx.current_directory);
             add_text(cmdx, "> ");    
             set_themed_color(cmdx, .Default);
             add_line(cmdx, input_string);
-            // Actually launch the command
+*/  
+          // Actually launch the command
             handle_input_string(cmdx, input_string);
         }
     }
@@ -343,29 +471,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     color_range_index: s64 = -1;
     color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
-    
+
     while line_index < max_line_index {
         line := array_get(*cmdx.lines, line_index);
-        for cursor := line.start; cursor < line.end; ++cursor {
-            character := cmdx.backlog[cursor];
+        cursor_x, cursor_y = draw_backlog_split(cmdx, line.start, line.end, *color_range_index, *color_range, cursor_x, cursor_y); // @nocheckin refactor draw_backlog_split into this again, as it was a disaster
             
-            while cursor >= color_range.end && color_range_index + 1 < cmdx.colors.count {
-                // The renderer right now only supports one color per draw call
-                flush_font_buffer(*cmdx.renderer);
-
-                // Increase the current color range
-                ++color_range_index;
-                color_range = array_get_value(*cmdx.colors, color_range_index);
-
-                // Set the actual foreground color. If the color range has a 
-                if color_range.color_index != -1 cmdx.renderer.foreground_color = cmdx.active_theme.colors[color_range.color_index];
-                else cmdx.renderer.foreground_color = color_range.true_color;
-            }
-            
-            cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-            if cursor + 1 < line.end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
-        }
-        
         if line_index + 1 < cmdx.lines.count {
             // If there is another line after this, reset the cursor position. If there isnt, then
             // leave the cursor as is so that the actual text input can be rendered at the correct position
@@ -460,8 +570,12 @@ main :: () -> s32 {
     
     // Display the welcome message
     clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
-    welcome_screen(*cmdx, run_tree);
-
+//    welcome_scren(*cmdx, run_tree); @nocheckin
+    debug(*cmdx);
+    debug(*cmdx);
+    debug(*cmdx);
+    debug(*cmdx);
+    
     // Main loop until the window gets closed
     while !cmdx.window.should_close {
         one_cmdx_frame(*cmdx);

@@ -258,9 +258,12 @@ debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
 }
 
 debug :: (cmdx: *CmdX) {
+/* @nocheckin
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
+*/
+    add_line(cmdx, "Hello World, these are 40 characters.!!!");
 }
 
 ls :: (cmdx: *CmdX) {
