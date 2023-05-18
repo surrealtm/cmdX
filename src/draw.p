@@ -73,6 +73,8 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
 }
 
 flush_font_buffer :: (renderer: *Renderer) {
+    if renderer.font_glyph_count == 0 return;
+
     set_shader(*renderer.font_shader);
     set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix);
     set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{ xx renderer.background_color.r / 255.0,

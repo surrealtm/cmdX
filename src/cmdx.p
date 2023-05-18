@@ -300,25 +300,26 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // The amount of visible lines on screen this frame
     visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
-    if cmdx.scroll_offset <= visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height;
+    if cmdx.scroll_offset <= visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
     
     // The amount of lines that fully fit into the screen space, without having to cut off the upper part of the line
-    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count);
+    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count) - 1;
     
     // Handle scrolling with the mouse wheel
-    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns, drawn_line_count - 1, cmdx.lines.count);
+    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns, drawn_line_count - 1, cmdx.lines.count - 1);
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.window.height - (drawn_line_count - 1) * cmdx.active_theme.font.line_height - 5;
+    cursor_y: s32 = cmdx.window.height - (drawn_line_count) * cmdx.active_theme.font.line_height - 5;
     
     // Draw all messages in the backlog
     line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
+    max_line_index: s64 = line_index + drawn_line_count;
     
     color_range_index: s64 = -1;
     color_range: Color_Range; // This will be overwritten by the first character written from the backlog, since the cursor will always be >= than the end of this range, which is 0
     
-    while line_index < cmdx.lines.count { // @Cleanup only actually render drawn_line_count lines, this should currently build up wayyy to many lines to render...
+    while line_index < max_line_index {
         line := array_get(*cmdx.lines, line_index);
         for cursor := line.start; cursor < line.end; ++cursor {
             character := cmdx.backlog[cursor];
@@ -342,7 +343,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Draw the text input
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, 5, cmdx.window.height - 5);
     
     // Reset the frame arena
     reset_allocator(*cmdx.frame_allocator);
