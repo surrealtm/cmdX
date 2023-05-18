@@ -26,6 +26,8 @@
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
+ARIAL           :: "C:/windows/fonts/arial.ttf";
+DEFAULT_FONT    :: COURIER_NEW;
 
 REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
@@ -33,6 +35,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 BACKLOG_SIZE :: 8129;
+SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
 Theme :: struct {
     name: string;
@@ -300,13 +303,13 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // The amount of visible lines on screen this frame
     visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
-    if cmdx.scroll_offset <= visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
+    if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
     
     // The amount of lines that fully fit into the screen space, without having to cut off the upper part of the line
     drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count) - 1;
     
     // Handle scrolling with the mouse wheel
-    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns, drawn_line_count - 1, cmdx.lines.count - 1);
+    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
@@ -410,10 +413,10 @@ main :: () -> s32 {
     create_renderer(*cmdx.renderer);
     
     // Create the builtin themes
-    create_theme(*cmdx, "light",   COURIER_NEW, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
-    create_theme(*cmdx, "dark",    COURIER_NEW, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
-    create_theme(*cmdx, "blue",    COURIER_NEW, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
-    create_theme(*cmdx, "monokai", COURIER_NEW, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
+    create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
+    create_theme(*cmdx, "dark",    DEFAULT_FONT, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
+    create_theme(*cmdx, "blue",    DEFAULT_FONT, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
+    create_theme(*cmdx, "monokai", DEFAULT_FONT, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
     
     // After everything has been loaded, actually show the window. This will prevent a small time 
