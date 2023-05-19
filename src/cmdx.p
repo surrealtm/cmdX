@@ -284,8 +284,7 @@ prepare_viewport :: (cmdx: *CmdX) {
 }
 
 close_viewport :: (cmdx: *CmdX) {
-    // When the last command finishes, append another new line for more reading clarity
-    new_line(cmdx);
+    new_line(cmdx); // When the last command finishes, append another new line for more reading clarity
 }
 
 
@@ -316,6 +315,10 @@ add_text :: (cmdx: *CmdX, text: string) {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
     
     if line_head.end + text.count >= BACKLOG_SIZE {
+        // The remaining backlog space is not enough to fit the complete text in it. The line needs to be
+        // wrapped around the backlog and restart at the beginning of the backlog ring buffer.
+        // The first part is the split of the text that still fits in the end of the backbuffer, then second
+        // part gets wrapped around to the beginning.
         first_part_length := BACKLOG_SIZE - line_head.end;
         second_part_length := text.count - first_part_length;
 
@@ -328,8 +331,9 @@ add_text :: (cmdx: *CmdX, text: string) {
         line_head.wrapped = true;
         line_head.end = second_part_length;
 
+        // The active color range also needs to be wrapped around the backlog.
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-        if color_head.source.wrapped color_head.source.start = line_head.start;
+        if color_head.source.wrapped color_head.source.start = line_head.start; // Not totally sure if this line here is actually necessary... Need to test it.
         color_head.source.end = second_part_length;
         color_head.source.wrapped = true;
     } else {
@@ -515,7 +519,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     // Query the first line in the backlog, and the last line to be rendered
     first_line := array_get(*cmdx.lines, 0);
-    line_head := array_get(*cmdx.lines, max_line_index);
+    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
 
     // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
     // the input string will be appended to the last line, so we can actually fit one more line into the screen.
@@ -527,7 +531,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.window.height - (drawn_line_count) * cmdx.active_theme.font.line_height - 5;
+    cursor_y: s32 = cmdx.window.height - drawn_line_count * cmdx.active_theme.font.line_height - 5;
 
     // Set up the color ranges
     color_range_index: s64 = 0;
@@ -556,13 +560,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             cursor_x = 5;
         }
             
-        ++line_index;        
+        ++line_index;
     }        
-    
-    // Draw the text input. If no process is currently running, always render the text input at the bottom
-    // of the screen, so the user can see his input even if they are scrolling.
-    if !cmdx.child_process_running cursor_y = cmdx.window.height - 5;
-    
+
     prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
     
@@ -729,6 +729,7 @@ main :: () -> s32 {
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);
 
+    // Release all memory.
     free_memory_pool(*cmdx.global_memory_pool);
     free_memory_arena(*cmdx.global_memory_arena);
     free_memory_arena(*cmdx.frame_memory_arena);
