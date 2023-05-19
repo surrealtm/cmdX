@@ -74,6 +74,11 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
+set_foreground_color :: (renderer: *Renderer, color: Color) {
+    if !compare_colors(renderer.foreground_color, color) flush_font_buffer(renderer);
+    renderer.foreground_color = color;
+}
+
 flush_font_buffer :: (renderer: *Renderer) {
     if renderer.font_glyph_count == 0 return;
 
