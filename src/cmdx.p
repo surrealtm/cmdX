@@ -36,7 +36,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 BACKLOG_SIZE :: 8129;
-HISTORY_SIZE :: 2;
+HISTORY_SIZE :: 4;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
 Color_Index :: enum {
@@ -81,6 +81,7 @@ CmdX :: struct {
     // Text Input
     text_input: Text_Input;
     history: [..]string;
+    history_index: s32 = -1; // -1 means no history is used
     
     // Backlog
     backlog: [BACKLOG_SIZE]s8 = ---;
@@ -434,17 +435,17 @@ draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64
     return cursor_x, cursor_y;
 }
 
-add_input_history :: (cmdx: *CmdX, input_string: string) {
+add_history :: (cmdx: *CmdX, input_string: string) {
     // Make space for the new input string if that is required
     if cmdx.history.count == HISTORY_SIZE {
-        head := array_get_value(*cmdx.history, 0);
+        head := array_get_value(*cmdx.history, cmdx.history.count - 1);
         free_string(head, *cmdx.global_allocator);
-        array_remove(*cmdx.history, 0);
+        array_remove(*cmdx.history, cmdx.history.count - 1);
     }
 
     // Since the input_string is just a string_view over the text input's buffer,
     // we need to copy it here.
-    array_add(*cmdx.history, copy_string(input_string, *cmdx.global_allocator));
+    array_add_at(*cmdx.history, 0, copy_string(input_string, *cmdx.global_allocator));
 }
 
 one_cmdx_frame :: (cmdx: *CmdX) {
@@ -460,8 +461,25 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
 
     // Go through the history if the arrow keys have been used
+    if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
+        if cmdx.history_index + 1 < cmdx.history.count {
+            ++cmdx.history_index;
+            set_text_input_string(*cmdx.text_input, array_get_value(*cmdx.history, cmdx.history_index));
+        }
+
+        cmdx.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+    }
+
     if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
-        debug_print_history(cmdx, "one_cmdx_frame");
+        if cmdx.history_index >= 1 {
+            --cmdx.history_index;
+            set_text_input_string(*cmdx.text_input, array_get_value(*cmdx.history, cmdx.history_index));
+        } else {
+            cmdx.history_index = -1;
+            set_text_input_string(*cmdx.text_input, ""); 
+        }
+                                  
+        cmdx.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
     }
     
     // Check for potential control keys
@@ -483,9 +501,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             if cmdx.history.count {
                 // Only add the new input string to the history if it is not the exact same input
                 // as the previous
-                previous := array_get_value(*cmdx.history, cmdx.history.count - 1);
-                if !compare_strings(previous, input_string) add_input_history(cmdx, input_string);
-            } else add_input_history(cmdx, input_string);
+                previous := array_get_value(*cmdx.history, 0);
+                if !compare_strings(previous, input_string) add_history(cmdx, input_string);
+            } else add_history(cmdx, input_string);
             
             // Print the complete input line into the backlog
             set_themed_color(cmdx, .Accent);
@@ -498,6 +516,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         // Reset the text input
+        cmdx.history_index = -1;
         clear_text_input(*cmdx.text_input);
         activate_text_input(*cmdx.text_input);
     }
