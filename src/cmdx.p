@@ -36,6 +36,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 BACKLOG_SIZE :: 8129;
+HISTORY_SIZE :: 2;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
 Color_Index :: enum {
@@ -76,9 +77,12 @@ CmdX :: struct {
     // Output
     window: Window = ---;
     renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
-    
-    // Text
+
+    // Text Input
     text_input: Text_Input;
+    history: [..]string;
+    
+    // Backlog
     backlog: [BACKLOG_SIZE]s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Source_Range;
@@ -129,6 +133,17 @@ debug_print_colors :: (cmdx: *CmdX, location: string) {
     }
 
     print("=== COLORS (%) ===\n", location);
+}
+
+debug_print_history :: (cmdx: *CmdX, location: string) {
+    print("=== HISTORY (%) ===\n", location);
+
+    for i := 0; i < cmdx.history.count; ++i {
+        string := array_get_value(*cmdx.history, i);
+        print("H %: '%'\n", i, string);
+    }
+    
+    print("=== HISTORY (%) ===\n", location);
 }
 
 
@@ -415,6 +430,19 @@ draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64
     return cursor_x, cursor_y;
 }
 
+add_input_history :: (cmdx: *CmdX, input_string: string) {
+    // Make space for the new input string if that is required
+    if cmdx.history.count == HISTORY_SIZE {
+        head := array_get_value(*cmdx.history, 0);
+        free_string(head, *cmdx.global_allocator);
+        array_remove(*cmdx.history, 0);
+    }
+
+    // Since the input_string is just a string_view over the text input's buffer,
+    // we need to copy it here.
+    array_add(*cmdx.history, copy_string(input_string, *cmdx.global_allocator));
+}
+
 one_cmdx_frame :: (cmdx: *CmdX) {
     frame_start := get_hardware_time();
     
@@ -426,6 +454,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
+
+    // Go through the history if the arrow keys have been used
+    if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
+        debug_print_history(cmdx, "one_cmdx_frame");
+    }
     
     // Check for potential control keys
     if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
@@ -435,16 +468,21 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Handle input for this frame
     if cmdx.text_input.entered {
-        // The user has entered a string, add that to the backlog, clear the input and actually run
-        // the command.
+        // input_string is only a wrapper over the text input's internal buffer, so do not free that
+        // until after the command has been handled
         input_string := get_string_view_from_text_input(*cmdx.text_input);
-        clear_text_input(*cmdx.text_input);
-        activate_text_input(*cmdx.text_input);
         
         if cmdx.child_process_running {
             // Send the input to the child process
             win32_write_to_child_process(cmdx, input_string);
         } else if input_string.count {
+            if cmdx.history.count {
+                // Only add the new input string to the history if it is not the exact same input
+                // as the previous
+                previous := array_get_value(*cmdx.history, cmdx.history.count - 1);
+                if !compare_strings(previous, input_string) add_input_history(cmdx, input_string);
+            } else add_input_history(cmdx, input_string);
+            
             // Print the complete input line into the backlog
             set_themed_color(cmdx, .Accent);
             add_text(cmdx, get_prefix_string(cmdx, *cmdx.frame_memory_arena));
@@ -454,6 +492,10 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             // Actually launch the command
             handle_input_string(cmdx, input_string);
         }
+
+        // Reset the text input
+        clear_text_input(*cmdx.text_input);
+        activate_text_input(*cmdx.text_input);
     }
     
     // The amount of visible lines on screen this frame
@@ -491,7 +533,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     color_range_index: s64 = 0;
     color_range: Color_Range = array_get_value(*cmdx.colors, color_range_index);
     activate_color_range(cmdx, *color_range);
-        
+
+    // Draw all visible lines
     while line_index <= max_line_index {
         line := array_get(*cmdx.lines, line_index);
 
@@ -631,6 +674,7 @@ main :: () -> s32 {
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
 
     // Link the allocators to all important data structures
+    cmdx.history.allocator  = *cmdx.global_allocator;
     cmdx.colors.allocator   = *cmdx.global_allocator;
     cmdx.lines.allocator    = *cmdx.global_allocator;
     cmdx.commands.allocator = *cmdx.global_allocator;
