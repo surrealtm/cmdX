@@ -65,7 +65,7 @@ win32_set_color_for_code :: (cmdx: *CmdX, code: u32) {
     case; actually_change_color = false;
     }
 
-    if actually_change_color set_color(cmdx, color);
+    if actually_change_color set_true_color(cmdx, color);
 }
 
 win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
