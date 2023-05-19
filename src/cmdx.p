@@ -147,7 +147,6 @@ random_line :: (cmdx: *CmdX) {
 
 /* --- Source Range --- */
 
-
 // Returns true if both ranges share at least one character in the backlog
 source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     overlap := false;
@@ -423,7 +422,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     update_window(*cmdx.window);
     prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
     
-    cmdx.text_input.active = cmdx.window.focused;
+    cmdx.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
     
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
@@ -461,37 +460,39 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
     if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
 
-    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    line_head_is_empty: bool = line_head.end == line_head.start;
-
     // The actual amount of lines that will be rendered. If the current line head is empty, don't consider it
     // to be an actual line yet, and skip drawing it.
-    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count, visible_line_count) - line_head_is_empty;
+    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count - 1, visible_line_count - 1);
     
     // Handle scrolling with the mouse wheel
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
     
+    // Set up the first line to be rendered, as well as the highest line index to be rendered
+    line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
+    max_line_index: s64 = line_index + drawn_line_count - 1;
+
+    // Query the first line in the backlog, and the last line to be rendered
+    first_line := array_get(*cmdx.lines, 0);
+    line_head := array_get(*cmdx.lines, max_line_index);
+
+    // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
+    // the input string will be appended to the last line, so we can actually fit one more line into the screen.
+    if line_head.start != line_head.end ++max_line_index;
+    
+    // If the wrapped line is not currently in view, that information is still important for the color range
+    // skipping, since the cursor needs to know whether it has technically wrapped before.
+    wrapped_before := line_head.start < first_line.start; 
+    
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
     cursor_y: s32 = cmdx.window.height - (drawn_line_count) * cmdx.active_theme.font.line_height - 5;
-    
-    // Set up the first line to be rendered, as well as the highest line index to be rendered
-    line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
-    max_line_index: s64 = line_index + drawn_line_count;
 
     // Set up the color ranges
     color_range_index: s64 = 0;
     color_range: Color_Range = array_get_value(*cmdx.colors, color_range_index);
-
-    // If the wrapped line is not currently in view, that information is still important for the color range
-    // skipping, since the cursor needs to know whether it has technically wrapped before.
-    first_line := array_get(*cmdx.lines, 0);
-    current_line := array_get(*cmdx.lines, line_index);
-    wrapped_before := current_line.start < first_line.start; 
-    
     activate_color_range(cmdx, *color_range);
-    
-    while line_index < max_line_index {
+        
+    while line_index <= max_line_index {
         line := array_get(*cmdx.lines, line_index);
 
         if line.wrapped {
