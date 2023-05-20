@@ -37,7 +37,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 BACKLOG_SIZE :: 8129;
-HISTORY_SIZE :: 4;
+HISTORY_SIZE :: 64;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
 Color_Index :: enum {
@@ -724,7 +724,7 @@ update_window_name :: (cmdx: *CmdX) {
 
 /* --- MAIN --- */
 
-main :: () -> s32 {
+cmdx :: () -> s32 {
     // Set up memory management
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 1 * GIGABYTES);
@@ -763,6 +763,10 @@ main :: () -> s32 {
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     cmdx.render_frame = true; // Render the first frame
+
+    // Now set the taskbar for the window, cause win32 sucks some ass.
+    success := set_window_icon(*cmdx.window, "data/cmdx.ico");
+    print("success: %\n", success);
     
     // Create the builtin themes
     create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
@@ -797,4 +801,19 @@ main :: () -> s32 {
     free_memory_arena(*cmdx.frame_memory_arena);
     
     return 0;
+}
+
+/* Depending on the selected subsystem, one of these will be exported in the object file */
+
+/*
+The command to compile this program is:
+  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
+*/
+
+main :: () -> s32 {
+    return cmdx();    
+}
+
+WinMain :: () -> s32 {
+    return cmdx();
 }
