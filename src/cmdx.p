@@ -9,6 +9,7 @@
 #load "gl_context.p";
 #load "gl_layer.p";
 #load "string_builder.p";
+#load "hash_table.p";
 #load "math/v2f.p";
 #load "math/v3f.p";
 #load "math/v4f.p";
@@ -77,7 +78,8 @@ CmdX :: struct {
     // Output
     window: Window = ---;
     renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
-
+    render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
+    
     // Text Input
     text_input: Text_Input;
     history: [..]string;
@@ -260,6 +262,10 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
 
 /* --- Backlog API --- */
 
+render_next_frame :: (cmdx: *CmdX) {
+    cmdx.render_frame = true;
+}
+
 get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
     return line_head.end - line_head.start; // The current cursor position is considered to be at the end of the current line
@@ -310,6 +316,8 @@ new_line :: (cmdx: *CmdX) {
     
     ++cmdx.viewport_height;
     cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+
+    render_next_frame(cmdx);
 }
 
 add_text :: (cmdx: *CmdX, text: string) {
@@ -348,6 +356,8 @@ add_text :: (cmdx: *CmdX, text: string) {
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
         color_head.source.end += text.count;
     }
+
+    render_next_frame(cmdx);
 }
 
 add_character :: (cmdx: *CmdX, character: s8) {
@@ -451,15 +461,18 @@ add_history :: (cmdx: *CmdX, input_string: string) {
 one_cmdx_frame :: (cmdx: *CmdX) {
     frame_start := get_hardware_time();
     
-    // Prepare the next frame
+    // Poll window updates
     update_window(*cmdx.window);
-    prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
-    
+    if cmdx.window.resized render_next_frame(cmdx);
+
+    if cmdx.window.focused && !cmdx.text_input.active render_next_frame(cmdx);
     cmdx.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
     
     // Update the terminal input
     for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
 
+    if cmdx.window.text_input_event_count render_next_frame(cmdx);
+    
     // Go through the history if the arrow keys have been used
     if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
         if cmdx.history_index + 1 < cmdx.history.count {
@@ -468,6 +481,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         cmdx.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        render_next_frame(cmdx);
     }
 
     if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
@@ -480,7 +494,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
                                   
         cmdx.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        render_next_frame(cmdx);
     }
+
+    // Update the internal text input rendering state
+    text_until_cursor := get_string_view_until_cursor_from_text_input(*cmdx.text_input);
+    text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.active_theme.font, text_until_cursor);
+    cursor_alpha_previous := cmdx.text_input.cursor_alpha;
+    set_text_input_target_position(*cmdx.text_input, xx text_until_cursor_width);
+    update_text_input_rendering_data(*cmdx.text_input);
+    if cursor_alpha_previous != cmdx.text_input.cursor_alpha render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+    
     
     // Check for potential control keys
     if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
@@ -557,40 +581,48 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     color_range: Color_Range = array_get_value(*cmdx.colors, color_range_index);
     activate_color_range(cmdx, *color_range);
 
-    // Draw all visible lines
-    while line_index <= max_line_index {
-        line := array_get(*cmdx.lines, line_index);
+    if cmdx.render_frame {
+        // Actually prepare the renderer now if we want to render this frame.
+        prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
+        
+        // Draw all visible lines
+        while line_index <= max_line_index {
+            line := array_get(*cmdx.lines, line_index);
 
-        if line.wrapped {
-            // If this line wraps, then the line actually contains two parts. The first goes from the start
-            // until the end of the backlog, the second part starts at the beginning of the backlog and goes
-            // until the end of the line. It is easier for draw_backlog_split to do it like this.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
-            wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-            cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
-        } else
-            cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            if line.wrapped {
+                // If this line wraps, then the line actually contains two parts. The first goes from the start
+                // until the end of the backlog, the second part starts at the beginning of the backlog and goes
+                // until the end of the line. It is easier for draw_backlog_split to do it like this.
+                cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+                wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
+                cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
+                cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            } else
+                cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             
-        if line_index + 1 < cmdx.lines.count {
-            // If there is another line after this, reset the cursor position. If there isnt, then
-            // leave the cursor as is so that the actual text input can be rendered at the correct position
-            cursor_y += cmdx.active_theme.font.line_height;
-            cursor_x = 5;
-        }
+            if line_index + 1 < cmdx.lines.count {
+                // If there is another line after this, reset the cursor position. If there isnt, then
+                // leave the cursor as is so that the actual text input can be rendered at the correct position
+                cursor_y += cmdx.active_theme.font.line_height;
+                cursor_x = 5;
+            }
             
-        ++line_index;
-    }        
+            ++line_index;
+        }        
 
-    prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
-    
+        // Render the text input at the end of the backlog
+        prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
+        draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
+
+        // Finish the frame, sleep until the next one
+        swap_gl_buffers(*cmdx.window);
+
+        cmdx.render_frame = false;
+    }
+        
     // Reset the frame arena
     reset_allocator(*cmdx.frame_allocator);
     
-    // Finish the frame, sleep until the next one
-    swap_gl_buffers(*cmdx.window);
-
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
     if active_frame_time < REQUESTED_FRAME_TIME_MILLISECONDS - 1 {
@@ -720,6 +752,7 @@ main :: () -> s32 {
     create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
+    cmdx.render_frame = true; // Render the first frame
     
     // Create the builtin themes
     create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });

@@ -183,13 +183,7 @@ draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, bord
 draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
-    prefix_string_width := query_text_width(*theme.font, prefix_string);
-    
-    // Update the internal text input rendering state
-    text_until_cursor := get_string_view_until_cursor_from_text_input(input);
-    text_until_cursor_width, text_until_cursor_height := query_text_size(*theme.font, text_until_cursor);
-    set_text_input_target_position(input, xx text_until_cursor_width);
-    update_text_input_rendering_data(input);
+    prefix_string_width := query_text_width(*theme.font, prefix_string);    
     
     // Render the input string
     draw_text(renderer, theme, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default]);
