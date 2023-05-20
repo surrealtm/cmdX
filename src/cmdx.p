@@ -55,8 +55,8 @@ Theme :: struct {
 }
 
 Source_Range :: struct {
-    start: s64;
-    end: s64;
+    first: s64; // The index containing the first character of this range in the backlog
+    one_plus_last: s64; // One character past the last of this range in the backlog
     wrapped: bool;
 }
 
@@ -116,9 +116,9 @@ debug_print_lines :: (cmdx: *CmdX, location: string) {
 
     for i := 0; i < cmdx.lines.count; ++i {
         line := array_get(*cmdx.lines, i);
-        print("I %: % -> % ", i, line.start, line.end);
-        if line.wrapped print("     '%*%' (wrapped)", string_view(*cmdx.backlog[line.start], BACKLOG_SIZE - line.start), string_view(*cmdx.backlog[0], line.end)); 
-        else print("     '%'", string_view(*cmdx.backlog[line.start], line.end - line.start));
+        print("I %: % -> % ", i, line.first, line.one_plus_last);
+        if line.wrapped print("     '%*%' (wrapped)", string_view(*cmdx.backlog[line.first], BACKLOG_SIZE - line.first), string_view(*cmdx.backlog[0], line.one_plus_last)); 
+        else print("     '%'", string_view(*cmdx.backlog[line.first], line.one_plus_last - line.first));
         print("\n");
     }
 
@@ -130,7 +130,7 @@ debug_print_colors :: (cmdx: *CmdX, location: string) {
 
     for i := 0; i < cmdx.colors.count; ++i {
         range := array_get(*cmdx.colors, i);
-        print("C %: % -> % (% | %, %, %)", i, range.source.start, range.source.end, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
+        print("C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
         if range.source.wrapped print(" (wrapped)");
         print("\n");
     }
@@ -158,7 +158,7 @@ random_line :: (cmdx: *CmdX) {
     color.a = 255;
 
     set_true_color(cmdx, color);
-    add_text(cmdx, "Hello World, these are 40 Characters.!!!");
+    add_line(cmdx, "Hello World, these are 40 Characters.!!!");
 }
 
 
@@ -172,11 +172,11 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     if lhs.wrapped && rhs.wrapped {
         overlap = true;
     } else if lhs.wrapped {
-        overlap = lhs.start <= rhs.end || lhs.end > rhs.start;
+        overlap = lhs.first <= rhs.one_plus_last || lhs.one_plus_last > rhs.first;
     } else if rhs.wrapped {
-        overlap = lhs.start <= rhs.end || lhs.end > rhs.start;
+        overlap = lhs.first <= rhs.one_plus_last || lhs.one_plus_last > rhs.first;
     } else {
-        overlap = lhs.start <= rhs.end && lhs.end > rhs.start;
+        overlap = lhs.first <= rhs.one_plus_last && lhs.one_plus_last > rhs.first;
     }
 
     return overlap;
@@ -186,16 +186,20 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
 // in lhs that is not also owned by rhs.
 source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     enclosed := false;
-
+    
     if lhs.wrapped && rhs.wrapped {
-        enclosed = lhs.start >= rhs.start && lhs.end <= rhs.end;
+        enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     } else if lhs.wrapped {
-        enclosed = rhs.start == 0 && rhs.end == BACKLOG_SIZE - 1;
+        enclosed = rhs.first == 0 && rhs.one_plus_last == BACKLOG_SIZE - 1; // TODO: Is -1 correct?
     } else if rhs.wrapped {
-        enclosed = lhs.start >= rhs.start && lhs.end < BACKLOG_SIZE;
+        // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
+        // of [0,rhs.one_plus_last]. It should also detect the edge case where lhs is an
+        // empty range just at the edge of rhs.one_plus_last (not enclosed).
+        // |--->       -->|
+        // | ->           |
+        enclosed = lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last;
     } else {
-        enclosed = lhs.start >= rhs.start && lhs.start < rhs.end &&
-            lhs.end > rhs.start && lhs.end <= rhs.end;
+        enclosed = lhs.first >= rhs.first && lhs.first < rhs.one_plus_last && lhs.one_plus_last > rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     }
 
     return enclosed;
@@ -204,9 +208,9 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
 // Returns true if the cursor has "passed" the source range, used for determining whether
 // a color range should be skipped.
 cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -> bool {
-    if !range.wrapped && cursor > range.start && cursor >= range.end return true;
-    if !range.wrapped && wrapped_before && cursor < range.start return true;
-    if range.wrapped && wrapped_before && cursor >= range.end return true;
+    if !range.wrapped && cursor > range.first && cursor >= range.one_plus_last return true;
+    if !range.wrapped && wrapped_before && cursor < range.first return true;
+    if range.wrapped && wrapped_before && cursor >= range.one_plus_last return true;
     return false;
 }
 
@@ -215,16 +219,18 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // wrong now). If a color range partly covered the removed space, but also covers other space,
 // that color range should be adapted to not cover the removed space.
 remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *Color_Range {
-    while cmdx.colors.count {
+    while cmdx.colors.count - 1 {
         color_range := array_get(*cmdx.colors, 0);
 
         if source_range_enclosed(color_range.source, line_range) {
-            // Color range is completely useless
+            // Color range is not used in any remaining line, so it should be removed. This should only
+            // happen if it is not the last color range in the list, since the backlog always requires
+            // at least one color for rendering.
             array_remove(*cmdx.colors, 0);
         } else if source_ranges_overlap(color_range.source, line_range) {
             // Remove the removed space from the color range
-            color_range.source.wrapped = color_range.source.end < line_range.end;
-            color_range.source.start   = line_range.end;
+            color_range.source.wrapped = color_range.source.one_plus_last < line_range.one_plus_last;
+            color_range.source.first   = line_range.one_plus_last;
             break;
         } else break;
     }
@@ -238,15 +244,15 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *C
 // any color ranges that lived in the now freed-up space.
 remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
-    total_removed_range.start = -1;
+    total_removed_range.first = -1;
     
     while cmdx.lines.count - 1 {
         existing_line := array_get_value(*cmdx.lines, 0);
         
         if source_ranges_overlap(existing_line, new_line) {
-            if total_removed_range.start == -1 total_removed_range.start = existing_line.start;
-            total_removed_range.end     = existing_line.end;
-            total_removed_range.wrapped = existing_line.wrapped;
+            if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
+            total_removed_range.one_plus_last = existing_line.one_plus_last;
+            total_removed_range.wrapped       = existing_line.wrapped;
             array_remove(*cmdx.lines, 0);
             continue;
         }
@@ -254,8 +260,8 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
         break;
     }
 
-    if total_removed_range.start != -1 remove_overlapping_color_ranges(cmdx, total_removed_range);
-
+    if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, total_removed_range);
+    
     return array_get(*cmdx.lines, cmdx.lines.count - 1);
 }
 
@@ -268,17 +274,17 @@ render_next_frame :: (cmdx: *CmdX) {
 
 get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    return line_head.end - line_head.start; // The current cursor position is considered to be at the end of the current line
+    return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
 
 set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
     // Remove part of the backlog line
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    line_head.end = line_head.start + x;
+    line_head.one_plus_last = line_head.first + x;
     
     // If part of the backlog just got erased, the end of the color range must be updated too.
     color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-    color_head.source.end = line_head.start + x;
+    color_head.source.one_plus_last = line_head.first + x;
 }
 
 set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
@@ -308,10 +314,11 @@ new_line :: (cmdx: *CmdX) {
     
     if cmdx.lines.count > 1 {
         // If there was a previous line, set the start of the new line in the backlog buffer to point 
-        // just after the previous line
+        // just after the previous line, but only if that previous line does not end on the actual
+        // backlog end, which would lead to unfortunate behaviour later on.
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
-        new_line_head.start = old_line_head.end;
-        new_line_head.end   = new_line_head.start;
+        new_line_head.first = old_line_head.one_plus_last;
+        new_line_head.one_plus_last = new_line_head.first;
     }
     
     ++cmdx.viewport_height;
@@ -323,38 +330,38 @@ new_line :: (cmdx: *CmdX) {
 add_text :: (cmdx: *CmdX, text: string) {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
     
-    if line_head.end + text.count >= BACKLOG_SIZE {
+    if line_head.one_plus_last + text.count >= BACKLOG_SIZE {
         // The remaining backlog space is not enough to fit the complete text in it. The line needs to be
         // wrapped around the backlog and restart at the beginning of the backlog ring buffer.
         // The first part is the split of the text that still fits in the end of the backbuffer, then second
         // part gets wrapped around to the beginning.
-        first_part_length := BACKLOG_SIZE - line_head.end;
-        second_part_length := text.count - first_part_length;
+        first_part_length := BACKLOG_SIZE - line_head.one_plus_last;
+        second_part_length := min(text.count - first_part_length, BACKLOG_SIZE - first_part_length); // If the line is too long to fit into the actual backlog (which in practice should never really happen...), then just cut the line off
 
         second_source_range := Source_Range.{ 0, second_part_length, false };
         line_head = remove_overlapping_lines(cmdx, second_source_range);
 
-        copy_memory(xx *cmdx.backlog[line_head.end], xx *text.data[0], first_part_length);
+        copy_memory(xx *cmdx.backlog[line_head.one_plus_last], xx *text.data[0], first_part_length);
         copy_memory(xx *cmdx.backlog[0], xx *text.data[first_part_length], second_part_length);
 
         line_head.wrapped = true;
-        line_head.end = second_part_length;
+        line_head.one_plus_last = second_part_length;
 
         // The active color range also needs to be wrapped around the backlog.
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-        if color_head.source.wrapped color_head.source.start = line_head.start; // Not totally sure if this line here is actually necessary... Need to test it.
-        color_head.source.end = second_part_length;
+        if color_head.source.wrapped color_head.source.first = line_head.first; // Not totally sure if this line here is actually necessary... Need to test it.
+        color_head.source.one_plus_last = second_part_length;
         color_head.source.wrapped = true;
     } else {
         // If the line still fits into the backlog, just append it to the current head.
-        new_source_range := Source_Range.{ line_head.end, line_head.end + text.count, false };
+        new_source_range := Source_Range.{ line_head.one_plus_last, line_head.one_plus_last + text.count, false };
         line_head = remove_overlapping_lines(cmdx, new_source_range);
 
-        copy_memory(xx *cmdx.backlog[line_head.end], xx text.data, text.count);
-        line_head.end += text.count;
+        copy_memory(xx *cmdx.backlog[line_head.one_plus_last], xx text.data, text.count);
+        line_head.one_plus_last += text.count;
         
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-        color_head.source.end += text.count;
+        color_head.source.one_plus_last += text.count;
     }
 
     render_next_frame(cmdx);
@@ -390,7 +397,7 @@ set_color_internal :: (cmdx: *CmdX, true_color: Color, color_index: Color_Index)
     if cmdx.colors.count {
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
 
-        if color_head.source.start == color_head.source.end {
+        if color_head.source.first == color_head.source.one_plus_last && !color_head.source.wrapped {
             // If the previous color was not actually used in any source range, then just overwrite that
             // entry with the new data to save space.
             color_head.color_index = color_index;
@@ -398,7 +405,7 @@ set_color_internal :: (cmdx: *CmdX, true_color: Color, color_index: Color_Index)
         } else if color_head.color_index != color_index || !compare_colors(color_head.true_color, true_color) {
             // If this newly set color is different than the previous color (which is getting used), append
             // a new color range to the list
-            range: Color_Range = .{ .{ color_head.source.end, color_head.source.end, false }, color_index, true_color };
+            range: Color_Range = .{ .{ color_head.source.one_plus_last, color_head.source.one_plus_last, false }, color_index, true_color };
             array_add(*cmdx.colors, range);
         }
     } else {
@@ -562,16 +569,18 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     max_line_index: s64 = line_index + drawn_line_count - 1;
 
     // Query the first line in the backlog, and the last line to be rendered
-    first_line := array_get(*cmdx.lines, 0);
-    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-
+    line_tail  := array_get(*cmdx.lines, 0);
+    first_line := array_get(*cmdx.lines, line_index);
+    line_head  := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    
+    
     // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
     // the input string will be appended to the last line, so we can actually fit one more line into the screen.
-    if line_head.start != line_head.end ++max_line_index;
+    if line_head.first != line_head.one_plus_last ++max_line_index;
     
     // If the wrapped line is not currently in view, that information is still important for the color range
     // skipping, since the cursor needs to know whether it has technically wrapped before.
-    wrapped_before := line_head.start < first_line.start; 
+    wrapped_before := first_line.first < line_tail.first; 
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
@@ -594,12 +603,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
                 // If this line wraps, then the line actually contains two parts. The first goes from the start
                 // until the end of the backlog, the second part starts at the beginning of the backlog and goes
                 // until the end of the line. It is easier for draw_backlog_split to do it like this.
-                cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+                cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
                 wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
                 cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-                cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+                cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             } else
-                cursor_x, cursor_y = draw_backlog_line(cmdx, line.start, line.end, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+                cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             
             if line_index + 1 < cmdx.lines.count {
                 // If there is another line after this, reset the cursor position. If there isnt, then
@@ -636,6 +645,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 /* --- SETUP CODE --- */
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {    
+/*
     set_themed_color(cmdx, .Accent);
     add_line(cmdx, "    Welcome to cmdX.");
     set_themed_color(cmdx, .Default);
@@ -645,6 +655,11 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
+*/
+
+    random_line(cmdx);
+    random_line(cmdx);
+    random_line(cmdx);
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
