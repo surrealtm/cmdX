@@ -504,8 +504,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     set_text_input_target_position(*cmdx.text_input, xx text_until_cursor_width);
     update_text_input_rendering_data(*cmdx.text_input);
     if cursor_alpha_previous != cmdx.text_input.cursor_alpha render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
-    
-    
+   
     // Check for potential control keys
     if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
         // Terminate the current running process
@@ -554,7 +553,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     drawn_line_count: s32 = min(cast(s32) cmdx.lines.count - 1, visible_line_count - 1);
     
     // Handle scrolling with the mouse wheel
+    previous_scroll_offset := cmdx.scroll_offset;
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
+    if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
     
     // Set up the first line to be rendered, as well as the highest line index to be rendered
     line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
