@@ -645,7 +645,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 /* --- SETUP CODE --- */
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {    
-/*
     set_themed_color(cmdx, .Accent);
     add_line(cmdx, "    Welcome to cmdX.");
     set_themed_color(cmdx, .Default);
@@ -655,11 +654,6 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
-*/
-
-    random_line(cmdx);
-    random_line(cmdx);
-    random_line(cmdx);
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
