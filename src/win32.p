@@ -15,9 +15,9 @@ Win32 :: struct {
     child_closed_the_pipe: bool;
     
     // The actual pseudo console and the child handle.
-    pseudo_console_handle: HPCON = INVALID_HANDLE_VALUE;
-    child_process_handle: HANDLE = INVALID_HANDLE_VALUE;
-    job_handle: HANDLE = INVALID_HANDLE_VALUE;
+    pseudo_console_handle: HPCON  = INVALID_HANDLE_VALUE;
+    child_process_handle:  HANDLE = INVALID_HANDLE_VALUE;
+    job_handle:            HANDLE = INVALID_HANDLE_VALUE;
 }
 
 // This little helper struct is used for parsing Virtual Terminal Sequences in the output read from
@@ -237,6 +237,7 @@ win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
 }
 
 win32_terminate_child_process :: (cmdx: *CmdX) {
+    TerminateProcess(cmdx.win32.child_process_handle, 0);
     CloseHandle(cmdx.win32.job_handle);
     cmdx.win32.job_handle = INVALID_HANDLE_VALUE;
 }
@@ -257,23 +258,25 @@ win32_cleanup :: (cmdx: *CmdX, working_directory: string) {
     ClosePseudoConsole(cmdx.win32.pseudo_console_handle);
     cmdx.win32.pseudo_console_handle = INVALID_HANDLE_VALUE;
 
+    // Close the job object
+    CloseHandle(cmdx.win32.job_handle);
+    cmdx.win32.job_handle = INVALID_HANDLE_VALUE;
+    
     // Close the child process handles
     CloseHandle(cmdx.win32.child_process_handle);
     cmdx.win32.child_process_handle = INVALID_HANDLE_VALUE;
     
-    // Close the job handle
-    CloseHandle(cmdx.win32.job_handle);
-    cmdx.win32.job_handle = INVALID_HANDLE_VALUE;
-
     // Set the internal state to be child-less
     cmdx.child_process_running = false;
     update_active_process_name(cmdx, "");
-    set_working_directory(working_directory);        
+    set_working_directory(working_directory);
 }
 
 win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Save the actual working directory of cmdX to restore it later
     working_directory := get_working_directory();
+    defer free_string(working_directory, Default_Allocator); // get_working_directory() allocates a string
+    
     set_working_directory(cmdx.current_directory);
     
     // Set up c strings for file paths
@@ -323,7 +326,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     job_info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
     job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     SetInformationJobObject(cmdx.win32.job_handle, 9, xx *job_info, size_of(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)); // 9 = JobObjectExtendedLimitInformation
-    
+
     // Create the startup info for the child process.
     extended_startup_info: STARTUPINFOEX;
     extended_startup_info.StartupInfo.cb = size_of(STARTUPINFOEX);
@@ -352,8 +355,8 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     process: PROCESS_INFORMATION;
     if !CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
         add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
-        win32_cleanup(cmdx, working_directory);
         DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
+        win32_cleanup(cmdx, working_directory);
         return;
     }
 
@@ -390,7 +393,15 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         process_name_length := K32GetModuleBaseNameA(process.hProcess, null, process_name, MAX_PATH);
         update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator));
     }
-    
+
+    // Once the object has closed the pipes, Ctrl+C is no longer required to work. Therefore, reset
+    // the job information. This is done to ensure that processes who have detached themselves from
+    // us (which are not console applications) are not actually terminated here (they would be if the
+    // flag is still set, and the handle to the job gets closed...)
+    job_info = .{};
+    job_info.BasicLimitInformation.LimitFlags = 0;
+    SetInformationJobObject(cmdx.win32.job_handle, 9, xx *job_info, size_of(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)); // 9 = JobObjectExtendedLimitInformation
+
     win32_read_from_child_process(cmdx); // Flush all remaining data in the incoming pipe
     win32_cleanup(cmdx, working_directory);
 }
