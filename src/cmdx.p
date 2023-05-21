@@ -765,8 +765,7 @@ cmdx :: () -> s32 {
     cmdx.render_frame = true; // Render the first frame
 
     // Now set the taskbar for the window, cause win32 sucks some ass.
-    success := set_window_icon(*cmdx.window, "data/cmdx.ico");
-    print("success: %\n", success);
+    set_window_icon(*cmdx.window, "data/cmdx.ico");
     
     // Create the builtin themes
     create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
@@ -803,9 +802,8 @@ cmdx :: () -> s32 {
     return 0;
 }
 
-/* Depending on the selected subsystem, one of these will be exported in the object file */
-
 /*
+Depending on the selected subsystem, one of these main procedures will be exported in the object file.
 The command to compile this program is:
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
 */
