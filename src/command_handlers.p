@@ -87,5 +87,6 @@ register_all_commands :: (cmdx: *CmdX) {
 
     df := register_command(cmdx, "delete_file", "Deletes the file specified by the relative or absolute path", delete_file_handler);
     register_command_alias(df, "rm");
+    register_command_alias(df, "remove_file");
     register_command_argument(df, "file_path", .String);
 }
