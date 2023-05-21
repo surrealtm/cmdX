@@ -37,6 +37,11 @@ cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     cd(cmdx, new_directory);
 }
 
+delete_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    file_path := get_string_argument(*argument_values, 0);
+    delete_file(file_path);
+}
+
 
 register_command :: (cmdx: *CmdX, name: string, description: string, handler: Command_Handler) -> *Command{
     cmd := array_push(*cmdx.commands);
@@ -76,7 +81,11 @@ register_all_commands :: (cmdx: *CmdX) {
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
     register_command_alias(ls, "dir");
 
-    cd := register_command(cmdx, "cd", "Changes the current active directory to the specified relative path", cd_handler);
+    cd := register_command(cmdx, "cd", "Changes the current active directory to the specified relative or absolute path", cd_handler);
     register_command_alias(cd, "change_directory");
     register_command_argument(cd, "new_directory", .String);
+
+    df := register_command(cmdx, "delete_file", "Deletes the file specified by the relative or absolute path", delete_file_handler);
+    register_command_alias(df, "rm");
+    register_command_argument(df, "file_path", .String);
 }
