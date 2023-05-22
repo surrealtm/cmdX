@@ -49,8 +49,6 @@ Color_Index :: enum {
 
 Theme :: struct {
     name: string;
-    font_path: string; // Needed for reloading the font when the size changes
-    font: Font;
     colors: [Color_Index.count]Color;
 }
 
@@ -86,7 +84,7 @@ CmdX :: struct {
     history_index: s32 = -1; // -1 means no history is used
     
     // Backlog
-    backlog: [BACKLOG_SIZE]s8 = ---;
+    backlog: *s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Source_Range;
     scroll_offset: s64; // The index for the first line to be rendered at the top of the screen
@@ -100,9 +98,13 @@ CmdX :: struct {
     
     // Styling
     font_size: s64;
+    font_path: string;
+    font: Font;
+
     active_theme_name: string;
     active_theme: *Theme;
     themes: [..]Theme;
+
     config: Config;
     
     // Platform data
@@ -445,8 +447,8 @@ draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64
             activate_color_range(cmdx, color_range);
         }
         
-        cursor_x, cursor_y = render_single_character_with_font(*cmdx.active_theme.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-        if cursor + 1 < end     cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, character, cmdx.backlog[cursor + 1], cursor_x);
+        cursor_x, cursor_y = render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
+        if cursor + 1 < end     cursor_x = apply_font_kerning_to_cursor(*cmdx.font, character, cmdx.backlog[cursor + 1], cursor_x);
     }
 
     return cursor_x, cursor_y;
@@ -506,7 +508,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     // Update the internal text input rendering state
     text_until_cursor := get_string_view_until_cursor_from_text_input(*cmdx.text_input);
-    text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.active_theme.font, text_until_cursor);
+    text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
     cursor_alpha_previous := cmdx.text_input.cursor_alpha;
     set_text_input_target_position(*cmdx.text_input, xx text_until_cursor_width);
     update_text_input_rendering_data(*cmdx.text_input);
@@ -552,8 +554,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
     
     // The amount of visible lines on screen this frame
-    visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.active_theme.font.line_height);
-    if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.active_theme.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
+    visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
+    if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
 
     // The actual amount of lines that will be rendered. If the current line head is empty, don't consider it
     // to be an actual line yet, and skip drawing it.
@@ -563,37 +565,36 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     previous_scroll_offset := cmdx.scroll_offset;
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
     if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
-    
-    // Set up the first line to be rendered, as well as the highest line index to be rendered
-    line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
-    max_line_index: s64 = line_index + drawn_line_count - 1;
 
-    // Query the first line in the backlog, and the last line to be rendered
-    line_tail  := array_get(*cmdx.lines, 0);
-    first_line := array_get(*cmdx.lines, line_index);
-    line_head  := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    
-    
-    // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
-    // the input string will be appended to the last line, so we can actually fit one more line into the screen.
-    if line_head.first != line_head.one_plus_last ++max_line_index;
-    
-    // If the wrapped line is not currently in view, that information is still important for the color range
-    // skipping, since the cursor needs to know whether it has technically wrapped before.
-    wrapped_before := first_line.first < line_tail.first; 
-    
-    // Set up coordinates for rendering
-    cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.window.height - drawn_line_count * cmdx.active_theme.font.line_height - 5;
+    if cmdx.render_frame {    
+        // Set up the first line to be rendered, as well as the highest line index to be rendered
+        line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
+        max_line_index: s64 = line_index + drawn_line_count - 1;
 
-    // Set up the color ranges
-    color_range_index: s64 = 0;
-    color_range: Color_Range = array_get_value(*cmdx.colors, color_range_index);
-    activate_color_range(cmdx, *color_range);
+        // Query the first line in the backlog, and the last line to be rendered
+        line_tail  := array_get(*cmdx.lines, 0);
+        first_line := array_get(*cmdx.lines, line_index);
+        line_head  := array_get(*cmdx.lines, cmdx.lines.count - 1);
+        
+        // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
+        // the input string will be appended to the last line, so we can actually fit one more line into the screen.
+        if line_head.first != line_head.one_plus_last ++max_line_index;
+        
+        // If the wrapped line is not currently in view, that information is still important for the color range
+        // skipping, since the cursor needs to know whether it has technically wrapped before.
+        wrapped_before := first_line.first < line_tail.first; 
+        
+        // Set up coordinates for rendering
+        cursor_x: s32 = 5;
+        cursor_y: s32 = cmdx.window.height - drawn_line_count * cmdx.font.line_height - 5;
 
-    if cmdx.render_frame {
+        // Set up the color ranges
+        color_range_index: s64 = 0;
+        color_range: Color_Range = array_get_value(*cmdx.colors, color_range_index);
+        activate_color_range(cmdx, *color_range);
+
         // Actually prepare the renderer now if we want to render this frame.
-        prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.window);
+        prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
         
         // Draw all visible lines
         while line_index <= max_line_index {
@@ -605,7 +606,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
                 // until the end of the line. It is easier for draw_backlog_split to do it like this.
                 cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
                 wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-                cursor_x = apply_font_kerning_to_cursor(*cmdx.active_theme.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
+                cursor_x = apply_font_kerning_to_cursor(*cmdx.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
                 cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             } else
                 cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
@@ -613,7 +614,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             if line_index + 1 < cmdx.lines.count {
                 // If there is another line after this, reset the cursor position. If there isnt, then
                 // leave the cursor as is so that the actual text input can be rendered at the correct position
-                cursor_y += cmdx.active_theme.font.line_height;
+                cursor_y += cmdx.font.line_height;
                 cursor_x = 5;
             }
             
@@ -622,7 +623,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
         // Render the text input at the end of the backlog
         prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
-        draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
+        draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
 
         // Finish the frame, sleep until the next one
         swap_gl_buffers(*cmdx.window);
@@ -667,12 +668,10 @@ get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
 create_theme :: (cmdx: *CmdX, name: string, font_path: string, default: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
-    theme.font_path = font_path;
-    theme.colors[Color_Index.Default] = default;
-    theme.colors[Color_Index.Cursor]  = cursor;
-    theme.colors[Color_Index.Accent]  = accent;
+    theme.colors[Color_Index.Default]    = default;
+    theme.colors[Color_Index.Cursor]     = cursor;
+    theme.colors[Color_Index.Accent]     = accent;
     theme.colors[Color_Index.Background] = background;
-    create_font(*theme.font, theme.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     return theme;
 }
 
@@ -696,8 +695,8 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
 update_font_size :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
-        destroy_font(*theme.font, xx destroy_gl_texture_2d, null);
-        create_font(*theme.font, theme.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+        destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
+        create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     }
 }
 
@@ -766,6 +765,12 @@ cmdx :: () -> s32 {
 
     // Now set the taskbar for the window, cause win32 sucks some ass.
     set_window_icon(*cmdx.window, "data/cmdx.ico");
+
+    // Create the backlog array
+    cmdx.backlog = allocate(*cmdx.global_allocator, BACKLOG_SIZE);
+    
+    // Load the font
+    create_font(*cmdx.font, DEFAULT_FONT, cmdx.font_size, true, create_gl_texture_2d, null);
     
     // Create the builtin themes
     create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
@@ -784,9 +789,7 @@ cmdx :: () -> s32 {
     welcome_screen(*cmdx, run_tree);
         
     // Main loop until the window gets closed
-    while !cmdx.window.should_close {
-        one_cmdx_frame(*cmdx);
-    }
+    while !cmdx.window.should_close    one_cmdx_frame(*cmdx);
         
     // Cleanup
     write_config_file(*cmdx.config, CONFIG_FILE_NAME);
@@ -797,8 +800,8 @@ cmdx :: () -> s32 {
     // Release all memory.
     free_memory_pool(*cmdx.global_memory_pool);
     free_memory_arena(*cmdx.global_memory_arena);
-    free_memory_arena(*cmdx.frame_memory_arena);
-    
+    free_memory_arena(*cmdx.frame_memory_arena);    
+
     return 0;
 }
 

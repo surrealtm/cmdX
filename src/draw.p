@@ -56,14 +56,14 @@ destroy_renderer :: (renderer: *Renderer) {
     deallocate(Default_Allocator, xx renderer.font_uvs);
 }
 
-prepare_renderer :: (renderer: *Renderer, theme: *Theme, window: *Window) {
+prepare_renderer :: (renderer: *Renderer, theme: *Theme, font: *Font, window: *Window) {
     background_color := theme.colors[Color_Index.Background];
 
     renderer.width  = window.width;
     renderer.height = window.height;
     renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
     renderer.background_color    = background_color;
-    renderer.font_texture_handle = theme.font.texture.handle;
+    renderer.font_texture_handle = font.texture.handle;
 
     glViewport(0, 0, renderer.width, renderer.height);
 
@@ -149,11 +149,11 @@ draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x:
     ++renderer.font_glyph_count;
 }
 
-draw_text :: (renderer: *Renderer, theme: *Theme, text: string, x: s32, y: s32, color: Color) {
+draw_text :: (renderer: *Renderer, font: *Font, text: string, x: s32, y: s32, color: Color) {
     if renderer.foreground_color.r != color.r || renderer.foreground_color.g != color.g || renderer.foreground_color.b != color.b || renderer.foreground_color.a != color.a   flush_font_buffer(renderer); // Since the font buffer only supports a constant color, it needs to be flushed with the previous color to allow for the new color afterwards
     
     renderer.foreground_color = color;
-    render_text_with_font(*theme.font, text, x, y, .Left, xx draw_single_glyph, xx renderer);
+    render_text_with_font(font, text, x, y, .Left, xx draw_single_glyph, xx renderer);
 }
 
 draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color) {
@@ -180,23 +180,23 @@ draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, bord
     draw_quad(renderer, x + w - border, y, border, h, color);
 }
 
-draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
+draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
-    prefix_string_width := query_text_width(*theme.font, prefix_string);    
+    prefix_string_width := query_text_width(font, prefix_string);    
     
     // Render the input string
-    draw_text(renderer, theme, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default]);
+    draw_text(renderer, font, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default]);
     
     // Render the string prefix
-    draw_text(renderer, theme, prefix_string, x, y, theme.colors[Color_Index.Accent]);
+    draw_text(renderer, font, prefix_string, x, y, theme.colors[Color_Index.Accent]);
     
     // Flush all text before rendering the cursor to make sure the cursor always gets rendered on top of the font
     flush_font_buffer(renderer);
     
     // Calculate the cursor size
-    cursor_width:  u32 = query_text_width(*theme.font, "M");
-    cursor_height: u32 = theme.font.line_height;
+    cursor_width:  u32 = query_text_width(font, "M");
+    cursor_height: u32 = font.line_height;
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
     
     // Render the cursor if the text input is active
@@ -205,8 +205,8 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, input: *Text_Input, pref
     
     if !input.active {
         // If the text input is not active, render an outlined quad as the cursor
-        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, 1, cursor_color_blended);
+        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, 1, cursor_color_blended);
     } else
         // If the text input is active, render a filled quad
-        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - theme.font.ascender, cursor_width, cursor_height, cursor_color_blended);
+        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, cursor_color_blended);
 }
