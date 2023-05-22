@@ -672,7 +672,7 @@ create_theme :: (cmdx: *CmdX, name: string, font_path: string, default: Color, c
     theme.colors[Color_Index.Cursor]  = cursor;
     theme.colors[Color_Index.Accent]  = accent;
     theme.colors[Color_Index.Background] = background;
-    load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
+    create_font(*theme.font, theme.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     return theme;
 }
 
@@ -697,7 +697,7 @@ update_font_size :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
         destroy_font(*theme.font, xx destroy_gl_texture_2d, null);
-        load_font(*theme.font, theme.font_path, cmdx.font_size, xx create_gl_texture_2d, null);
+        create_font(*theme.font, theme.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     }
 }
 
