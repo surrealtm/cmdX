@@ -200,6 +200,7 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     if total_bytes_available == 0 return;
     
     input_buffer := allocate(*cmdx.frame_allocator, total_bytes_available);
+    
     bytes_read: u32 = ---;
     
     if !ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {

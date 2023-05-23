@@ -447,8 +447,8 @@ draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64
             activate_color_range(cmdx, color_range);
         }
         
-        cursor_x, cursor_y = render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-        if cursor + 1 < end     cursor_x = apply_font_kerning_to_cursor(*cmdx.font, character, cmdx.backlog[cursor + 1], cursor_x);
+        render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
+        if cursor + 1 < end     cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, cmdx.backlog[cursor + 1]);
     }
 
     return cursor_x, cursor_y;
@@ -606,7 +606,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
                 // until the end of the line. It is easier for draw_backlog_split to do it like this.
                 cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
                 wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-                cursor_x = apply_font_kerning_to_cursor(*cmdx.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0], cursor_x); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
+                cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
                 cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             } else
                 cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
@@ -724,7 +724,7 @@ update_window_name :: (cmdx: *CmdX) {
 /* --- MAIN --- */
 
 cmdx :: () -> s32 {
-    // Set up memory management
+    // Set up the memory management of the cmdx instance
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 1 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
@@ -779,14 +779,14 @@ cmdx :: () -> s32 {
     create_theme(*cmdx, "monokai", DEFAULT_FONT, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
     
+    // Display the welcome message
+    clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
+    welcome_screen(*cmdx, run_tree);
+    
     // After everything has been loaded, actually show the window. This will prevent a small time 
     // frame in which the window is just blank white, which does not seem very clean. Instead, the 
     // window takes a little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
-    
-    // Display the welcome message
-    clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
-    welcome_screen(*cmdx, run_tree);
         
     // Main loop until the window gets closed
     while !cmdx.window.should_close    one_cmdx_frame(*cmdx);
