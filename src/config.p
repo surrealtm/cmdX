@@ -83,8 +83,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
             continue;
         }
         
-        name  := trim_string_right(substring(line, 0, space));
-        value := trim_string(substring(line, space + 1, line.count));
+        name  := trim_string_right(substring_view(line, 0, space));
+        value := trim_string(substring_view(line, space + 1, line.count));
         
         property := find_property(config, name);
         if !property {
@@ -124,20 +124,20 @@ write_config_file :: (config: *Config, file_path: string) {
     file_printer: Print_Buffer = ---;
     create_file_printer(*file_printer, file_path);
     
-    internal_print(*file_printer, "[1] # version number, do not change\n");
-    internal_print(*file_printer, ":/general\n", file_path);
+    bprint(*file_printer, "[1] # version number, do not change\n");
+    bprint(*file_printer, ":/general\n", file_path);
     
     for i := 0; i < config.properties.count; ++i {
         // Write property to file
         property := array_get(*config.properties, i);
-        internal_print(*file_printer, "% ", property.name);
+        bprint(*file_printer, "% ", property.name);
         
         switch property.type {
-            case .String;  internal_print(*file_printer, ~property.value._string);
-            case .Integer; internal_print(*file_printer, "%", ~property.value._integer);
+            case .String;  bprint(*file_printer, ~property.value._string);
+            case .Integer; bprint(*file_printer, "%", ~property.value._integer);
         }
         
-        internal_print(*file_printer, "\n");
+        bprint(*file_printer, "\n");
     }
     
     close_file_printer(*file_printer);

@@ -29,7 +29,7 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     print_buffer.size = 0;
     print_buffer.output_handle = 0;
     
-    internal_print(*print_buffer, " > %", command.name);
+    bprint(*print_buffer, " > %", command.name);
     
     builder: String_Builder;
     create_string_builder(*builder, *cmdx.frame_memory_arena);
@@ -126,19 +126,19 @@ get_next_word_in_input :: (input: *string) -> string {
         if argument_end == -1 {
             // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
             // assume that the argument is the rest of the input string.
-            argument = substring(~input, argument_start, input.count);
+            argument = substring_view(~input, argument_start, input.count);
             ~input = "";
         } else {
             // Exclude the actual quote characters from the output string
-            argument = substring(~input, argument_start + 1, argument_end);
-            ~input = substring(~input, argument_end + 1, input.count);
+            argument = substring_view(~input, argument_start + 1, argument_end);
+            ~input = substring_view(~input, argument_end + 1, input.count);
         }
     } else {
         // The word goes until the next encountered space character.
         argument_end := search_string_from(~input, ' ', argument_start);
         if argument_end == -1    argument_end = input.count;
-        argument = substring(~input, argument_start, argument_end);
-        ~input = substring(~input, argument_end, input.count);
+        argument = substring_view(~input, argument_start, argument_end);
+        ~input = substring_view(~input, argument_end, input.count);
     }
     
     return argument;
@@ -268,9 +268,7 @@ debug :: (cmdx: *CmdX) {
 ls :: (cmdx: *CmdX) {
     add_formatted_line(cmdx, "Contents of folder '%':", cmdx.current_directory);
     
-    files: [..]string;
-    files.allocator = *cmdx.frame_allocator;
-    get_files_in_folder(cmdx.current_directory, *files);
+    files := get_files_in_folder(cmdx.current_directory, *cmdx.frame_allocator);
     
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);

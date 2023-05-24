@@ -105,7 +105,7 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             
             while is_digit_character(parser.input[parser.index]) && parser.parameter_count < parser.parameters.count {
                 parameter_end := search_string_for_character_types(parser.input, ^.Digit, parser.index);
-                value, valid := string_to_int(substring(parser.input, parser.index, parameter_end));
+                value, valid := string_to_int(substring_view(parser.input, parser.index, parameter_end));
                 parser.parameters[parser.parameter_count] = value;
                 ++parser.parameter_count;
                 parser.index = parameter_end;
@@ -114,7 +114,7 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             }
             
             command_end := win32_find_sequence_command_end(*parser); // For now, only ever read one character. There are some sequences which have more than one character
-            command := substring(parser.input, parser.index, command_end);
+            command := substring_view(parser.input, parser.index, command_end);
             parser.index = command_end;
             
             if compare_strings(command, "H") {

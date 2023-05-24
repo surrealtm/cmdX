@@ -36,7 +36,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 8129;
+BACKLOG_SIZE :: 65536;
 HISTORY_SIZE :: 64;
 SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
 
