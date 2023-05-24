@@ -522,9 +522,15 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Handle input for this frame
     if cmdx.text_input.entered {
-        // input_string is only a wrapper over the text input's internal buffer, so do not free that
-        // until after the command has been handled
-        input_string := get_string_view_from_text_input(*cmdx.text_input);
+        // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
+        // afterwards, we need to make a copy from the input string, so that it may potentially be used later on.
+        input_string := copy_string(get_string_view_from_text_input(*cmdx.text_input), *cmdx.frame_allocator);
+
+        // Reset the text input
+        cmdx.history_index = -1;
+        clear_text_input(*cmdx.text_input);
+        activate_text_input(*cmdx.text_input);
+        print("Cleared text input.\n");
         
         if cmdx.child_process_running {
             // Send the input to the child process
@@ -546,11 +552,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             // Actually launch the command
             handle_input_string(cmdx, input_string);
         }
-
-        // Reset the text input
-        cmdx.history_index = -1;
-        clear_text_input(*cmdx.text_input);
-        activate_text_input(*cmdx.text_input);
     }
     
     // The amount of visible lines on screen this frame

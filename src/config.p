@@ -96,17 +96,12 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         valid := false;
         
         switch property.type {
-            case .String;
+        case .String;
             valid = true;
             ~property.value._string = copy_string(value, config.allocator);
             
-            case .Integer;
-            valid = true;
-            for i := 0; i < value.count; ++i {
-                valid &= is_digit_character(value[i]);
-            }            
-            
-            if valid ~property.value._integer = string_to_int(value);
+        case .Integer;            
+            ~property.value._integer, valid = string_to_int(value);
         }
         
         if !valid {
