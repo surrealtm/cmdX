@@ -76,8 +76,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         line := get_first_line(*file_data);
         if line[0] == ':' continue; // Section line, ignore for now
         
-        space := search_string(line, ' ');
-        if space == -1 {
+        space, found_space := search_string(line, ' ');
+        if !found_space {
             add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
             add_formatted_line(cmdx, "   Expected syntax 'name value', no space found in the line.");
             continue;

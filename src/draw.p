@@ -61,7 +61,7 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, font: *Font, window: *W
 
     renderer.width  = window.width;
     renderer.height = window.height;
-    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, 1);
+    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, -1, 1);
     renderer.background_color    = background_color;
     renderer.font_texture_handle = font.texture.handle;
 
@@ -160,7 +160,7 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     scale := v2f.{ xx w, xx h };
     
-    if color.a != 255 set_blending(.Normal);
+    if color.a != 255    set_blending(.Default);
     
     set_shader(*renderer.quad_shader);
     set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale);

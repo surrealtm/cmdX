@@ -72,15 +72,6 @@ win32_set_color_for_code :: (cmdx: *CmdX, code: u32) {
 win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
     end := parser.index + 1;
     
-    if parser.input[parser.index] == '?' {
-        // If a question mark is the first character to read, it is followed by a numeric and one
-        // final character code.
-        end = search_string_for_character_types(parser.input, ^.Digit, parser.index + 1) + 1;
-    } else if parser.input[parser.index] == ' ' {
-        // If the first character is a space, it will be followed by a 'q' and be used to define
-        // the cursor shape.
-        end = parser.index + 2;
-    }
     
     return end;
 }
@@ -104,7 +95,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             parser.parameter_count = 0;
             
             while is_digit_character(parser.input[parser.index]) && parser.parameter_count < parser.parameters.count {
-                parameter_end := search_string_for_character_types(parser.input, ^.Digit, parser.index);
+                // Parse a single integer parameter from the the input string.
+                parameter_end, ignored := search_string_for_character_types(parser.input, ^.Digit, parser.index);
                 value, valid := string_to_int(substring_view(parser.input, parser.index, parameter_end));
                 parser.parameters[parser.parameter_count] = value;
                 ++parser.parameter_count;
@@ -112,8 +104,21 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 
                 if parser.input[parser.index] == ';' ++parser.index; // Skip over a potential parameter seperator
             }
+
+            command_end: s64 = ---;
             
-            command_end := win32_find_sequence_command_end(*parser); // For now, only ever read one character. There are some sequences which have more than one character
+            if parser.input[parser.index] == '?' {
+                // If a question mark is the first character to read, it is followed by a numeric value and one
+                // final character code.
+                ignored: bool = ---;
+                command_end, ignored = search_string_for_character_types(parser.input, ^.Digit, parser.index + 1);
+                command_end += 1; // Include the actual character in the command name
+            } else if parser.input[parser.index] == ' ' {
+                // If the first character is a space, it will be followed by a 'q' and be used to define
+                // the cursor shape.
+                command_end = parser.index + 2;
+            }
+            
             command := substring_view(parser.input, parser.index, command_end);
             parser.index = command_end;
             

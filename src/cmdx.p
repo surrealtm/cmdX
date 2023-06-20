@@ -799,9 +799,9 @@ cmdx :: () -> s32 {
     destroy_window(*cmdx.window);
 
     // Release all memory.
-    free_memory_pool(*cmdx.global_memory_pool);
-    free_memory_arena(*cmdx.global_memory_arena);
-    free_memory_arena(*cmdx.frame_memory_arena);    
+    destroy_memory_pool(*cmdx.global_memory_pool);
+    destroy_memory_arena(*cmdx.global_memory_arena);
+    destroy_memory_arena(*cmdx.frame_memory_arena);    
 
     return 0;
 }
@@ -819,3 +819,6 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
+
+
+#run cmdx(); // If you are on a machine that does not have a linker installed, you should be able to run it from inside the compiler without any other dependencies.

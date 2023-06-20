@@ -122,8 +122,8 @@ get_next_word_in_input :: (input: *string) -> string {
     if input.data[argument_start] == '"' {
         // If the start of this word is a quotation mark, then the word end is marked by the next
         // quotation mark. Spaces are ignored in this case.
-        argument_end := search_string_from(~input, '"', argument_start + 1);
-        if argument_end == -1 {
+        argument_end, found_quote := search_string_from(~input, '"', argument_start + 1);
+        if !found_quote {
             // While this is technically invalid syntax, we'll allow it for now. If no closing quote is found, just
             // assume that the argument is the rest of the input string.
             argument = substring_view(~input, argument_start, input.count);
@@ -135,8 +135,8 @@ get_next_word_in_input :: (input: *string) -> string {
         }
     } else {
         // The word goes until the next encountered space character.
-        argument_end := search_string_from(~input, ' ', argument_start);
-        if argument_end == -1    argument_end = input.count;
+        argument_end, found_space := search_string_from(~input, ' ', argument_start);
+        if !found_space    argument_end = input.count;
         argument = substring_view(~input, argument_start, argument_end);
         ~input = substring_view(~input, argument_end, input.count);
     }
