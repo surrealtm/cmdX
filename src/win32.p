@@ -117,7 +117,9 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 // If the first character is a space, it will be followed by a 'q' and be used to define
                 // the cursor shape.
                 command_end = parser.index + 2;
-            }
+            } else
+                // Default command type; just one character.
+                command_end = parser.index + 1;
             
             command := substring_view(parser.input, parser.index, command_end);
             parser.index = command_end;
