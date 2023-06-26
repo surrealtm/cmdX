@@ -36,9 +36,9 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 65536;
-HISTORY_SIZE :: 64;
-SCROLL_SPEED :: 3; // In amount of lines per mouse wheel turn
+BACKLOG_SIZE :: 65536; // In characters
+HISTORY_SIZE :: 64;    // In input lines
+SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 
 Color_Index :: enum {
     Default;
@@ -530,7 +530,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         cmdx.history_index = -1;
         clear_text_input(*cmdx.text_input);
         activate_text_input(*cmdx.text_input);
-        print("Cleared text input.\n");
         
         if cmdx.child_process_running {
             // Send the input to the child process
@@ -819,6 +818,3 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
-
-
-#run cmdx(); // If you are on a machine that does not have a linker installed, you should be able to run it from inside the compiler without any other dependencies.

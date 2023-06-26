@@ -57,20 +57,17 @@ destroy_renderer :: (renderer: *Renderer) {
 }
 
 prepare_renderer :: (renderer: *Renderer, theme: *Theme, font: *Font, window: *Window) {
-    background_color := theme.colors[Color_Index.Background];
-
     renderer.width  = window.width;
     renderer.height = window.height;
-    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width, xx renderer.height, -1, 1);
-    renderer.background_color    = background_color;
+    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width / 2, xx renderer.height / -2, -1, 1); // The coordinate space for this application is a bit different than for games, here we want positive y to mean downwards...
     renderer.font_texture_handle = font.texture.handle;
 
     glViewport(0, 0, renderer.width, renderer.height);
-
-    glClearColor(xx background_color.r / 255.0,
-                 xx background_color.g / 255.0,
-                 xx background_color.b / 255.0,
-                 xx background_color.a / 255.0);
+    
+    glClearColor(xx theme.colors[Color_Index.Background].r / 255.0,
+                 xx theme.colors[Color_Index.Background].g / 255.0,
+                 xx theme.colors[Color_Index.Background].b / 255.0,
+                 xx theme.colors[Color_Index.Background].a / 255.0);
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -149,10 +146,11 @@ draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x:
     ++renderer.font_glyph_count;
 }
 
-draw_text :: (renderer: *Renderer, font: *Font, text: string, x: s32, y: s32, color: Color) {
-    if renderer.foreground_color.r != color.r || renderer.foreground_color.g != color.g || renderer.foreground_color.b != color.b || renderer.foreground_color.a != color.a   flush_font_buffer(renderer); // Since the font buffer only supports a constant color, it needs to be flushed with the previous color to allow for the new color afterwards
+draw_text :: (renderer: *Renderer, font: *Font, text: string, x: s32, y: s32, foreground_color: Color, background_color: Color) {
+    if !compare_colors(renderer.foreground_color, foreground_color) || !compare_colors(renderer.background_color, background_color) flush_font_buffer(renderer); // Since the font buffer only supports a constant color, it needs to be flushed with the previous color to allow for the new color afterwards
     
-    renderer.foreground_color = color;
+    renderer.foreground_color = foreground_color;
+    renderer.background_color = background_color;
     render_text_with_font(font, text, x, y, .Left, xx draw_single_glyph, xx renderer);
 }
 
@@ -184,12 +182,32 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);
     prefix_string_width := query_text_width(font, prefix_string);    
-    
-    // Render the input string
-    draw_text(renderer, font, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default]);
+
+    if input.selection_start != -1 {
+        // There is currently an active selection. Render the selection background with a specific color
+        // under the location where the selected text will be rendered later.
+        selection_color := Color.{ 73, 149, 236, 255 };
+
+        text_until_selection := substring_view(input.buffer, 0, input.selection_start);
+        selection_text       := substring_view(input.buffer, input.selection_start, input.selection_end);
+        text_after_selection := substring_view(input.buffer, input.selection_end, input.count);
+        
+        // Draw the actual selection background.
+        selection_offset: s32 = query_text_width(font, text_until_selection); // @Cleanup apply kerning from the first char included in the selection to the last char before the selection
+        selection_width:  s32 = query_text_width(font, selection_text);
+        draw_quad(renderer, x + prefix_string_width + selection_offset, y - font.ascender, selection_width, font.line_height, selection_color);
+
+        // Since the background color for the selected part of the input is different, we need to split the
+        // text rendering in three parts and set the cursor accordingly.
+        draw_text(renderer, font, text_until_selection, x + prefix_string_width, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Background]);
+        draw_text(renderer, font, selection_text, x + prefix_string_width + selection_offset, y, theme.colors[Color_Index.Default], selection_color);
+        draw_text(renderer, font, text_after_selection, x + prefix_string_width + selection_offset + selection_width, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Background]);
+    } else
+        // Render the complete input string without any selection
+        draw_text(renderer, font, input_string, x + prefix_string_width, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Background]);
     
     // Render the string prefix
-    draw_text(renderer, font, prefix_string, x, y, theme.colors[Color_Index.Accent]);
+    draw_text(renderer, font, prefix_string, x, y, theme.colors[Color_Index.Accent], theme.colors[Color_Index.Background]);
     
     // Flush all text before rendering the cursor to make sure the cursor always gets rendered on top of the font
     flush_font_buffer(renderer);
