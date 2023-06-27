@@ -1,3 +1,9 @@
+Section_Type :: enum {
+    Unknown;
+    General;
+    Actions;
+}
+
 Property_Type :: enum {
     String;
     Integer;
@@ -17,6 +23,7 @@ Property :: struct {
 Config :: struct {
     allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
+    actions: [..]Action;
 }
 
 property_type_to_string :: (type: Property_Type) -> string {
@@ -41,7 +48,7 @@ create_property :: (config: *Config, name: string, type: Property_Type) -> *Prop
 create_string_property :: (config: *Config, name: string, value: *string, default: string) {
     property := create_property(config, name, .String);
     property.value._string = value;
-    ~property.value._string = copy_string(default, Default_Allocator);
+    ~property.value._string = copy_string(default, config.allocator);
 }
 
 create_integer_property :: (config: *Config, name: string, value: *s64, default: s64) {
@@ -59,7 +66,45 @@ find_property :: (config: *Config, name: string) -> *Property {
     return null;
 }
 
+read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
+    space, found_space := search_string(line, ' ');
+    if !found_space {
+        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+        add_formatted_line(cmdx, "   Expected syntax 'name value', no space found in the line.");
+        return;
+    }
+    
+    name  := trim_string_right(substring_view(line, 0, space));
+    value := trim_string(substring_view(line, space + 1, line.count));
+    
+    property := find_property(config, name);
+    if !property {
+        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+        add_formatted_line(cmdx, "   Property name '%' is unknown.", name);
+        return;
+    }
+    
+    valid := false;
+    
+    switch property.type {
+    case .String;
+        valid = true;
+        ~property.value._string = copy_string(value, config.allocator);
+        
+    case .Integer;            
+        ~property.value._integer, valid = string_to_int(value);
+    }
+    
+    if !valid {
+        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
+        add_formatted_line(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+    }
+}
+
 read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
+    config.properties.allocator = config.allocator;
+    config.actions.allocator    = config.allocator;
+
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
     
@@ -69,44 +114,33 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     version_line := get_first_line(*file_data);
     
     line_count := 1; // Version line was already read
+
+    current_section := Section_Type.count; // Mark as "no section has been encountered yet"
     
     while file_data.count {
         ++line_count;
         
         line := get_first_line(*file_data);
-        if line[0] == ':' continue; // Section line, ignore for now
-        
-        space, found_space := search_string(line, ' ');
-        if !found_space {
-            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-            add_formatted_line(cmdx, "   Expected syntax 'name value', no space found in the line.");
+        if line[0] == ':' && line[1] == '/' {
+            // New section identifier. Try to parse the section type and move on to the next line
+            identifier := substring_view(line, 2, line.count);
+            if compare_strings(identifier, "general") {
+                current_section = .General;
+            } else if compare_strings(identifier, "actions") {
+                current_section = .Actions;
+            } else {
+                add_formatted_line(cmdx, "Malformed section declaration in line %:", line_count);
+                add_formatted_line(cmdx, "    Unknown section identifier.");
+                current_section = .Unknown;
+            }
+
             continue;
         }
-        
-        name  := trim_string_right(substring_view(line, 0, space));
-        value := trim_string(substring_view(line, space + 1, line.count));
-        
-        property := find_property(config, name);
-        if !property {
-            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-            add_formatted_line(cmdx, "   Property name '%' is unknown.", name);
-            continue;
-        }
-        
-        valid := false;
-        
-        switch property.type {
-        case .String;
-            valid = true;
-            ~property.value._string = copy_string(value, config.allocator);
-            
-        case .Integer;            
-            ~property.value._integer, valid = string_to_int(value);
-        }
-        
-        if !valid {
-            add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-            add_formatted_line(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+
+        switch current_section {
+        case .Unknown; // If an error occurred while parsing the previous section identifier, silently ignore the line
+        case .General; read_property(cmdx, config, line, line_count);
+        case .Actions; read_action(cmdx, config, line, line_count);
         }
     }
     
@@ -120,7 +154,7 @@ write_config_file :: (config: *Config, file_path: string) {
     create_file_printer(*file_printer, file_path);
     
     bprint(*file_printer, "[1] # version number, do not change\n");
-    bprint(*file_printer, ":/general\n", file_path);
+    bprint(*file_printer, ":/general\n");
     
     for i := 0; i < config.properties.count; ++i {
         // Write property to file
@@ -134,6 +168,11 @@ write_config_file :: (config: *Config, file_path: string) {
         
         bprint(*file_printer, "\n");
     }
+
+    bprint(*file_printer, "\n");
+    bprint(*file_printer, ":/actions\n");
+
+    write_actions_to_file(*config.actions, *file_printer);
     
     close_file_printer(*file_printer);
 }

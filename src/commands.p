@@ -258,15 +258,12 @@ debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
 }
 
 debug :: (cmdx: *CmdX) {
-/*
     static_size, static_size_unit := convert_to_biggest_memory_unit(size_of(CmdX));
     add_formatted_line(cmdx, "Static memory usage: %*%\n", static_size, memory_unit_string(static_size_unit));
+
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
-*/
-
-    for i := 0; i < 100000; ++i random_line(cmdx);
 }
 
 ls :: (cmdx: *CmdX) {

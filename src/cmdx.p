@@ -20,6 +20,7 @@
 
 // --- Local files
 #load "config.p";
+#load "actions.p";
 #load "draw.p";
 #load "commands.p";
 #load "command_handlers.p";
@@ -724,6 +725,14 @@ update_window_name :: (cmdx: *CmdX) {
 /* --- MAIN --- */
 
 cmdx :: () -> s32 {
+    string := "Hello World, how are \"you doing today?\"";
+    arguments := split_string(string, ' ', true, Default_Allocator);
+
+    for i := 0; i < arguments.count; ++i print("Arg %: '%'\n", array_get_value(*arguments, i));
+
+    return 0;
+
+
     // Set up the memory management of the cmdx instance
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 1 * GIGABYTES);
