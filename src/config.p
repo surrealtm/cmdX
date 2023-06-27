@@ -69,8 +69,8 @@ find_property :: (config: *Config, name: string) -> *Property {
 read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     space, found_space := search_string(line, ' ');
     if !found_space {
-        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-        add_formatted_line(cmdx, "   Expected syntax 'name value', no space found in the line.");
+        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
         return;
     }
     
@@ -79,8 +79,8 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     
     property := find_property(config, name);
     if !property {
-        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-        add_formatted_line(cmdx, "   Property name '%' is unknown.", name);
+        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "   Property name '%' is unknown.", name);
         return;
     }
     
@@ -96,8 +96,8 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     }
     
     if !valid {
-        add_formatted_line(cmdx, "Malformed config property in line %:", line_count);
-        add_formatted_line(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
     }
 }
 
@@ -121,6 +121,9 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         ++line_count;
         
         line := get_first_line(*file_data);
+
+        if line.count == 0 || line[0] == '#' continue; // Ignore commented-out lines
+
         if line[0] == ':' && line[1] == '/' {
             // New section identifier. Try to parse the section type and move on to the next line
             identifier := substring_view(line, 2, line.count);
@@ -129,8 +132,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
             } else if compare_strings(identifier, "actions") {
                 current_section = .Actions;
             } else {
-                add_formatted_line(cmdx, "Malformed section declaration in line %:", line_count);
-                add_formatted_line(cmdx, "    Unknown section identifier.");
+                config_error(cmdx, "Malformed section declaration in line %:", line_count);
+                config_error(cmdx, "    Unknown section identifier.");
                 current_section = .Unknown;
             }
 
@@ -175,4 +178,14 @@ write_config_file :: (config: *Config, file_path: string) {
     write_actions_to_file(*config.actions, *file_printer);
     
     close_file_printer(*file_printer);
+}
+
+
+
+config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
+    // Since the cmdx backbuffer has not been set up at the time the config gets loaded (since the backbuffer
+    // size actually depends on the config, and so on...), we can't just add messages to the backlog.
+    // Instead, for now print them out on the actual console, and maybe in the future have something
+    // more sophisticated here...
+    print(format, ..parameters);
 }

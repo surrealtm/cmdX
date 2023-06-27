@@ -131,22 +131,59 @@ key_code_to_string :: (key: Key_Code) -> string {
     return result;
 }
 
+parse_action_type :: (string: string) -> Action_Type {
+    result: Action_Type = .Undefined;
+
+    if compare_strings(string, "Macro") result = .Macro;
+
+    return result;
+}
+
+action_type_to_string :: (type: Action_Type) -> string {
+    result: string = ---;
+
+    switch type {
+    case .Macro; result = "Macro";
+    case; result = "UnknownActionType";
+    }
+    
+    return result;
+}
+
+parse_action_data :: (type: Action_Type, string: string, allocator: *Allocator) -> Action_Data {
+    result: Action_Data = ---;
+
+    if type == .Macro {
+        if string[0] == '"' && string[string.count - 1] == '"' {
+            result.macro_text = copy_string(substring_view(string, 1, string.count - 1), allocator);
+        } else
+            result.macro_text = copy_string(string, allocator);
+    }
+    
+    return result;
+}
 
 read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
-    action := array_push(*config.actions);
-
     arguments := split_string(line, ' ', true, *cmdx.frame_allocator);
-    trigger_argument     := array_get(*arguments, 0);
-    action_type_argument := array_get(*arguments, 1);
-    action_data_argument := array_get(*arguments, 2);
 
-    
+    // @Cleanup error handling
+
+    trigger_argument     := array_get_value(*arguments, 0);
+    action_type_argument := array_get_value(*arguments, 1);
+    action_data_argument := array_get_value(*arguments, 2);
+
+    action := array_push(*config.actions);
+    action.trigger = parse_key_code(trigger_argument);
+    action.type    = parse_action_type(action_type_argument);
+    action.data    = parse_action_data(action.type, action_data_argument, config.allocator);
 }
 
 write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
     for i := 0; i < list.count; ++i {
         action := array_get(list, i);
 
-        
+        bprint(file, "% ", key_code_to_string(action.trigger));
+        bprint(file, "% ", action_type_to_string(action.type));
+        bprint(file, "\"%\"", action.data.macro_text);
     }
 }

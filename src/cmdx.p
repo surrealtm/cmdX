@@ -725,19 +725,11 @@ update_window_name :: (cmdx: *CmdX) {
 /* --- MAIN --- */
 
 cmdx :: () -> s32 {
-    string := "Hello World, how are \"you doing today?\"";
-    arguments := split_string(string, ' ', true, Default_Allocator);
-
-    for i := 0; i < arguments.count; ++i print("Arg %: '%'\n", array_get_value(*arguments, i));
-
-    return 0;
-
-
     // Set up the memory management of the cmdx instance
     cmdx: CmdX;
     create_memory_arena(*cmdx.global_memory_arena, 1 * GIGABYTES);
     create_memory_pool(*cmdx.global_memory_pool, *cmdx.global_memory_arena);
-    cmdx.global_allocator  = memory_pool_allocator(*cmdx.global_memory_pool);
+    cmdx.global_allocator = memory_pool_allocator(*cmdx.global_memory_pool);
     
     create_memory_arena(*cmdx.frame_memory_arena, 16 * MEGABYTES);
     cmdx.frame_allocator = memory_arena_allocator(*cmdx.frame_memory_arena);
@@ -787,15 +779,15 @@ cmdx :: () -> s32 {
     create_theme(*cmdx, "blue",    DEFAULT_FONT, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
     create_theme(*cmdx, "monokai", DEFAULT_FONT, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
-    
-    // Display the welcome message
-    clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
-    welcome_screen(*cmdx, run_tree);
-    
+        
     // After everything has been loaded, actually show the window. This will prevent a small time 
     // frame in which the window is just blank white, which does not seem very clean. Instead, the 
     // window takes a little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
+
+    // Display the welcome message
+    clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
+    welcome_screen(*cmdx, run_tree);
         
     // Main loop until the window gets closed
     while !cmdx.window.should_close    one_cmdx_frame(*cmdx);
