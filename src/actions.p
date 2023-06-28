@@ -187,3 +187,23 @@ write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
         bprint(file, "\"%\"", action.data.macro_text);
     }
 }
+
+execute_actions_with_trigger :: (cmdx: *CmdX, list: *[..]Action, key_code: Key_Code) -> bool {
+    executed_something := false;
+    
+    for i := 0; i < list.count; ++i {
+        action := array_get(list, i);
+
+        if action.trigger == key_code {
+            switch action.type {
+            case .Macro;
+                clear_text_input(*cmdx.text_input);
+                set_text_input_string(*cmdx.text_input, action.data.macro_text);
+            }
+            
+            executed_something = true;
+        }
+    }
+
+    return executed_something;
+}

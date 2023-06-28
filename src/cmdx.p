@@ -477,10 +477,20 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     if cmdx.window.focused && !cmdx.text_input.active render_next_frame(cmdx);
     cmdx.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
-    
-    // Update the terminal input
-    for i := 0; i < cmdx.window.text_input_event_count; ++i   handle_text_input_event(*cmdx.text_input, cmdx.window.text_input_events[i]);
 
+    // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
+    // straight into the text input. @Cleanup what happens if the 'A' key is a short cut? We probably
+    // only want to trigger an action in that case, and not have it go into the text input...
+    
+    for i := 0; i < cmdx.window.key_pressed.count; ++i {
+        if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, *cmdx.config.actions, xx i) break;
+    }
+
+    for i := 0; i < cmdx.window.text_input_event_count; ++i {
+        event := cmdx.window.text_input_events[i];
+        handle_text_input_event(*cmdx.text_input, event);
+    }
+        
     if cmdx.window.text_input_event_count render_next_frame(cmdx);
     
     // Go through the history if the arrow keys have been used
@@ -819,3 +829,6 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
+
+// @Cleanup chars like Umlauts are not visible, but they are added into the text input thing, which seems
+// weird. Either completely ignore them, or display the rectangle thing.
