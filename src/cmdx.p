@@ -494,7 +494,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         input.text_input_event_count = cmdx.window.text_input_event_count;
         prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height });
 
-        ui_button(*cmdx.ui, "Hello World");
+        do_actions_window(cmdx);
     }
         
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go

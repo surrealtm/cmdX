@@ -227,3 +227,17 @@ execute_actions_with_trigger :: (cmdx: *CmdX, list: *[..]Action, key_code: Key_C
 
     return executed_something;
 }
+
+
+
+do_actions_window :: (cmdx: *CmdX) {
+    ui_push_window(*cmdx.ui, "Actions");
+
+    ui_horizontal_layout(*cmdx.ui);
+    ui_push_width(*cmdx.ui, .Pixels, 300, 0.6);
+    ui_label(*cmdx.ui, "Trigger");
+    ui_label(*cmdx.ui, "Type");
+    ui_label(*cmdx.ui, "Data");
+    
+    ui_pop_window(*cmdx.ui);
+}

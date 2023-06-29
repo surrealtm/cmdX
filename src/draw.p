@@ -86,14 +86,16 @@ flush_font_buffer :: (renderer: *Renderer) {
 
     set_shader(*renderer.font_shader);
     set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix);
-    set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{ xx renderer.background_color.r / 255.0,
-                               xx renderer.background_color.g / 255.0,
-                               xx renderer.background_color.b / 255.0,
-                               xx renderer.background_color.a / 255.0 });
-    set_shader_uniform_v4f(*renderer.font_shader, "u_foreground", v4f.{ xx renderer.foreground_color.r / 255.0,
-                               xx renderer.foreground_color.g / 255.0,
-                               xx renderer.foreground_color.b / 255.0,
-                               xx renderer.foreground_color.a / 255.0 });
+    set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{
+        xx renderer.background_color.r / 255.0,
+        xx renderer.background_color.g / 255.0,
+        xx renderer.background_color.b / 255.0,
+        xx renderer.background_color.a / 255.0 });
+    set_shader_uniform_v4f(*renderer.font_shader, "u_foreground", v4f.{
+        xx renderer.foreground_color.r / 255.0,
+        xx renderer.foreground_color.g / 255.0,
+        xx renderer.foreground_color.b / 255.0,
+        xx renderer.foreground_color.a / 255.0 });
     
     glBindTexture(GL_TEXTURE_2D, renderer.font_texture_handle);
     
@@ -244,6 +246,7 @@ convert_ui_color :: (ui: UI_Color) -> Color {
 
 ui_draw_text :: (cmdx: *CmdX, text: string, position: UI_Vector2, foreground_color: UI_Color, background_color: UI_Color) {
     draw_text(*cmdx.renderer, *cmdx.font, text, xx position.x, xx position.y, convert_ui_color(foreground_color), convert_ui_color(background_color));
+    flush_font_buffer(*cmdx.renderer); // Since the UI heavily relies upon scissors, rendering batches of text might not work correctly and cull some previous texts. For that reason, simply flush after every draw call.
 }
 
 ui_draw_quad :: (cmdx: *CmdX, color: UI_Color, rounding: f32, top_left: UI_Vector2, size: UI_Vector2) {

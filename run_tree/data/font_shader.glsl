@@ -24,8 +24,8 @@ uniform sampler2D t_texture;
 uniform vec4 u_foreground;
 uniform vec4 u_background;
 
-const float c_gamma = 1.2;
-const float c_inverse_gamma = 1 / c_gamma;
+const float c_gamma = 1.0;
+const float c_inverse_gamma = 1.0 / c_gamma;
 
 vec4 pow4(vec4 _input, float exponent) {
     vec4 _output = vec4(pow(_input.x, exponent),
@@ -43,13 +43,16 @@ void main(void) {
     vec4 linear_foreground = pow4(u_foreground, c_gamma);
     vec4 linear_background = pow4(u_background, c_gamma);
     
-    // Blend between the background color and the pixel
-    float r = texture_sample.r * linear_foreground.r + (1.0 - texture_sample.r) * linear_background.r;
-    float g = texture_sample.g * linear_foreground.g + (1.0 - texture_sample.g) * linear_background.g;
-    float b = texture_sample.b * linear_foreground.b + (1.0 - texture_sample.b) * linear_background.b;
+    // Blend between the background color and the pixel. Since the outputted pixel does not have
+    // an actual alpha value, we need to premultiply the alpha of both the fore- and the background
+    // color here to produce correct results if at least one of them is transparent.
+    float r = texture_sample.r * linear_foreground.r * linear_foreground.a + (1.0 - texture_sample.r) * linear_background.r * linear_background.a;
+    float g = texture_sample.g * linear_foreground.g * linear_foreground.a + (1.0 - texture_sample.g) * linear_background.g * linear_background.a;
+    float b = texture_sample.b * linear_foreground.b * linear_foreground.a + (1.0 - texture_sample.b) * linear_background.b * linear_background.a;
 
     // Gamma encode the resuling texel
-    out_color = pow4(vec4(r, g, b, texture_sample.a), c_inverse_gamma);
+    out_color = pow4(vec4(r, g, b, 1), c_inverse_gamma);
+    //out_color = vec4(a, 0, 0, 1);
 #else
     // NO LCD SUBFILTERING
     float alpha = texture2D(t_texture, pass_uv).r;
