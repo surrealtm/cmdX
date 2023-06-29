@@ -76,6 +76,11 @@ set_foreground_color :: (renderer: *Renderer, color: Color) {
     renderer.foreground_color = color;
 }
 
+set_background_color :: (renderer: *Renderer, color: Color) {
+    if !compare_colors(renderer.background_color, color) flush_font_buffer(renderer);
+    renderer.background_color = color;
+}
+
 flush_font_buffer :: (renderer: *Renderer) {
     if renderer.font_glyph_count == 0 return;
 
@@ -227,4 +232,38 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
     } else
         // If the text input is active, render a filled quad
         draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, cursor_color_blended);
+}
+
+
+
+/* UI CALLBACKS */
+
+convert_ui_color :: (ui: UI_Color) -> Color {
+    return .{ ui.r, ui.g, ui.b, ui.a };
+}
+
+ui_draw_text :: (cmdx: *CmdX, text: string, position: UI_Vector2, foreground_color: UI_Color, background_color: UI_Color) {
+    draw_text(*cmdx.renderer, *cmdx.font, text, xx position.x, xx position.y, convert_ui_color(foreground_color), convert_ui_color(background_color));
+}
+
+ui_draw_quad :: (cmdx: *CmdX, color: UI_Color, rounding: f32, top_left: UI_Vector2, size: UI_Vector2) {
+    draw_quad(*cmdx.renderer, xx top_left.x, xx top_left.y, xx size.x, xx size.y, convert_ui_color(color));
+}
+
+ui_set_scissors :: (cmdx: *CmdX, top_left: UI_Vector2, size: UI_Vector2) {
+    set_scissors(xx top_left.x, xx top_left.y, xx size.x, xx size.y, cmdx.window.height);
+}
+
+ui_reset_scissors :: (cmdx: *CmdX) {
+    disable_scissors();
+}
+
+ui_query_label_size :: (cmdx: *CmdX, text: string) -> UI_Vector2 {
+    width, height := query_text_size(*cmdx.font, text);
+    return .{ xx width, xx height };
+}
+
+ui_query_character_size :: (cmdx: *CmdX, character: u8) -> UI_Vector2 {
+    width, height := query_glyph_size(*cmdx.font, character);
+    return .{ xx width, xx height };    
 }

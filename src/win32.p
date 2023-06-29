@@ -244,13 +244,7 @@ win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
     FlushFileBuffers(cmdx.win32.input_write_pipe);
 }
 
-win32_terminate_child_process :: (cmdx: *CmdX) {
-    TerminateProcess(cmdx.win32.child_process_handle, 0);
-    CloseHandle(cmdx.win32.job_handle);
-    cmdx.win32.job_handle = INVALID_HANDLE_VALUE;
-}
-
-win32_cleanup :: (cmdx: *CmdX, working_directory: string) {
+win32_cleanup :: (cmdx: *CmdX) {
     // Close the communication pipes
     CloseHandle(cmdx.win32.input_read_pipe);
     CloseHandle(cmdx.win32.input_write_pipe);
@@ -277,15 +271,21 @@ win32_cleanup :: (cmdx: *CmdX, working_directory: string) {
     // Set the internal state to be child-less
     cmdx.child_process_running = false;
     update_active_process_name(cmdx, "");
-    set_working_directory(working_directory);
 }
 
 win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
-    // Save the actual working directory of cmdX to restore it later
+    // The working directory of CmdX is NOT the current directory (since CmdX needs to be relative to it's data
+    // folder). However, when launching a process, Win32 takes the current directory as first possible path,
+    // therefore we need to quickly change the working directory when doing that.
     working_directory := get_working_directory();
-    defer free_string(working_directory, Default_Allocator); // get_working_directory() allocates a string
-    
     set_working_directory(cmdx.current_directory);
+
+    defer {
+        // Restore the original working directory
+        set_working_directory(working_directory);
+        free_string(working_directory, Default_Allocator); // get_working_directory() allocates a string
+    }
+
     
     // Set up c strings for file paths
     c_command_string    := to_cstring(command_string, *cmdx.frame_allocator);
@@ -294,14 +294,14 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     // Create a pipe to read the output of the child process
     if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, null, 0) {
         add_formatted_line(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
     
     // Create a pipe to write input from this console to the child process
     if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, null, 0) {
         add_formatted_line(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
     
@@ -315,7 +315,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     error_code:= CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 6, *cmdx.win32.pseudo_console_handle);
     if error_code!= S_OK {
         add_formatted_line(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
     
@@ -347,14 +347,14 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     
     if !InitializeProcThreadAttributeList(extended_startup_info.lpAttributeList, attribute_list_count, 0, *attribute_list_size) {
         add_formatted_line(cmdx, "Failed to initialize the attribute list for the child process (Error: %).", GetLastError());
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
     
     if !UpdateProcThreadAttribute(extended_startup_info.lpAttributeList, 0, 0x20016, cmdx.win32.pseudo_console_handle,
                                   size_of(HPCON), null, null) { // 0x20016 = PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
         add_formatted_line(cmdx, "Failed to set the pseudo console handle for the child process (Error: %).", GetLastError());
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
     
@@ -364,7 +364,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     if !CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
         add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
         DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
-        win32_cleanup(cmdx, working_directory);
+        win32_cleanup(cmdx);
         return;
     }
 
@@ -386,30 +386,42 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
     cmdx.win32.child_process_handle  = process.hProcess;
-    
-    // Wait for the child process to close his side of the pipes, so that we know the console
-    // connection can be terminated.
-    while !cmdx.win32.child_closed_the_pipe && !cmdx.window.should_close {
-        // Check if any data is available to be read in the pipe
-        win32_read_from_child_process(cmdx);
-        
-        // Render a single frame while waiting for the process to terminate
-        one_cmdx_frame(cmdx);
-        
-        // Get the current process name and display that in the window title
-        process_name: [MAX_PATH]s8 = ---;
-        process_name_length := K32GetModuleBaseNameA(process.hProcess, null, process_name, MAX_PATH);
-        update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator));
-    }
+}
 
+win32_detach_spawned_process :: (cmdx: *CmdX) {
     // Once the object has closed the pipes, Ctrl+C is no longer required to work. Therefore, reset
     // the job information. This is done to ensure that processes who have detached themselves from
     // us (which are not console applications) are not actually terminated here (they would be if the
     // flag is still set, and the handle to the job gets closed...)
-    job_info = .{};
+    job_info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
     job_info.BasicLimitInformation.LimitFlags = 0;
     SetInformationJobObject(cmdx.win32.job_handle, 9, xx *job_info, size_of(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)); // 9 = JobObjectExtendedLimitInformation
 
     win32_read_from_child_process(cmdx); // Flush all remaining data in the incoming pipe
-    win32_cleanup(cmdx, working_directory);
+
+    win32_cleanup(cmdx);
+    close_viewport(cmdx);
+}
+
+win32_terminate_child_process :: (cmdx: *CmdX) {
+    // If the user forcefully wants to terminate a process by using Ctrl+C, then do not just close the
+    // connection, actually shut the process down.
+    TerminateProcess(cmdx.win32.child_process_handle, 0);
+    win32_cleanup(cmdx);
+    close_viewport(cmdx);
+}
+
+win32_update_spawned_process :: (cmdx: *CmdX) -> bool {
+    // If the spanwed process has closed the pipes, then it disconnected from this terminal and should
+    // no longer be updated. If cmdx was terminated itself, then the connection should also be closed.
+    if cmdx.win32.child_closed_the_pipe || cmdx.window.should_close return false;
+
+    // Check if any data is available to be read in the pipe
+    win32_read_from_child_process(cmdx);
+    
+    // Get the current process name and display that in the window title
+    process_name: [MAX_PATH]s8 = ---;
+    process_name_length := K32GetModuleBaseNameA(cmdx.win32.child_process_handle, null, process_name, MAX_PATH);
+    update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator));
+    return true;
 }

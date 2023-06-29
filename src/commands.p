@@ -179,6 +179,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
             command_found = true;
+            close_viewport(cmdx);
             break;
         }
     }
@@ -203,9 +204,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         command_string := finish_string_builder(*string_builder);
         
         win32_spawn_process_for_command(cmdx, command_string);
-    }
-    
-    close_viewport(cmdx);
+    }    
 }
 
 
@@ -264,6 +263,10 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
+}
+
+settings :: (cmdx: *CmdX) {
+    cmdx.render_settings = !cmdx.render_settings;
 }
 
 ls :: (cmdx: *CmdX) {

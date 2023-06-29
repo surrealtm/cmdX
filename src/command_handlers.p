@@ -28,6 +28,10 @@ debug_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     debug(cmdx);
 }
 
+settings_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    settings(cmdx);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
@@ -77,6 +81,7 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_argument(font_size, "size", .Integer);
 
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
+    register_command(cmdx, ":settings", "Toggles the settings user interface", settings_handler);
 
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
     register_command_alias(ls, "dir");

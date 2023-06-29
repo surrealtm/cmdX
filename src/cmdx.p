@@ -6,6 +6,7 @@
 #load "window.p";
 #load "font.p";
 #load "text_input.p";
+#load "ui.p";
 #load "gl_context.p";
 #load "gl_layer.p";
 #load "string_builder.p";
@@ -78,6 +79,8 @@ CmdX :: struct {
     window: Window = ---;
     renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
+    render_settings: bool; // If we are currently in the settings menu, we need to render every frame, since the UI module is immediate mode
+    ui: UI;
     
     // Text Input
     text_input: Text_Input;
@@ -436,6 +439,8 @@ activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
 }
 
 draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {   
+    set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
+
     for cursor := start; cursor < end; ++cursor {
         character := cmdx.backlog[cursor];
         
@@ -478,6 +483,20 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.focused && !cmdx.text_input.active render_next_frame(cmdx);
     cmdx.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
 
+    if cmdx.render_settings {
+        // Prepare the ui
+        input: UI_Input = ---;
+        input.mouse_position         = .{ xx cmdx.window.mouse_x, xx cmdx.window.mouse_y };
+        input.left_button_pressed    = cmdx.window.button_pressed[Button_Code.Left];
+        input.left_button_held       = cmdx.window.button_held[Button_Code.Left];
+        input.mouse_active           = cmdx.window.mouse_active;
+        input.text_input_events      = cmdx.window.text_input_events;
+        input.text_input_event_count = cmdx.window.text_input_event_count;
+        prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height });
+
+        ui_button(*cmdx.ui, "Hello World");
+    }
+        
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
     // straight into the text input. @Cleanup what happens if the 'A' key is a short cut? We probably
     // only want to trigger an action in that case, and not have it go into the text input...
@@ -526,9 +545,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cursor_alpha_previous != cmdx.text_input.cursor_alpha render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
    
     // Check for potential control keys
-    if cmdx.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
-        // Terminate the current running process
-        win32_terminate_child_process(cmdx);
+    if cmdx.child_process_running {
+        if !win32_update_spawned_process(cmdx) {
+            // If CmdX is terminating, or if the child process has disconnected from us (either by terminating
+            // itself, or by closing the pipes), then close the connectoin to it.
+            win32_detach_spawned_process(cmdx);
+        }
+            
+        if cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
+            // Terminate the current running process
+            win32_terminate_child_process(cmdx);
+        }
     }
     
     // Handle input for this frame
@@ -577,7 +604,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
     if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
 
-    if cmdx.render_frame {    
+    if cmdx.render_frame || cmdx.render_settings {    
         // Set up the first line to be rendered, as well as the highest line index to be rendered
         line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
         max_line_index: s64 = line_index + drawn_line_count - 1;
@@ -636,6 +663,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         prefix_string := get_prefix_string(cmdx, *cmdx.frame_memory_arena);
         draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
 
+        // Render the ui on top of the actual terminal stuff
+        if cmdx.render_settings {
+            draw_ui(*cmdx.ui, cmdx.window.frame_time);
+            flush_font_buffer(*cmdx.renderer); // Flush all remaining ui texta
+        }
+            
         // Finish the frame, sleep until the next one
         swap_gl_buffers(*cmdx.window);
 
@@ -789,7 +822,26 @@ cmdx :: () -> s32 {
     create_theme(*cmdx, "blue",    DEFAULT_FONT, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
     create_theme(*cmdx, "monokai", DEFAULT_FONT, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
-        
+
+    // Create the ui
+    ui_callbacks: UI_Callbacks = .{
+        *cmdx,
+        ui_draw_text,
+        ui_draw_quad,
+        ui_set_scissors,
+        ui_reset_scissors,
+        ui_query_label_size,
+        ui_query_character_size
+    };
+
+    ui_font_stats: UI_Font_Statistics = .{
+        cmdx.font.line_height,
+        cmdx.font.ascender,
+        cmdx.font.descender
+    };
+    
+    create_ui(*cmdx.ui, ui_callbacks, UI_Light_Theme, ui_font_stats);
+    
     // After everything has been loaded, actually show the window. This will prevent a small time 
     // frame in which the window is just blank white, which does not seem very clean. Instead, the 
     // window takes a little longer to show up, but it immediatly gets filled with the first frame.
@@ -805,10 +857,11 @@ cmdx :: () -> s32 {
         
     // Cleanup
     write_config_file(*cmdx.config, CONFIG_FILE_NAME);
+    destroy_ui(*cmdx.ui);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
     destroy_window(*cmdx.window);
-
+    
     // Release all memory.
     destroy_memory_pool(*cmdx.global_memory_pool);
     destroy_memory_arena(*cmdx.global_memory_arena);
