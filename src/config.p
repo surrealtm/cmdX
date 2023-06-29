@@ -24,6 +24,8 @@ Config :: struct {
     allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
     actions: [..]Action;
+
+    error_messages: [..]string;
 }
 
 property_type_to_string :: (type: Property_Type) -> string {
@@ -185,7 +187,27 @@ write_config_file :: (config: *Config, file_path: string) {
 config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
     // Since the cmdx backbuffer has not been set up at the time the config gets loaded (since the backbuffer
     // size actually depends on the config, and so on...), we can't just add messages to the backlog.
-    // Instead, for now print them out on the actual console, and maybe in the future have something
-    // more sophisticated here...
-    print(format, ..parameters);
+    // Instead, print them out on the console (in case cmdx actually has a console attached), and add them
+    // to a list which will be printed to the actual backbuffer once it has been set up.
+    size := query_required_print_buffer_size(format, ..parameters);
+    string := allocate_string(size, Default_Allocator);
+    mprint(string, format, ..parameters);
+    print(string);
+    array_add(*cmdx.config.error_messages, string);
+}
+
+flush_config_errors :: (cmdx: *CmdX) {
+    if !cmdx.config.error_messages.count return;
+
+    set_true_color(cmdx, .{ 255, 100, 100, 255 });
+    for i := 0; i < cmdx.config.error_messages.count; ++i {
+        message := array_get_value(*cmdx.config.error_messages, i);
+        add_line(cmdx, message);
+        free_string(message, Default_Allocator);
+    }
+
+    new_line(cmdx);
+    set_themed_color(cmdx, .Default);
+    
+    array_clear(*cmdx.config.error_messages);
 }

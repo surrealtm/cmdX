@@ -798,7 +798,8 @@ cmdx :: () -> s32 {
     // Display the welcome message
     clear_backlog(*cmdx); // Prepare the backlog by clearing it. This will create the initial line and color range
     welcome_screen(*cmdx, run_tree);
-        
+    flush_config_errors(*cmdx);
+    
     // Main loop until the window gets closed
     while !cmdx.window.should_close    one_cmdx_frame(*cmdx);
         

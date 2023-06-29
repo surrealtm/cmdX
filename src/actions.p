@@ -166,16 +166,36 @@ parse_action_data :: (type: Action_Type, string: string, allocator: *Allocator) 
 read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     arguments := split_string(line, ' ', true, *cmdx.frame_allocator);
 
-    // @Cleanup error handling
+    if arguments.count != 3 {
+        config_error(cmdx, "Malformed config action in line %:", line_count);
+        config_error(cmdx, "  Expected exactly three arguments, in the syntax: <key> <type> <data>");
+        return;
+    }
+    
+    // @cleanup error handling
 
     trigger_argument     := array_get_value(*arguments, 0);
     action_type_argument := array_get_value(*arguments, 1);
     action_data_argument := array_get_value(*arguments, 2);
+    
+    trigger := parse_key_code(trigger_argument);
+    type    := parse_action_type(action_type_argument);
+    data    := parse_action_data(type, action_data_argument, config.allocator);
+
+    if trigger == .None {
+        config_error(cmdx, "Malformed config action in line %: Unknown key code '%'", line_count, trigger_argument);
+        return;
+    }
+
+    if type == .Undefined {
+        config_error(cmdx, "Malformed config action in line %: Unknown action type '%'", line_count, action_type_argument);
+        return;
+    }
 
     action := array_push(*config.actions);
-    action.trigger = parse_key_code(trigger_argument);
-    action.type    = parse_action_type(action_type_argument);
-    action.data    = parse_action_data(action.type, action_data_argument, config.allocator);
+    action.trigger = trigger;
+    action.type    = type;
+    action.data    = data;
 }
 
 write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
