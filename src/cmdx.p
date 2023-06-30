@@ -79,7 +79,7 @@ CmdX :: struct {
     window: Window = ---;
     renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
-    render_settings: bool; // If we are currently in the settings menu, we need to render every frame, since the UI module is immediate mode
+    render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
     ui: UI;
     
     // Text Input
@@ -483,7 +483,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.focused && !cmdx.text_input.active render_next_frame(cmdx);
     cmdx.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
 
-    if cmdx.render_settings {
+    if cmdx.render_ui {
         // Prepare the ui
         input: UI_Input = ---;
         input.mouse_position         = .{ xx cmdx.window.mouse_x, xx cmdx.window.mouse_y };
@@ -494,7 +494,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         input.text_input_event_count = cmdx.window.text_input_event_count;
         prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height });
 
-        do_actions_window(cmdx);
+        // Do the actual ui panels
     }
         
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
@@ -604,7 +604,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
     if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
 
-    if cmdx.render_frame || cmdx.render_settings {    
+    if cmdx.render_frame || cmdx.render_ui {    
         // Set up the first line to be rendered, as well as the highest line index to be rendered
         line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
         max_line_index: s64 = line_index + drawn_line_count - 1;
@@ -664,7 +664,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.text_input, prefix_string, cursor_x, cursor_y);
 
         // Render the ui on top of the actual terminal stuff
-        if cmdx.render_settings {
+        if cmdx.render_ui {
             draw_ui(*cmdx.ui, cmdx.window.frame_time);
             flush_font_buffer(*cmdx.renderer); // Flush all remaining ui texta
         }

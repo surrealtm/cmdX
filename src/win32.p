@@ -273,7 +273,7 @@ win32_cleanup :: (cmdx: *CmdX) {
     update_active_process_name(cmdx, "");
 }
 
-win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
+win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool {
     // The working directory of CmdX is NOT the current directory (since CmdX needs to be relative to it's data
     // folder). However, when launching a process, Win32 takes the current directory as first possible path,
     // therefore we need to quickly change the working directory when doing that.
@@ -295,14 +295,14 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, null, 0) {
         add_formatted_line(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
     
     // Create a pipe to write input from this console to the child process
     if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, null, 0) {
         add_formatted_line(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
     
     // Create the actual pseudo console, using the pipe handles that were just created.
@@ -316,7 +316,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     if error_code!= S_OK {
         add_formatted_line(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
     
     pseudo_console: *PseudoConsole = cast(*PseudoConsole) cmdx.win32.pseudo_console_handle;
@@ -348,14 +348,14 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     if !InitializeProcThreadAttributeList(extended_startup_info.lpAttributeList, attribute_list_count, 0, *attribute_list_size) {
         add_formatted_line(cmdx, "Failed to initialize the attribute list for the child process (Error: %).", GetLastError());
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
     
     if !UpdateProcThreadAttribute(extended_startup_info.lpAttributeList, 0, 0x20016, cmdx.win32.pseudo_console_handle,
                                   size_of(HPCON), null, null) { // 0x20016 = PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
         add_formatted_line(cmdx, "Failed to set the pseudo console handle for the child process (Error: %).", GetLastError());
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
     
     // Launch the process with the attached information. The child process will inherit the current 
@@ -365,7 +365,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
         add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
         DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
         win32_cleanup(cmdx);
-        return;
+        return false;
     }
 
     // Delete the proc thread attribute, since that is no longer needed after the process has been spawned
@@ -386,6 +386,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) {
     cmdx.child_process_running       = true;
     cmdx.win32.child_closed_the_pipe = false;
     cmdx.win32.child_process_handle  = process.hProcess;
+    return true;
 }
 
 win32_detach_spawned_process :: (cmdx: *CmdX) {

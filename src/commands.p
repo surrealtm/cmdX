@@ -6,6 +6,7 @@ Command_Handler :: (*CmdX, [..]string);
 Command_Argument_Type :: enum {
     String;
     Integer;
+    Key_Code;
 }
 
 Command_Argument :: struct {
@@ -49,9 +50,10 @@ command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
     result: string = ---;
     
     switch type {
-        case .String; result = "String";
-        case .Integer; result = "Integer";
-        case; result = "Unknown Type";
+    case .String; result = "String";
+    case .Integer; result = "Integer";
+    case .Key_Code; result = "Key";
+    case; result = "Unknown Type";
     }
     
     return result;
@@ -61,13 +63,17 @@ is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) 
     valid := false;
     
     switch type {
-        case .String; valid = true;
+    case .String; valid = true;
         
-        case .Integer;
+    case .Integer;
         valid = true;
         for i := 0; i < value.count; ++i {
             valid &= is_digit_character(value[i]);
         }
+
+    case .Key_Code;
+        key_code := parse_key_code(value);
+        valid = key_code != .None;
     }
     
     return valid;
@@ -81,6 +87,12 @@ get_int_argument :: (argument_values: *[..]string, index: u32) -> s64 {
     string := array_get_value(argument_values, index);
     int, valid := string_to_int(string);
     return int;
+}
+
+get_key_code_argument :: (argument_values: *[..]string, index: u32) -> Key_Code {
+    string := array_get_value(argument_values, index);
+    key_code := parse_key_code(string);
+    return key_code;
 }
 
 dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
@@ -203,7 +215,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         command_string := finish_string_builder(*string_builder);
         
-        win32_spawn_process_for_command(cmdx, command_string);
+        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
     }    
 }
 
@@ -265,8 +277,11 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 }
 
-settings :: (cmdx: *CmdX) {
-    cmdx.render_settings = !cmdx.render_settings;
+add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
+    action        := array_push(*cmdx.config.actions);
+    action.trigger = trigger;
+    action.type    = .Macro;
+    action.data.macro_text = copy_string(text, cmdx.config.allocator);
 }
 
 ls :: (cmdx: *CmdX) {

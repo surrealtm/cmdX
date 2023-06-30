@@ -171,8 +171,6 @@ read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         config_error(cmdx, "  Expected exactly three arguments, in the syntax: <key> <type> <data>");
         return;
     }
-    
-    // @cleanup error handling
 
     trigger_argument     := array_get_value(*arguments, 0);
     action_type_argument := array_get_value(*arguments, 1);
@@ -205,6 +203,7 @@ write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
         bprint(file, "% ", key_code_to_string(action.trigger));
         bprint(file, "% ", action_type_to_string(action.type));
         bprint(file, "\"%\"", action.data.macro_text);
+        bprint(file, "\n");
     }
 }
 
@@ -226,18 +225,4 @@ execute_actions_with_trigger :: (cmdx: *CmdX, list: *[..]Action, key_code: Key_C
     }
 
     return executed_something;
-}
-
-
-
-do_actions_window :: (cmdx: *CmdX) {
-    ui_push_window(*cmdx.ui, "Actions");
-
-    ui_horizontal_layout(*cmdx.ui);
-    ui_push_width(*cmdx.ui, .Pixels, 300, 0.6);
-    ui_label(*cmdx.ui, "Trigger");
-    ui_label(*cmdx.ui, "Type");
-    ui_label(*cmdx.ui, "Data");
-    
-    ui_pop_window(*cmdx.ui);
 }
