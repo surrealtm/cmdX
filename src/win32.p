@@ -277,20 +277,11 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // The working directory of CmdX is NOT the current directory (since CmdX needs to be relative to it's data
     // folder). However, when launching a process, Win32 takes the current directory as first possible path,
     // therefore we need to quickly change the working directory when doing that.
-    working_directory := get_working_directory();
-    set_working_directory(cmdx.current_directory);
-
-    defer {
-        // Restore the original working directory
-        set_working_directory(working_directory);
-        free_string(working_directory, Default_Allocator); // get_working_directory() allocates a string
-    }
-
-    
+   
     // Set up c strings for file paths
     c_command_string    := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
-    
+        
     // Create a pipe to read the output of the child process
     if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, null, 0) {
         add_formatted_line(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
@@ -357,6 +348,13 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
         win32_cleanup(cmdx);
         return false;
     }
+
+    // For some god-forsaken reason the working directory must be reset before the hPtyReference handle gets
+    // closed, or else opening files won't work??? Thats why we cannot use defer here, and instead must do
+    // this absolute tragedy... I do not even fucking know what the hell microsoft...
+    //    - vmat 07.01.23
+    previous_working_directory := get_working_directory();
+    set_working_directory(cmdx.current_directory);
     
     // Launch the process with the attached information. The child process will inherit the current 
     // std handles if it wants a console connection.
@@ -364,13 +362,19 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     if !CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
         add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
         DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
+        set_working_directory(previous_working_directory);
+        free_string(previous_working_directory, Default_Allocator);
         win32_cleanup(cmdx);
         return false;
     }
 
+    // Reset the working directory.
+    set_working_directory(previous_working_directory);
+    free_string(previous_working_directory, Default_Allocator);
+
     // Delete the proc thread attribute, since that is no longer needed after the process has been spawned
     DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
-
+    
     // Attach the launched process to our created job, so that all child processes of this process will also be
     // terminated. After that has been done, resume the thread to actually start the child process.
     AssignProcessToJobObject(cmdx.win32.job_handle, process.hProcess);
@@ -380,7 +384,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // process terminates. This is a bit sketchy, since there does not seem to be an api for it,
     // but that is what the windows terminal does
     // (in src/cascadia/terminalconnection/contpyconnection.cpp), and it works, so yeah...
-    CloseHandle(pseudo_console.hPtyReference);
+    if CloseHandle(pseudo_console.hPtyReference) == 0 print("Failed to close pseudo console reference handle.\n");
     
     // Prepare the cmdx internal state
     cmdx.child_process_running       = true;
