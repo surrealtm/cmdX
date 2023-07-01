@@ -28,6 +28,10 @@ debug_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     debug(cmdx);
 }
 
+config_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    config(cmdx);
+}
+
 add_macro_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     trigger := get_key_code_argument(*argument_values, 0);
     text := get_string_argument(*argument_values, 1);
@@ -83,6 +87,7 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_argument(font_size, "size", .Integer);
 
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
+    register_command(cmdx, ":config", "Prints information about the current config", config_handler);
 
     add_macro := register_command(cmdx, ":add-macro", "Adds a new macro to the configuration", add_macro_handler);
     register_command_argument(add_macro, "trigger", .Key_Code);

@@ -277,6 +277,32 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 }
 
+config :: (cmdx: *CmdX) {
+    add_line(cmdx, "Properties:");
+
+    for i := 0; i < cmdx.config.properties.count; ++i {
+        property := array_get(*cmdx.config.properties, i);
+        add_formatted_text(cmdx, "    %: % = ", property.name, property_type_to_string(property.type));
+
+        switch property.type {
+        case .Integer; add_formatted_line(cmdx, "%", ~property.value._integer);
+        case .String; add_formatted_line(cmdx, "%", ~property.value._string);
+        }
+    }
+
+    new_line(cmdx);
+    add_line(cmdx, "Actions:");
+    
+    for i := 0; i < cmdx.config.actions.count; ++i {
+        action := array_get(*cmdx.config.actions, i);
+        add_formatted_text(cmdx, "    %: % = ", key_code_to_string(action.trigger), action_type_to_string(action.type));
+
+        switch action.type {
+        case .Macro; add_formatted_line(cmdx, "\"%\"", action.data.macro_text);
+        }
+    }
+}
+
 add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
     action        := array_push(*cmdx.config.actions);
     action.trigger = trigger;
