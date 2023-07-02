@@ -737,11 +737,8 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
 }
 
 update_font_size :: (cmdx: *CmdX) {
-    for i := 0; i < cmdx.themes.count; ++i {
-        theme := array_get(*cmdx.themes, i);
-        destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
-        create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
-    }
+    destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
+    create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
 }
 
 update_active_process_name :: (cmdx: *CmdX, name: string) {
@@ -798,6 +795,7 @@ cmdx :: () -> s32 {
     
     // Set up all the required config properties, and read the config file if it exists
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
+    create_string_property(*cmdx.config, "font-name", *cmdx.font_path, DEFAULT_FONT);
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
@@ -814,7 +812,7 @@ cmdx :: () -> s32 {
     cmdx.backlog = allocate(*cmdx.global_allocator, BACKLOG_SIZE);
     
     // Load the font
-    create_font(*cmdx.font, DEFAULT_FONT, cmdx.font_size, true, create_gl_texture_2d, null);
+    create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     
     // Create the builtin themes
     create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
