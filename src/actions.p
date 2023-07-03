@@ -190,6 +190,11 @@ read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         return;
     }
 
+    if find_action_with_trigger(cmdx, trigger) {
+        config_error(cmdx, "Duplicate action trigger binding in line %: The trigger '%' has been used before.", line_count, key_code_to_string(trigger));
+        return;
+    }
+    
     action := array_push(*config.actions);
     action.trigger = trigger;
     action.type    = type;
