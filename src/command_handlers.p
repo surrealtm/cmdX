@@ -1,5 +1,6 @@
 help_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    help(cmdx);
+    command_name := get_string_argument(*argument_values, 0);
+    help(cmdx, command_name);
 }
 
 quit_handler :: (cmdx: *CmdX, argument_values: [..]string) {
@@ -72,6 +73,20 @@ register_command_argument :: (command: *Command, name: string, type: Command_Arg
     argument := array_push(*command.arguments);
     argument.name = name;
     argument.type = type;
+    argument.is_optional_argument = false;
+    argument.default_value = .{};
+}
+
+register_optional_command_argument :: (command: *Command, name: string, type: Command_Argument_Type, default_value: string) {
+    assert(!command.contains_optional_argument, "This command already contains an optional argument, for now only one is allowed.");
+
+    command.contains_optional_argument = true;
+    
+    argument := array_push(*command.arguments);
+    argument.name = name;
+    argument.type = type;
+    argument.is_optional_argument = true;
+    argument.default_value = default_value;
 }
 
 register_command_alias :: (command: *Command, alias: string) {
@@ -79,7 +94,9 @@ register_command_alias :: (command: *Command, alias: string) {
 }
 
 register_all_commands :: (cmdx: *CmdX) {
-    register_command(cmdx, ":help", "Displays this help message", help_handler);
+    help := register_command(cmdx, ":help", "Displays help information about all available commands", help_handler);
+    register_optional_command_argument(help, "command", .String, "");
+    
     register_command(cmdx, ":quit", "Terminates cmdX", quit_handler);
     register_command(cmdx, ":clear", "Clears the backlog", clear_handler);
 

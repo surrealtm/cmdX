@@ -796,7 +796,7 @@ cmdx :: () -> s32 {
     // Set up all the required config properties, and read the config file if it exists
     create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
     create_string_property(*cmdx.config, "font-name", *cmdx.font_path, DEFAULT_FONT);
-    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "light");
+    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "blue");
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer

@@ -12,6 +12,8 @@ Command_Argument_Type :: enum {
 Command_Argument :: struct {
     name: string;
     type: Command_Argument_Type;
+    is_optional_argument: bool;
+    default_value: string;
 }
 
 Command :: struct {
@@ -20,6 +22,7 @@ Command :: struct {
     description: string;
     handler: Command_Handler;
     arguments: [..]Command_Argument;
+    contains_optional_argument: bool;
 }
 
 
@@ -38,7 +41,15 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     
     for i := 0; i < command.arguments.count; ++i {
         argument := array_get(*command.arguments, i);
-        append_format(*builder, "    '%': '%'", argument.name, command_argument_type_to_string(argument.type));
+
+        append_string(*builder, "    ");
+
+        if argument.is_optional_argument   append_string(*builder, "[");
+        
+        append_format(*builder, "'%': %", argument.name, command_argument_type_to_string(argument.type));
+
+        if argument.is_optional_argument   append_string(*builder, "]");
+
         if i + 1 < command.arguments.count append_string(*builder, ",");
     }
     
@@ -96,6 +107,31 @@ get_key_code_argument :: (argument_values: *[..]string, index: u32) -> Key_Code 
 }
 
 dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string) -> bool {
+    if argument_values.count == command.arguments.count - 1 && command.contains_optional_argument {
+        // If the command has an optional argument, and it seems like that argument is currently missing
+        // from the array, then try to add the default value to the argument array.
+
+        // Find the optional argument, in case it is not the last one (which is technically not enforced...)
+        argument: *Command_Argument = null;
+        argument_index := 0;
+        
+        for i := 0; i < command.arguments.count; ++i {
+            arg := array_get(*command.arguments, i);
+            if arg.is_optional_argument {
+                argument = arg;
+                argument_index = i;
+                break;
+            }
+        }
+
+        assert(argument != null, "Could not find the optional argument for a command."); // contains_optional_argument should only ever be set if an optional argument is created...
+
+        if argument_index == argument_values.count {
+            array_add(*argument_values, argument.default_value);
+        } else
+            array_add_at(*argument_values, argument_index, argument.default_value);
+    }
+    
     if argument_values.count != command.arguments.count {
         add_formatted_line(cmdx, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
         return false;
@@ -112,6 +148,21 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
     
     command.handler(cmdx, argument_values);
     return true;
+}
+
+find_command_by_name :: (cmdx: *CmdX, name: string) -> *Command {
+    command: *Command = null;
+
+    for i := 0; i < cmdx.commands.count; ++i {
+        cmd := array_get(*cmdx.commands, i);
+
+        if compare_command_name(cmd, name) {
+            command = cmd;
+            break;
+        }
+    }
+    
+    return command;
 }
 
 
@@ -222,15 +273,26 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
 
 /* Builtin command behaviour */
 
-help :: (cmdx: *CmdX) {
-    add_line(cmdx, "=== HELP ===");
-    
-    for i := 0; i < cmdx.commands.count; ++i {
-        command := array_get(*cmdx.commands, i);
-        print_command_syntax(cmdx, command);
+help :: (cmdx: *CmdX, command_name: string) {
+    if command_name.count == 0 {
+        // Default argument, list all commands
+        add_line(cmdx, "=== HELP ===");
+        
+        for i := 0; i < cmdx.commands.count; ++i {
+            command := array_get(*cmdx.commands, i);
+            print_command_syntax(cmdx, command);
+        }
+        
+        add_line(cmdx, "=== HELP ===");
+    } else {
+        // A specific command was specified, display that syntax.
+        command := find_command_by_name(cmdx, command_name);
+        if command {
+            print_command_syntax(cmdx, command);
+        } else {
+            add_formatted_line(cmdx, "No command could be found under the name '%'.", command_name);
+        }
     }
-    
-    add_line(cmdx, "=== HELP ===");
 }
 
 quit :: (cmdx: *CmdX) {
