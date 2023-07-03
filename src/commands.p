@@ -304,10 +304,24 @@ config :: (cmdx: *CmdX) {
 }
 
 add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
+    if find_action_with_trigger(cmdx, trigger) != null {
+        add_formatted_line(cmdx, "An action bound to trigger '%' already exists.", key_code_to_string(trigger));
+        return;
+    }
+
     action        := array_push(*cmdx.config.actions);
     action.trigger = trigger;
     action.type    = .Macro;
     action.data.macro_text = copy_string(text, cmdx.config.allocator);
+}
+
+remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
+    removed_something := remove_action_by_trigger(cmdx, trigger);
+
+    if !removed_something {
+        add_formatted_line(cmdx, "No action bound to trigger '%' exists.", key_code_to_string(trigger));
+        return;
+    }
 }
 
 ls :: (cmdx: *CmdX) {

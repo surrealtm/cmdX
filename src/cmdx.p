@@ -502,7 +502,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // only want to trigger an action in that case, and not have it go into the text input...
     
     for i := 0; i < cmdx.window.key_pressed.count; ++i {
-        if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, *cmdx.config.actions, xx i) break;
+        if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;
     }
 
     for i := 0; i < cmdx.window.text_input_event_count; ++i {

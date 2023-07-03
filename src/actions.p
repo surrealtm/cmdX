@@ -207,22 +207,47 @@ write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
     }
 }
 
-execute_actions_with_trigger :: (cmdx: *CmdX, list: *[..]Action, key_code: Key_Code) -> bool {
-    executed_something := false;
+find_action_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> *Action {
+    result: *Action = null;
     
-    for i := 0; i < list.count; ++i {
-        action := array_get(list, i);
+    for i := 0; i < cmdx.config.actions.count; ++i {
+        action := array_get(*cmdx.config.actions, i);
 
-        if action.trigger == key_code {
-            switch action.type {
-            case .Macro;
-                clear_text_input(*cmdx.text_input);
-                set_text_input_string(*cmdx.text_input, action.data.macro_text);
-            }
-            
-            executed_something = true;
+        if action.trigger == trigger {
+            result = action;
+            break;
         }
     }
 
-    return executed_something;
+    return result;
+}
+
+execute_actions_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
+    action := find_action_with_trigger(cmdx, trigger);
+
+    if !action return true;
+    
+    switch action.type {
+    case .Macro;
+        clear_text_input(*cmdx.text_input);
+        set_text_input_string(*cmdx.text_input, action.data.macro_text);
+    }
+    
+    return true;
+}
+
+remove_action_by_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
+    removed_something := false;
+
+    for i := 0; i < cmdx.config.actions.count; ++i {
+        action := array_get(*cmdx.config.actions, i);
+
+        if action.trigger == trigger {
+            array_remove(*cmdx.config.actions, i);
+            removed_something = true;
+            break;
+        }
+    }
+    
+    return removed_something;
 }

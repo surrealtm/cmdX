@@ -38,6 +38,11 @@ add_macro_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     add_macro(cmdx, trigger, text);
 }
 
+remove_macro_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    trigger := get_key_code_argument(*argument_values, 0);
+    remove_macro(cmdx, trigger);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     ls(cmdx);
 }
@@ -92,6 +97,9 @@ register_all_commands :: (cmdx: *CmdX) {
     add_macro := register_command(cmdx, ":add-macro", "Adds a new macro to the configuration", add_macro_handler);
     register_command_argument(add_macro, "trigger", .Key_Code);
     register_command_argument(add_macro, "text", .String);
+
+    remove_macro := register_command(cmdx, ":remove-macro", "Removes a macro from the configuration", remove_macro_handler);
+    register_command_argument(remove_macro, "trigger", .Key_Code);
     
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
     register_command_alias(ls, "dir");
