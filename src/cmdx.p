@@ -735,7 +735,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     cmdx.active_theme_name = cmdx.active_theme.name;    
 }
 
-update_font_size :: (cmdx: *CmdX) {
+update_font :: (cmdx: *CmdX) {
     destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
     create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
 }

@@ -1,7 +1,7 @@
 // A command handler takes in the actual name of the command, as well as all the arguments parsed from
 // the input. If the command has been parsed successfully (no syntax errors), the handler returns true. 
 // If the handler returns false, the custom help message for the command will be displayed.
-Command_Handler :: (*CmdX, [..]string);
+Command_Handler :: (*CmdX, *[..]string);
 
 Command_Argument_Type :: enum {
     String;
@@ -166,7 +166,7 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
         }
     }
     
-    command.handler(cmdx, argument_values);
+    command.handler(cmdx, *argument_values);
     return true;
 }
 
@@ -341,7 +341,13 @@ theme_lister :: (cmdx: *CmdX) {
 
 font_size :: (cmdx: *CmdX, size: u32) {
     cmdx.font_size = size;
-    update_font_size(cmdx);
+    update_font(cmdx);
+}
+
+font_name :: (cmdx: *CmdX, path: string) {
+    free_string(cmdx.font_path, cmdx.config.allocator);
+    cmdx.font_path = copy_string(path, cmdx.config.allocator);
+    update_font(cmdx);
 }
 
 debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
@@ -368,7 +374,7 @@ config :: (cmdx: *CmdX) {
 
         switch property.type {
         case .Integer; add_formatted_line(cmdx, "%", ~property.value._integer);
-        case .String; add_formatted_line(cmdx, "%", ~property.value._string);
+        case .String; add_formatted_line(cmdx, "\"%\"", ~property.value._string);
         }
     }
 

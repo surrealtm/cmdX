@@ -3,69 +3,73 @@
 // the compiler supports that. Until then, we manually need to register commands and write
 // their command handlers.
 
-
-help_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    command_name := get_string_argument(*argument_values, 0);
+help_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    command_name := get_string_argument(argument_values, 0);
     help(cmdx, command_name);
 }
 
-quit_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+quit_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     quit(cmdx);
 }
 
-clear_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+clear_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     clear(cmdx);
 }
 
-theme_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    theme_name := get_string_argument(*argument_values, 0);
+theme_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    theme_name := get_string_argument(argument_values, 0);
     theme(cmdx, theme_name);
 }
 
-theme_lister_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+theme_lister_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     theme_lister(cmdx);
 }
 
-font_size_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    size := get_int_argument(*argument_values, 0);
+font_size_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    size := get_int_argument(argument_values, 0);
     font_size(cmdx, size);
 }
 
-debug_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+font_name_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    path := get_string_argument(argument_values, 0);
+    font_name(cmdx, path);
+}
+
+debug_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     debug(cmdx);
 }
 
-config_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     config(cmdx);
 }
 
-add_macro_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    trigger := get_key_code_argument(*argument_values, 0);
-    text := get_string_argument(*argument_values, 1);
+add_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    trigger := get_key_code_argument(argument_values, 0);
+    text := get_string_argument(argument_values, 1);
     add_macro(cmdx, trigger, text);
 }
 
-remove_macro_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    trigger := get_key_code_argument(*argument_values, 0);
+remove_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    trigger := get_key_code_argument(argument_values, 0);
     remove_macro(cmdx, trigger);
 }
 
-ls_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+ls_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     ls(cmdx);
 }
 
-cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    new_directory := get_string_argument(*argument_values, 0);
+cd_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    new_directory := get_string_argument(argument_values, 0);
     cd(cmdx, new_directory);
 }
 
-create_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    file_path := get_string_argument(*argument_values, 0);
+create_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    file_path := get_string_argument(argument_values, 0);
     create_file(cmdx, file_path);
 }
 
-remove_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
-    file_path := get_string_argument(*argument_values, 0);
+remove_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    file_path := get_string_argument(argument_values, 0);
     remove_file(cmdx, file_path);
 }
 
@@ -119,6 +123,9 @@ register_all_commands :: (cmdx: *CmdX) {
     font_size := register_command(cmdx, ":font-size", "Updates the current font size", font_size_handler);
     register_command_argument(font_size, "size", .Integer);
 
+    font_name := register_command(cmdx, ":font", "Loads a font from the specified path", font_name_handler);
+    register_command_argument(font_name, "path", .String);
+    
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
     register_command(cmdx, ":config", "Prints information about the current config", config_handler);
 
