@@ -732,8 +732,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     // No theme with that name could be found, revert back to the default one
     add_formatted_line(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     cmdx.active_theme = *cmdx.themes.data[0];
-    cmdx.active_theme_name = cmdx.active_theme.name;
-    
+    cmdx.active_theme_name = cmdx.active_theme.name;    
 }
 
 update_font_size :: (cmdx: *CmdX) {
@@ -748,17 +747,14 @@ update_active_process_name :: (cmdx: *CmdX, name: string) {
 }
 
 update_window_name :: (cmdx: *CmdX) {
-    window_name := concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator);
+    builder: String_Builder = ---;
+    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    append_string(*builder, "cmdX | ");
+    append_string(*builder, cmdx.current_directory);
     
-    if cmdx.child_process_name.count {
-        // This is pretty bad... Should probably just use some kind of string builder for this, but that
-        // does not exist yet.   @Cleanup it now does idiot, so fix this shit
-        window_name = concatenate_strings(window_name, " (", *cmdx.frame_allocator);
-        window_name = concatenate_strings(window_name, cmdx.child_process_name, *cmdx.frame_allocator);
-        window_name = concatenate_strings(window_name, ")", *cmdx.frame_allocator);
-    }
+    if cmdx.child_process_name.count append_format(*builder, " (%)", cmdx.child_process_name);
     
-    set_window_name(*cmdx.window, window_name);
+    set_window_name(*cmdx.window, finish_string_builder(*builder));
 }
 
 

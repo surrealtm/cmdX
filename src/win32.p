@@ -427,6 +427,6 @@ win32_update_spawned_process :: (cmdx: *CmdX) -> bool {
     // Get the current process name and display that in the window title
     process_name: [MAX_PATH]s8 = ---;
     process_name_length := K32GetModuleBaseNameA(cmdx.win32.child_process_handle, null, process_name, MAX_PATH);
-    update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator));
+    update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator)); // @Cleanup this gets called once per frame, which leads to a lot of allocations and stuff, which does not seem great
     return true;
 }
