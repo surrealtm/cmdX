@@ -1,3 +1,9 @@
+// This file is complete boilerplate code to make command execution as easy as possible.
+// The reason this may seem so overhead is because it will eventually be automated, once
+// the compiler supports that. Until then, we manually need to register commands and write
+// their command handlers.
+
+
 help_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     command_name := get_string_argument(*argument_values, 0);
     help(cmdx, command_name);
@@ -53,9 +59,14 @@ cd_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     cd(cmdx, new_directory);
 }
 
-delete_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+create_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
     file_path := get_string_argument(*argument_values, 0);
-    delete_file(file_path);
+    create_file(cmdx, file_path);
+}
+
+remove_file_handler :: (cmdx: *CmdX, argument_values: [..]string) {
+    file_path := get_string_argument(*argument_values, 0);
+    remove_file(cmdx, file_path);
 }
 
 
@@ -125,8 +136,11 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_alias(cd, "change_directory");
     register_command_argument(cd, "new_directory", .String);
 
-    df := register_command(cmdx, "delete_file", "Deletes the file specified by the relative or absolute path", delete_file_handler);
-    register_command_alias(df, "rm");
-    register_command_alias(df, "remove_file");
-    register_command_argument(df, "file_path", .String);
+    cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path.", create_file_handler);
+    register_command_argument(cf, "file_path", .String);
+    
+    rf := register_command(cmdx, "remove_file", "Deletes the file or folder specified by the relative or absolute path", remove_file_handler);
+    register_command_alias(rf, "rm");
+    register_command_alias(rf, "delete_file");
+    register_command_argument(rf, "file_path", .String);
 }

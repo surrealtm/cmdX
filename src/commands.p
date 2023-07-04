@@ -28,6 +28,26 @@ Command :: struct {
 
 /* --- Command Handling --- */
 
+get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
+    // If the path is already absolute, then do not apply the relative working directory
+    cstring := to_cstring(file_path, *cmdx.frame_allocator);
+    if !PathIsRelativeA(cstring) {
+        return get_absolute_path(file_path, *cmdx.frame_allocator); 
+    }
+        
+    // Concatenate the relative path with the current directory of cmdx.
+    builder: String_Builder = ---;
+    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    append_string(*builder, cmdx.current_directory);
+    append_string(*builder, "\\");
+    append_string(*builder, file_path);
+    concatenation := finish_string_builder(*builder);
+
+    // Remove any redundency in the path (e.g. parent/../)
+    new_path := get_absolute_path(concatenation, *cmdx.frame_allocator);
+    return new_path;
+}
+
 print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     print_buffer: Print_Buffer = ---;
     print_buffer.size = 0;
@@ -397,14 +417,27 @@ ls :: (cmdx: *CmdX) {
     }
 }
 
-cd :: (cmdx: *CmdX, new_directory: string) {
-    cwd := concatenate_strings(cmdx.current_directory, "\\", *cmdx.frame_allocator);
-    concat := concatenate_strings(cwd, new_directory, *cmdx.frame_allocator);
-    if folder_exists(concat) {
+cd :: (cmdx: *CmdX, folder_path: string) {
+    absolute_path := get_path_relative_to_cd(cmdx, folder_path);
+
+    if folder_exists(absolute_path) {
         free_string(cmdx.current_directory, *cmdx.global_allocator);
-        cmdx.current_directory = get_absolute_path(concat, *cmdx.global_allocator); // Remove any redundency in the path (e.g. parent/../parent)
+        cmdx.current_directory = copy_string(absolute_path, *cmdx.global_allocator); // The new directory must survive the frame
         update_window_name(cmdx);
-    } else {
-        add_formatted_line(cmdx, "Cannot change directory: The folder '%' does not exists.", concat);
-    }
+    } else
+        add_formatted_line(cmdx, "Cannot change directory: The folder '%' does not exist.", absolute_path);
+}
+
+create_file :: (cmdx: *CmdX, file_path: string) {
+    absolute_path := get_path_relative_to_cd(cmdx, file_path);
+    
+    if !write_file(absolute_path, "", false)
+        add_formatted_line(cmdx, "Cannot create file: The path '%' is not available for file creation.", absolute_path);
+}
+
+remove_file :: (cmdx: *CmdX, file_path: string) {
+    absolute_path := get_path_relative_to_cd(cmdx, file_path);
+    
+    if !delete_file(absolute_path) && !delete_folder(absolute_path)
+        add_formatted_line(cmdx, "Cannot remove file or directory: The path '%' does not exist.", absolute_path);
 }
