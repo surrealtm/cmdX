@@ -430,20 +430,29 @@ cd :: (cmdx: *CmdX, folder_path: string) {
         free_string(cmdx.current_directory, *cmdx.global_allocator);
         cmdx.current_directory = copy_string(absolute_path, *cmdx.global_allocator); // The new directory must survive the frame
         update_window_name(cmdx);
-    } else
-        add_formatted_line(cmdx, "Cannot change directory: The folder '%' does not exist.", absolute_path);
+    } else {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Cannot change to directory '%': %", absolute_path, error_string);
+        win32_free_last_error_string(*error_string);
+    }
 }
-
+    
 create_file :: (cmdx: *CmdX, file_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, file_path);
     
-    if !write_file(absolute_path, "", false)
-        add_formatted_line(cmdx, "Cannot create file: The path '%' is not available for file creation.", absolute_path);
+    if !write_file(absolute_path, "", false) {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Cannot create file '%': %", absolute_path, error_string);
+        win32_free_last_error_string(*error_string);
+    }
 }
 
 remove_file :: (cmdx: *CmdX, file_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, file_path);
     
-    if !delete_file(absolute_path) && !delete_folder(absolute_path)
-        add_formatted_line(cmdx, "Cannot remove file or directory: The path '%' does not exist.", absolute_path);
+    if !delete_file(absolute_path) && !delete_folder(absolute_path) {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Cannot remove file or directory '%': %", absolute_path, error_string);
+        win32_free_last_error_string(*error_string);
+    }
 }
