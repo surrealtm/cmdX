@@ -210,7 +210,7 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     
     bytes_read: u32 = ---;
     
-    if !ReadFile(cmdx.win32.output_read_pipe, xx input_buffer, total_bytes_available, *bytes_read, null) {
+    if !ReadFile(cmdx.win32.output_read_pipe, input_buffer, total_bytes_available, *bytes_read, null) {
         // If this read fails, the child closed the pipe. This case should probably be covered by 
         // the return value of PeekNamedPipe, but safe is safe.
         cmdx.win32.child_closed_the_pipe = true;
@@ -244,22 +244,47 @@ win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
     FlushFileBuffers(cmdx.win32.input_write_pipe);
 }
 
+// This is another artifact showing the utter beauty of Win32. According to the docs (which does match the
+// empirical experience), ClosePseudoConsole does not return until all data in the output pipe has been
+// drained. Failing to do so will result in an infinite loop inside ClosePseudoConsole. This can happen if
+// the child process outputs stuff in an endless for-loop.
+// To fight this, when the pseudo console gets closed a new thread gets spawned that continously drains
+// the output pipe until all cleanup has happened.
+// Obviously spawning a thread to detach from the application is absolutely terrible, but this is the only
+// solution that I have found...
+//    - vmat 06.07.23
+win32_drain_thread :: (cmdx: *CmdX) -> u32 {
+    input_buffer: [512]s8 = ---;
+
+    while cmdx.child_process_running {
+        if !ReadFile(cmdx.win32.output_read_pipe, input_buffer, size_of(input_buffer), null, null)
+            // When ClosePseudoConsole has terminated, this pipe should be broken, at which point we are done.
+            break;
+    }
+    
+    return 0;
+}
+
 win32_cleanup :: (cmdx: *CmdX) {
-    // Close the communication pipes
-    CloseHandle(cmdx.win32.input_read_pipe);
+    // Close the input pipe from us to the child process
     CloseHandle(cmdx.win32.input_write_pipe);
-    CloseHandle(cmdx.win32.output_read_pipe);
-    CloseHandle(cmdx.win32.output_write_pipe);
 
-    cmdx.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
-    cmdx.win32.input_write_pipe  = INVALID_HANDLE_VALUE;
-    cmdx.win32.output_read_pipe  = INVALID_HANDLE_VALUE;
-    cmdx.win32.output_write_pipe = INVALID_HANDLE_VALUE;
-
-    // Close the pseudo console
+    // See the comment above win32_drain_thread for details on this fuckery.
+    drain_thread := CreateThread(null, 0, win32_drain_thread, cmdx, 0, null);
+    
+    // Close the pseudo console. The pseudo console will only close when there is no more data to be read.
     ClosePseudoConsole(cmdx.win32.pseudo_console_handle);
     cmdx.win32.pseudo_console_handle = INVALID_HANDLE_VALUE;
 
+    // After the data has been flushed, close the read pipe
+    CloseHandle(cmdx.win32.output_read_pipe);
+
+    cmdx.win32.input_write_pipe = INVALID_HANDLE_VALUE;
+    cmdx.win32.output_read_pipe = INVALID_HANDLE_VALUE;
+
+    // Close the drain thread handle, which should have terminated at this point due to a broken pipe.
+    CloseHandle(drain_thread);
+    
     // Close the job object
     CloseHandle(cmdx.win32.job_handle);
     cmdx.win32.job_handle = INVALID_HANDLE_VALUE;
@@ -303,8 +328,8 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     console_size: COORD;
     console_size.X = 512;
     console_size.Y = 512;
-    error_code:= CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 6, *cmdx.win32.pseudo_console_handle);
-    if error_code!= S_OK {
+    error_code:= CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 0, *cmdx.win32.pseudo_console_handle);
+    if error_code != S_OK {
         add_formatted_line(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
         win32_cleanup(cmdx);
         return false;
@@ -401,8 +426,6 @@ win32_detach_spawned_process :: (cmdx: *CmdX) {
     job_info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
     job_info.BasicLimitInformation.LimitFlags = 0;
     SetInformationJobObject(cmdx.win32.job_handle, 9, xx *job_info, size_of(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)); // 9 = JobObjectExtendedLimitInformation
-
-    win32_read_from_child_process(cmdx); // Flush all remaining data in the incoming pipe
 
     win32_cleanup(cmdx);
     close_viewport(cmdx);

@@ -877,6 +877,3 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
-
-// @Cleanup chars like Umlauts are not visible, but they are added into the text input thing, which seems
-// weird. Either completely ignore them, or display the rectangle thing.
