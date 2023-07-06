@@ -412,10 +412,16 @@ remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
     }
 }
 
-ls :: (cmdx: *CmdX) {
-    add_formatted_line(cmdx, "Contents of folder '%':", cmdx.current_directory);
+ls :: (cmdx: *CmdX, directory: string) {
+    complete_directory := cmdx.current_directory;
+
+    if directory.count {
+        complete_directory = get_path_relative_to_cd(cmdx, directory);
+    }
     
-    files := get_files_in_folder(cmdx.current_directory, *cmdx.frame_allocator);
+    add_formatted_line(cmdx, "Contents of folder '%':", complete_directory);
+    
+    files := get_files_in_folder(complete_directory, *cmdx.frame_allocator);
     
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);

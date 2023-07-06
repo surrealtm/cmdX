@@ -55,7 +55,8 @@ remove_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
 }
 
 ls_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
-    ls(cmdx);
+    directory := get_string_argument(argument_values, 0);
+    ls(cmdx, directory);
 }
 
 cd_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
@@ -137,6 +138,7 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_argument(remove_macro, "trigger", .Key_Code);
     
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
+    register_optional_command_argument(ls, "directory", .String, "");
     register_command_alias(ls, "dir");
 
     cd := register_command(cmdx, "cd", "Changes the current active directory to the specified relative or absolute path", cd_handler);
