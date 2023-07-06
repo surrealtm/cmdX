@@ -29,6 +29,12 @@ Command :: struct {
 /* --- Command Handling --- */
 
 get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
+    // If the path appendation is empty, then just take the current directory
+    if file_path.count == 0    return cmdx.current_directory;
+
+    // If the path supplied ends on a slash, it is effectively the same as without the slash, so just ignore it.
+    while file_path[file_path.count - 1] == '/' || file_path[file_path.count - 1] == '\\' file_path.count -= 1;
+    
     // If the path is already absolute, then do not apply the relative working directory
     cstring := to_cstring(file_path, *cmdx.frame_allocator);
     if !PathIsRelativeA(cstring) {
