@@ -70,11 +70,11 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
 
         append_string(*builder, "    ");
 
-        if argument.is_optional_argument   append_string(*builder, "[");
+        if argument.is_optional_argument   append_string(*builder, "<");
         
         append_format(*builder, "'%': %", argument.name, command_argument_type_to_string(argument.type));
 
-        if argument.is_optional_argument   append_string(*builder, "]");
+        if argument.is_optional_argument   append_string(*builder, ">");
 
         if i + 1 < command.arguments.count append_string(*builder, ",");
     }

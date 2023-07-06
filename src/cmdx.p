@@ -67,6 +67,8 @@ Color_Range :: struct {
 }
 
 CmdX :: struct {
+    setup: bool = false; // This flag gets set to true once the welcome screen was displayed. It indicates that everything has been loaded and initialized, and the terminal will behave as expected. Before this happens, the config may not be loaded yet, the backlog may not exist yet...
+
     // Memory management
     global_memory_arena: Memory_Arena;
     global_memory_pool: Memory_Pool;
@@ -699,6 +701,8 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
+
+    cmdx.setup = true;
 }
 
 get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
@@ -709,7 +713,7 @@ get_prefix_string :: (cmdx: *CmdX, arena: *Memory_Arena) -> string {
     return finish_string_builder(*string_builder);
 }
 
-create_theme :: (cmdx: *CmdX, name: string, font_path: string, default: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
+create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
     theme.colors[Color_Index.Default]    = default;
@@ -729,9 +733,19 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
         }
     }
     
-    // No theme with that name could be found, revert back to the default one
-    add_formatted_line(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
-    cmdx.active_theme = *cmdx.themes.data[0];
+    // No theme with that name could be found.
+    if cmdx.setup {
+        add_formatted_line(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+    } else
+        config_error(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+        
+    if !cmdx.active_theme {
+        // If there is no valid active theme pointer, revert back to the default since a theme pointer
+        // is required. If there is already a theme loaded and the user tried to switch to a different
+        // one, then just ignore this and leave everything as was.
+        cmdx.active_theme = *cmdx.themes.data[0];
+    }
+
     cmdx.active_theme_name = cmdx.active_theme.name;    
 }
 
@@ -811,10 +825,11 @@ cmdx :: () -> s32 {
     create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     
     // Create the builtin themes
-    create_theme(*cmdx, "light",   DEFAULT_FONT, .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
-    create_theme(*cmdx, "dark",    DEFAULT_FONT, .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
-    create_theme(*cmdx, "blue",    DEFAULT_FONT, .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
-    create_theme(*cmdx, "monokai", DEFAULT_FONT, .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
+    create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
+    create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
+    create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 });
+    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
+    create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
     update_active_theme_pointer(*cmdx);
 
     // Create the ui
