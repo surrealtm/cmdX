@@ -88,6 +88,10 @@ CmdX :: struct {
     text_input: Text_Input;
     history: [..]string;
     history_index: s32 = -1; // -1 means no history is used
+
+    // Auto complete
+    auto_complete_options: [..]string;
+    auto_complete_index := 0; // This is the next index that will be used for completion when the next tab key is pressed
     
     // Backlog
     backlog: *s8 = ---;
@@ -475,6 +479,21 @@ add_history :: (cmdx: *CmdX, input_string: string) {
     array_add_at(*cmdx.history, 0, copy_string(input_string, *cmdx.global_allocator));
 }
 
+update_auto_complete_options :: (cmdx: *CmdX) {
+    array_clear(*cmdx.auto_complete_options);
+    cmdx.auto_complete_index = 0;
+
+    current_string := get_string_view_from_text_input(*cmdx.text_input);
+
+    // Add all commands that start with the current string
+    for i := 0; i < cmdx.commands.count; ++i {
+        command := array_get(*cmdx.commands, i);
+        if string_starts_with(command.name, current_string) {
+            array_add(*cmdx.auto_complete_options, command.name);
+        }
+    }
+}
+
 one_cmdx_frame :: (cmdx: *CmdX) {
     frame_start := get_hardware_time();
     
@@ -496,7 +515,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         input.text_input_event_count = cmdx.window.text_input_event_count;
         prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height });
 
-        // Do the actual ui panels
+        // At this point actual UI panels can be created. For now, there is no actual UI integration
+        // (since it is not really required), but maybe in the future?
     }
         
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
@@ -507,12 +527,29 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;
     }
 
+    handled_some_text_input: bool = false;
+    
     for i := 0; i < cmdx.window.text_input_event_count; ++i {
         event := cmdx.window.text_input_events[i];
-        handle_text_input_event(*cmdx.text_input, event);
+        if event.utf32 != 0x9 {
+            handle_text_input_event(*cmdx.text_input, event); // Do not handle tab keys in the actual text input
+            handled_some_text_input = true;
+        }
+    }
+
+    // The text buffer was updated, update the auto complete options and render the next frame
+    if handled_some_text_input {
+        update_auto_complete_options(cmdx);
+        render_next_frame(cmdx);
     }
         
-    if cmdx.window.text_input_event_count render_next_frame(cmdx);
+    // Do one cycle of auto-complete if the tab key has been pressed.
+    if cmdx.window.key_pressed[Key_Code.Tab] && cmdx.auto_complete_options.count {
+        full_string := array_get_value(*cmdx.auto_complete_options, cmdx.auto_complete_index);
+        set_text_input_string(*cmdx.text_input, full_string);
+
+        cmdx.auto_complete_index = (cmdx.auto_complete_index + 1) % cmdx.auto_complete_options.count;
+    }
     
     // Go through the history if the arrow keys have been used
     if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
