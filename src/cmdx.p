@@ -97,7 +97,7 @@ CmdX :: struct {
     backlog: *s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Source_Range;
-    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen
+    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
     
     // Command handling
@@ -575,6 +575,16 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         render_next_frame(cmdx);
     }
 
+    if cmdx.window.key_pressed[Key_Code.Page_Down] {
+        // Hotkey to scroll to the bottom of the backlog
+        cmdx.scroll_offset = cmdx.lines.count;
+    }
+
+    if cmdx.window.key_pressed[Key_Code.Page_Up] {
+        // Hotkey to scroll to the start of the backlog
+        cmdx.scroll_offset = 0;
+    }
+    
     // Update the internal text input rendering state
     text_until_cursor := get_string_view_until_cursor_from_text_input(*cmdx.text_input);
     text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
