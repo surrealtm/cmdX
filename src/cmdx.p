@@ -92,6 +92,7 @@ CmdX :: struct {
     // Auto complete
     auto_complete_options: [..]string;
     auto_complete_index := 0; // This is the next index that will be used for completion when the next tab key is pressed
+    auto_complete_start := 0; // This is the first character that is part of the auto-complete. This is usually the start of the current "word"
     
     // Backlog
     backlog: *s8 = ---;
@@ -479,17 +480,57 @@ add_history :: (cmdx: *CmdX, input_string: string) {
     array_add_at(*cmdx.history, 0, copy_string(input_string, *cmdx.global_allocator));
 }
 
+// @Cleanup maybe don't actually do this every time text input has been received, instead mark the auto complete
+// list as dirty on text input, and do this when we actually require the auto-complete options (tab) and the
+// list is dirty.
 update_auto_complete_options :: (cmdx: *CmdX) {
+    // Clear the previous auto complete options and deallocate all strings
+    for i := 0; i < cmdx.auto_complete_options.count; ++i {
+        string := array_get_value(*cmdx.auto_complete_options, i);
+        free_string(string, *cmdx.global_allocator);
+    }
+    
     array_clear(*cmdx.auto_complete_options);
     cmdx.auto_complete_index = 0;
 
-    current_string := get_string_view_from_text_input(*cmdx.text_input);
+    if cmdx.text_input.count == 0    return; // If the text input is empty, don't bother auto-completing since the user could simply mean anything
+    
+    // Gauge the text that should be auto-completed next
+    string_until_cursor := string_view(cmdx.text_input.buffer, cmdx.text_input.cursor);    
+    last_space, space_found := search_string_reverse(string_until_cursor, ' ');
+    last_slash, slash_found := search_string_reverse(string_until_cursor, '/');
 
-    // Add all commands that start with the current string
-    for i := 0; i < cmdx.commands.count; ++i {
-        command := array_get(*cmdx.commands, i);
-        if string_starts_with(command.name, current_string) {
-            array_add(*cmdx.auto_complete_options, command.name);
+    // Update the auto-complete start index
+    cmdx.auto_complete_start = 0;
+    if space_found && last_space > cmdx.auto_complete_start    cmdx.auto_complete_start = last_space + 1;
+    if slash_found && last_slash > cmdx.auto_complete_start    cmdx.auto_complete_start = last_slash + 1;
+
+    text_to_complete := substring_view(cmdx.text_input.buffer, cmdx.auto_complete_start, cmdx.text_input.cursor);
+    
+    if cmdx.auto_complete_start == 0 {
+        // Add all commands, but only if this could actually be a command (it is actually the first thing in
+        // the input string)
+        for i := 0; i < cmdx.commands.count; ++i {
+            command := array_get(*cmdx.commands, i);
+            if string_starts_with(command.name, text_to_complete) {
+                // Since the options array also includes file names which need to be allocated and freed once
+                // they are no longer needed, we also need to copy this name so that it can be freed.
+                command_name_copy := copy_string(command.name, *cmdx.global_allocator);
+                array_add(*cmdx.auto_complete_options, command_name_copy);
+            }
+        }
+    }
+
+    // Add all files in the current folder to the auto-complete.
+    // @Incomplete actually this should try to complete the partial supplied folder, if there has been a slash
+    // before in the current word (slash between auto_complete_start and cursor)
+    files := get_files_in_folder(cmdx.current_directory, *cmdx.frame_allocator);
+    for i := 0; i < files.count; ++i {
+        file := array_get_value(*files, i);
+        if string_starts_with(file, text_to_complete) {
+            // Copy the file name since it needs to live longer than the current frame.
+            file_name_copy := copy_string(file, *cmdx.global_allocator);
+            array_add(*cmdx.auto_complete_options, file_name_copy);
         }
     }
 }
@@ -545,7 +586,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
     // Do one cycle of auto-complete if the tab key has been pressed.
     if cmdx.window.key_pressed[Key_Code.Tab] && cmdx.auto_complete_options.count {
-        full_string := array_get_value(*cmdx.auto_complete_options, cmdx.auto_complete_index);
+        remaining_input_string := substring_view(cmdx.text_input.buffer, 0, cmdx.auto_complete_start);
+        auto_completion := array_get_value(*cmdx.auto_complete_options, cmdx.auto_complete_index);
+
+        full_string := concatenate_strings(remaining_input_string, auto_completion, *cmdx.frame_allocator);
+
         set_text_input_string(*cmdx.text_input, full_string);
 
         cmdx.auto_complete_index = (cmdx.auto_complete_index + 1) % cmdx.auto_complete_options.count;
