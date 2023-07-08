@@ -522,14 +522,35 @@ update_auto_complete_options :: (cmdx: *CmdX) {
     }
 
     // Add all files in the current folder to the auto-complete.
-    // @Incomplete actually this should try to complete the partial supplied folder, if there has been a slash
-    // before in the current word (slash between auto_complete_start and cursor)
-    files := get_files_in_folder(cmdx.current_directory, *cmdx.frame_allocator);
+
+    files_directory := cmdx.current_directory;
+    directory_start := 0;
+    if space_found     directory_start = last_space + 1;
+    
+    if slash_found && last_slash > directory_start {
+        // If the user has already supplied a folder (e.g. some/path/file_), then get the files in that
+        // directory, not the current one.
+        files_directory = get_path_relative_to_cd(cmdx, substring_view(cmdx.text_input.buffer, directory_start, last_slash));
+    }
+    
+    files := get_files_in_folder(files_directory, *cmdx.frame_allocator);
+
     for i := 0; i < files.count; ++i {
         file := array_get_value(*files, i);
         if string_starts_with(file, text_to_complete) {
-            // Copy the file name since it needs to live longer than the current frame.
-            file_name_copy := copy_string(file, *cmdx.global_allocator);
+            // Check if the given path is actually a folder. If so, then append a final slash
+            // to it, to make it easier to just auto-complete to a path without having to type the slashes
+            // themselves. @@Robustness maybe return this information along with the path in the
+            // get_files_in_folder procedure?
+            full_path := concatenate_strings(files_directory, "\\", *cmdx.frame_allocator);
+            full_path = concatenate_strings(full_path, file, *cmdx.frame_allocator);
+
+            file_name_copy: string = ---;
+            if folder_exists(full_path) {
+                file_name_copy = concatenate_strings(file, "/", *cmdx.global_allocator);
+            } else
+                file_name_copy = copy_string(file, *cmdx.global_allocator);
+            
             array_add(*cmdx.auto_complete_options, file_name_copy);
         }
     }
@@ -594,6 +615,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         set_text_input_string(*cmdx.text_input, full_string);
 
         cmdx.auto_complete_index = (cmdx.auto_complete_index + 1) % cmdx.auto_complete_options.count;
+
+        // If there was only one option, then we can be sure that the user wanted this one (or at least that
+        // there is no other option for the user anyway). In that case, accept this option as the correct one,
+        // and resume normal operation. This allows the user to quickly auto-complete paths if there is the
+        // supplied information is unique enough.
+        if cmdx.auto_complete_options.count == 1    update_auto_complete_options(cmdx);
     }
     
     // Go through the history if the arrow keys have been used
