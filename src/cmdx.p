@@ -93,6 +93,7 @@ CmdX :: struct {
     auto_complete_options: [..]string;
     auto_complete_index := 0; // This is the next index that will be used for completion when the next tab key is pressed
     auto_complete_start := 0; // This is the first character that is part of the auto-complete. This is usually the start of the current "word"
+    auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
     
     // Backlog
     backlog: *s8 = ---;
@@ -480,10 +481,9 @@ add_history :: (cmdx: *CmdX, input_string: string) {
     array_add_at(*cmdx.history, 0, copy_string(input_string, *cmdx.global_allocator));
 }
 
-// @Cleanup maybe don't actually do this every time text input has been received, instead mark the auto complete
-// list as dirty on text input, and do this when we actually require the auto-complete options (tab) and the
-// list is dirty.
-update_auto_complete_options :: (cmdx: *CmdX) {
+refresh_auto_complete_options :: (cmdx: *CmdX) {
+    if !cmdx.auto_complete_dirty return;
+    
     // Clear the previous auto complete options and deallocate all strings
     for i := 0; i < cmdx.auto_complete_options.count; ++i {
         string := array_get_value(*cmdx.auto_complete_options, i);
@@ -492,8 +492,6 @@ update_auto_complete_options :: (cmdx: *CmdX) {
     
     array_clear(*cmdx.auto_complete_options);
     cmdx.auto_complete_index = 0;
-
-    if cmdx.text_input.count == 0    return; // If the text input is empty, don't bother auto-completing since the user could simply mean anything
     
     // Gauge the text that should be auto-completed next
     string_until_cursor := string_view(cmdx.text_input.buffer, cmdx.text_input.cursor);    
@@ -505,6 +503,8 @@ update_auto_complete_options :: (cmdx: *CmdX) {
     if space_found && last_space > cmdx.auto_complete_start    cmdx.auto_complete_start = last_space + 1;
     if slash_found && last_slash > cmdx.auto_complete_start    cmdx.auto_complete_start = last_slash + 1;
 
+    if last_space + 1 == cmdx.text_input.cursor    return; // If the current auto-complete "word" is empty, don't bother completing anything, since it could mean anything and this is probably more annoying than useful to the user.
+    
     text_to_complete := substring_view(cmdx.text_input.buffer, cmdx.auto_complete_start, cmdx.text_input.cursor);
     
     if cmdx.auto_complete_start == 0 {
@@ -554,6 +554,8 @@ update_auto_complete_options :: (cmdx: *CmdX) {
             array_add(*cmdx.auto_complete_options, file_name_copy);
         }
     }
+
+    cmdx.auto_complete_dirty = false;
 }
 
 one_cmdx_frame :: (cmdx: *CmdX) {
@@ -601,26 +603,30 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     // The text buffer was updated, update the auto complete options and render the next frame
     if handled_some_text_input {
-        update_auto_complete_options(cmdx);
+        cmdx.auto_complete_dirty = true;
         render_next_frame(cmdx);
     }
         
     // Do one cycle of auto-complete if the tab key has been pressed.
-    if cmdx.window.key_pressed[Key_Code.Tab] && cmdx.auto_complete_options.count {
-        remaining_input_string := substring_view(cmdx.text_input.buffer, 0, cmdx.auto_complete_start);
-        auto_completion := array_get_value(*cmdx.auto_complete_options, cmdx.auto_complete_index);
+    if cmdx.window.key_pressed[Key_Code.Tab] {
+        refresh_auto_complete_options(cmdx);
 
-        full_string := concatenate_strings(remaining_input_string, auto_completion, *cmdx.frame_allocator);
+        if cmdx.auto_complete_options.count {
+            remaining_input_string := substring_view(cmdx.text_input.buffer, 0, cmdx.auto_complete_start);
+            auto_completion := array_get_value(*cmdx.auto_complete_options, cmdx.auto_complete_index);
 
-        set_text_input_string(*cmdx.text_input, full_string);
+            full_string := concatenate_strings(remaining_input_string, auto_completion, *cmdx.frame_allocator);
 
-        cmdx.auto_complete_index = (cmdx.auto_complete_index + 1) % cmdx.auto_complete_options.count;
+            set_text_input_string(*cmdx.text_input, full_string);
 
-        // If there was only one option, then we can be sure that the user wanted this one (or at least that
-        // there is no other option for the user anyway). In that case, accept this option as the correct one,
-        // and resume normal operation. This allows the user to quickly auto-complete paths if there is the
-        // supplied information is unique enough.
-        if cmdx.auto_complete_options.count == 1    update_auto_complete_options(cmdx);
+            cmdx.auto_complete_index = (cmdx.auto_complete_index + 1) % cmdx.auto_complete_options.count;
+
+            // If there was only one option, then we can be sure that the user wanted this one (or at least that
+            // there is no other option for the user anyway). In that case, accept this option as the correct one,
+            // and resume normal operation. This allows the user to quickly auto-complete paths if there is the
+            // supplied information is unique enough.
+            if cmdx.auto_complete_options.count == 1    cmdx.auto_complete_dirty = true;
+        }
     }
     
     // Go through the history if the arrow keys have been used
