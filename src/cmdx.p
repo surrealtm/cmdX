@@ -38,7 +38,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 65536; // In characters
+BACKLOG_SIZE :: 39; //65536; // In characters @nocheckin
 HISTORY_SIZE :: 64;    // In input lines
 SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 
@@ -233,20 +233,23 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // wrong now). If a color range partly covered the removed space, but also covers other space,
 // that color range should be adapted to not cover the removed space.
 remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *Color_Range {
-    while cmdx.colors.count - 1 {
-        color_range := array_get(*cmdx.colors, 0);
+    index := 0;
 
-        if source_range_enclosed(color_range.source, line_range) {
+    while index < cmdx.colors.count {
+        color_range := array_get(*cmdx.colors, index);
+
+        if index < cmdx.colors.count - 1 && source_range_enclosed(color_range.source, line_range) {
             // Color range is not used in any remaining line, so it should be removed. This should only
             // happen if it is not the last color range in the list, since the backlog always requires
             // at least one color for rendering.
-            array_remove(*cmdx.colors, 0);
+            array_remove(*cmdx.colors, index);
         } else if source_ranges_overlap(color_range.source, line_range) {
             // Remove the removed space from the color range
             color_range.source.wrapped = color_range.source.one_plus_last < line_range.one_plus_last;
             color_range.source.first   = line_range.one_plus_last;
-            break;
-        } else break;
+            ++index;
+        } else
+            ++index;
     }
     
     return array_get(*cmdx.colors, cmdx.colors.count - 1);
@@ -259,19 +262,27 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *C
 remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
+
+    index := 0;
     
-    while cmdx.lines.count - 1 {
-        existing_line := array_get_value(*cmdx.lines, 0);
+    while index < cmdx.lines.count {
+        existing_line := array_get(*cmdx.lines, index);
         
-        if source_ranges_overlap(existing_line, new_line) {
-            if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
-            total_removed_range.one_plus_last = existing_line.one_plus_last;
-            total_removed_range.wrapped       = existing_line.wrapped;
-            array_remove(*cmdx.lines, 0);
-            continue;
-        }
-            
-        break;
+        if source_ranges_overlap(~existing_line, new_line) {
+            // Make sure that at least one line always remains in the buffer, or else it will crash.
+            if index < cmdx.lines.count - 1 {
+                if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
+                total_removed_range.one_plus_last = existing_line.one_plus_last;
+                total_removed_range.wrapped       = existing_line.wrapped;
+                array_remove(*cmdx.lines, index);
+            } else {
+                // Effectly remove this line by replacing it with an empty one.
+                existing_line.first = existing_line.one_plus_last;
+                existing_line.wrapped = false;
+                ++index;
+            }
+        } else
+            ++index;
     }
 
     if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, total_removed_range);
@@ -344,28 +355,40 @@ new_line :: (cmdx: *CmdX) {
 add_text :: (cmdx: *CmdX, text: string) {
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
     
-    if line_head.one_plus_last + text.count >= BACKLOG_SIZE {
+    if line_head.one_plus_last + text.count >= BACKLOG_SIZE || (line_head.wrapped && line_head.one_plus_last + text.count > line_head.first) {
         // The remaining backlog space is not enough to fit the complete text in it. The line needs to be
         // wrapped around the backlog and restart at the beginning of the backlog ring buffer.
         // The first part is the split of the text that still fits in the end of the backbuffer, then second
         // part gets wrapped around to the beginning.
-        first_part_length := BACKLOG_SIZE - line_head.one_plus_last;
+        first_part_length  := min(text.count, BACKLOG_SIZE - line_head.one_plus_last);
         second_part_length := min(text.count - first_part_length, BACKLOG_SIZE - first_part_length); // If the line is too long to fit into the actual backlog (which in practice should never really happen...), then just cut the line off
 
+        first_source_range  := Source_Range.{ line_head.one_plus_last, line_head.one_plus_last + first_part_length, false };
         second_source_range := Source_Range.{ 0, second_part_length, false };
+        line_head = remove_overlapping_lines(cmdx, first_source_range);
         line_head = remove_overlapping_lines(cmdx, second_source_range);
 
         copy_memory(xx *cmdx.backlog[line_head.one_plus_last], xx *text.data[0], first_part_length);
         copy_memory(xx *cmdx.backlog[0], xx *text.data[first_part_length], second_part_length);
 
-        line_head.wrapped = true;
-        line_head.one_plus_last = second_part_length;
-
         // The active color range also needs to be wrapped around the backlog.
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+
         if color_head.source.wrapped color_head.source.first = line_head.first; // Not totally sure if this line here is actually necessary... Need to test it.
-        color_head.source.one_plus_last = second_part_length;
-        color_head.source.wrapped = true;
+
+        if second_part_length {
+            line_head.one_plus_last = second_source_range.one_plus_last;
+            line_head.wrapped = true;
+
+            color_head.source.one_plus_last = second_source_range.one_plus_last;
+            color_head.source.wrapped = true;
+        } else {
+            line_head.one_plus_last = first_source_range.one_plus_last;
+            line_head.wrapped = false;
+
+            color_head.source.one_plus_last = first_source_range.one_plus_last;
+            color_head.source.wrapped = false;
+        }            
     } else {
         // If the line still fits into the backlog, just append it to the current head.
         new_source_range := Source_Range.{ line_head.one_plus_last, line_head.one_plus_last + text.count, false };
