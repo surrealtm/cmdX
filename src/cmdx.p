@@ -38,7 +38,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 39; //65536; // In characters @nocheckin
+BACKLOG_SIZE :: 128; //65536; // In characters @nocheckin
 HISTORY_SIZE :: 64;    // In input lines
 SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 
@@ -152,15 +152,21 @@ debug_print_colors :: (cmdx: *CmdX) {
     print("=== COLORS ===\n");
 }
 
-debug_print_history :: (cmdx: *CmdX, location: string) {
-    print("=== HISTORY (%) ===\n", location);
+debug_print_history :: (cmdx: *CmdX) {
+    print("=== HISTORY ===\n");
 
     for i := 0; i < cmdx.history.count; ++i {
         string := array_get_value(*cmdx.history, i);
         print("H %: '%'\n", i, string);
     }
     
-    print("=== HISTORY (%) ===\n", location);
+    print("=== HISTORY ===\n");
+}
+
+debug_print :: (cmdx: *CmdX) {
+    debug_print_lines(cmdx);
+    debug_print_colors(cmdx);
+    //debug_print_history(cmdx);
 }
 
 
@@ -204,7 +210,7 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     if lhs.wrapped && rhs.wrapped {
         enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     } else if lhs.wrapped {
-        enclosed = rhs.first == 0 && rhs.one_plus_last == BACKLOG_SIZE - 1; // TODO: Is -1 correct?
+        enclosed = rhs.first == 0 && rhs.one_plus_last == BACKLOG_SIZE;
     } else if rhs.wrapped {
         // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
         // of [0,rhs.one_plus_last]. It should also detect the edge case where lhs is an
@@ -217,6 +223,10 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     }
 
     return enclosed;
+}
+
+source_range_empty :: (source: Source_Range) -> bool {
+    return !source.wrapped && source.first == source.one_plus_last;
 }
 
 // Returns true if the cursor has "passed" the source range, used for determining whether
@@ -233,12 +243,12 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // wrong now). If a color range partly covered the removed space, but also covers other space,
 // that color range should be adapted to not cover the removed space.
 remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *Color_Range {
-    index := 0;
+    index := 0; // @Cleanup right now this index is not used, get rid of it?
 
-    while index < cmdx.colors.count - 1 {
+    while index < cmdx.colors.count {
         color_range := array_get(*cmdx.colors, index);
 
-        if index < cmdx.colors.count - 1 && source_range_enclosed(color_range.source, line_range) {
+        if index < cmdx.colors.count - 1 && (source_range_empty(line_range) || source_range_enclosed(color_range.source, line_range)) {
             // Color range is not used in any remaining line, so it should be removed. This should only
             // happen if it is not the last color range in the list, since the backlog always requires
             // at least one color for rendering.
@@ -247,9 +257,9 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *C
             // Remove the removed space from the color range
             color_range.source.wrapped = color_range.source.one_plus_last < line_range.one_plus_last;
             color_range.source.first   = line_range.one_plus_last;
-            ++index;
+            break;
         } else
-            ++index;
+            break;
     }
     
     return array_get(*cmdx.colors, cmdx.colors.count - 1);
@@ -273,7 +283,7 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
             // new one.
             if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
             total_removed_range.one_plus_last = existing_line.one_plus_last;
-            total_removed_range.wrapped       = existing_line.wrapped;
+            total_removed_range.wrapped      |= existing_line.wrapped;
             array_remove(*cmdx.lines, index);
         } else
             break;
@@ -297,13 +307,24 @@ get_cursor_position_in_line :: (cmdx: *CmdX) -> s64 {
 }
 
 set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
-    // Remove part of the backlog line
+    // Remove part of the backlog line. The color range must obviously also be adjusted
     line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
-    line_head.one_plus_last = line_head.first + x;
-    
-    // If part of the backlog just got erased, the end of the color range must be updated too.
     color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-    color_head.source.one_plus_last = line_head.first + x;
+
+    assert(line_head.first + x < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
+
+    if line_head.first + x < BACKLOG_SIZE {
+        line_head.one_plus_last = line_head.first + x;
+        line_head.wrapped = false;
+
+        color_head.source.one_plus_last = line_head.one_plus_last;
+        color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
+    } else {
+        line_head.one_plus_last = line_head.first + x - BACKLOG_SIZE;
+        color_head.source.one_plus_last = line_head.one_plus_last;
+    }
+    
+    debug_print(cmdx); // @nocheckin
 }
 
 set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
@@ -317,6 +338,8 @@ prepare_viewport :: (cmdx: *CmdX) {
 
 close_viewport :: (cmdx: *CmdX) {
     new_line(cmdx); // When the last command finishes, append another new line for more reading clarity
+
+    debug_print(cmdx); // @nocheckin
 }
 
 
@@ -338,10 +361,13 @@ new_line :: (cmdx: *CmdX) {
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
         new_line_head.first = old_line_head.one_plus_last;
         new_line_head.one_plus_last = new_line_head.first;
+        
     }
     
     ++cmdx.viewport_height;
     cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+
+    debug_print(cmdx); // @nocheckin
 
     render_next_frame(cmdx);
 }
@@ -368,7 +394,7 @@ add_text :: (cmdx: *CmdX, text: string) {
         // around the start.
         before_wrap_length := BACKLOG_SIZE - current_line.one_plus_last;
         after_wrap_length  := available_text_space - before_wrap_length;
-
+        
         // Remove all lines that are between the end of the current line until the end of the backlog,
         // and the end of the line after that wrap-around
         to_remove_range := Source_Range.{ current_line.one_plus_last, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
@@ -381,6 +407,10 @@ add_text :: (cmdx: *CmdX, text: string) {
         // The current line will now wrap around
         current_line.wrapped = true;
         current_line.one_plus_last = after_wrap_length;
+
+        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+        color_head.source.wrapped       = true;
+        color_head.source.one_plus_last = after_wrap_length;
         return;
     }
 
@@ -401,6 +431,9 @@ add_text :: (cmdx: *CmdX, text: string) {
 
         // Update the current line end, It now takes over the complete backlog
         current_line.one_plus_last = current_line.first;
+
+        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+        color_head.source.one_plus_last = current_line.first;        
         return;
     }
     
@@ -415,9 +448,12 @@ add_text :: (cmdx: *CmdX, text: string) {
     // Copy the text content into the backlog
     copy_memory(*cmdx.backlog[current_line.one_plus_last], text.data, text.count);
     
-    // The current line now has grown
-    current_line.one_plus_last = projected_one_plus_last;
+    // The current line now has grown. Increase the source ranges
+    current_line.one_plus_last = current_line.one_plus_last + text.count;
 
+    color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
+    color_head.source.one_plus_last = current_line.one_plus_last;
+    
     render_next_frame(cmdx);
 }
 
@@ -866,7 +902,7 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
-
+    
     cmdx.setup = true;
 }
 

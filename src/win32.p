@@ -69,13 +69,6 @@ win32_set_color_for_code :: (cmdx: *CmdX, code: u32) {
     if actually_change_color set_true_color(cmdx, color);
 }
 
-win32_find_sequence_command_end :: (parser: *Win32_Input_Parser) -> s64 {
-    end := parser.index + 1;
-    
-    
-    return end;
-}
-
 win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, default: s64) -> s64 {
     if index >= parser.parameter_count return default;
     return parser.parameters[index];
