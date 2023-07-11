@@ -369,6 +369,9 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
+
+    debug_print_lines(cmdx);
+    debug_print_colors(cmdx);
 }
 
 config :: (cmdx: *CmdX) {

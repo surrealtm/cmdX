@@ -125,8 +125,8 @@ CmdX :: struct {
 
 /* --- DEBUGGING --- */
 
-debug_print_lines :: (cmdx: *CmdX, location: string) {
-    print("=== LINES (%) ===\n", location);
+debug_print_lines :: (cmdx: *CmdX) {
+    print("=== LINES ===\n");
 
     for i := 0; i < cmdx.lines.count; ++i {
         line := array_get(*cmdx.lines, i);
@@ -136,11 +136,11 @@ debug_print_lines :: (cmdx: *CmdX, location: string) {
         print("\n");
     }
 
-    print("=== LINES (%) ===\n", location);
+    print("=== LINES ===\n");
 }
 
-debug_print_colors :: (cmdx: *CmdX, location: string) {
-    print("=== COLORS (%) ===\n", location);
+debug_print_colors :: (cmdx: *CmdX) {
+    print("=== COLORS ===\n");
 
     for i := 0; i < cmdx.colors.count; ++i {
         range := array_get(*cmdx.colors, i);
@@ -149,7 +149,7 @@ debug_print_colors :: (cmdx: *CmdX, location: string) {
         print("\n");
     }
 
-    print("=== COLORS (%) ===\n", location);
+    print("=== COLORS ===\n");
 }
 
 debug_print_history :: (cmdx: *CmdX, location: string) {
@@ -186,9 +186,9 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     if lhs.wrapped && rhs.wrapped {
         overlap = true;
     } else if lhs.wrapped {
-        overlap = lhs.first <= rhs.one_plus_last || lhs.one_plus_last > rhs.first;
+        overlap = lhs.first < rhs.one_plus_last || lhs.one_plus_last > rhs.first;
     } else if rhs.wrapped {
-        overlap = lhs.first <= rhs.one_plus_last || lhs.one_plus_last > rhs.first;
+        overlap = lhs.first < rhs.one_plus_last || lhs.one_plus_last > rhs.first;
     } else {
         overlap = lhs.first <= rhs.one_plus_last && lhs.one_plus_last > rhs.first;
     }
@@ -263,26 +263,20 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
 
-    index := 0;
+    index := 0; // @Cleanup right now this index is not used, get rid of it?
     
     while index < cmdx.lines.count {
         existing_line := array_get(*cmdx.lines, index);
         
         if source_ranges_overlap(~existing_line, new_line) {
-            // Make sure that at least one line always remains in the buffer, or else it will crash.
-            if index < cmdx.lines.count - 1 {
-                if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
-                total_removed_range.one_plus_last = existing_line.one_plus_last;
-                total_removed_range.wrapped       = existing_line.wrapped;
-                array_remove(*cmdx.lines, index);
-            } else {
-                // Effectly remove this line by replacing it with an empty one.
-                existing_line.first = existing_line.one_plus_last;
-                existing_line.wrapped = false;
-                ++index;
-            }
+            // If the source ranges overlap, then the existing line must be removed to make space for the
+            // new one.
+            if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
+            total_removed_range.one_plus_last = existing_line.one_plus_last;
+            total_removed_range.wrapped       = existing_line.wrapped;
+            array_remove(*cmdx.lines, index);
         } else
-            ++index;
+            break;
     }
 
     if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, total_removed_range);
@@ -353,53 +347,79 @@ new_line :: (cmdx: *CmdX) {
 }
 
 add_text :: (cmdx: *CmdX, text: string) {
-    line_head := array_get(*cmdx.lines, cmdx.lines.count - 1);
+    // Append text to the latest line
+    current_line := array_get(*cmdx.lines, cmdx.lines.count - 1);
+
+    // Edge-Case: If the current line already has wrapped, and it completely fills the backlog, then there
+    // simply is no more space for this new text, therefore just ignore it.
+    if current_line.wrapped && current_line.one_plus_last == current_line.first return;
     
-    if line_head.one_plus_last + text.count >= BACKLOG_SIZE || (line_head.wrapped && line_head.one_plus_last + text.count > line_head.first) {
-        // The remaining backlog space is not enough to fit the complete text in it. The line needs to be
-        // wrapped around the backlog and restart at the beginning of the backlog ring buffer.
-        // The first part is the split of the text that still fits in the end of the backbuffer, then second
-        // part gets wrapped around to the beginning.
-        first_part_length  := min(text.count, BACKLOG_SIZE - line_head.one_plus_last);
-        second_part_length := min(text.count - first_part_length, BACKLOG_SIZE - first_part_length); // If the line is too long to fit into the actual backlog (which in practice should never really happen...), then just cut the line off
+    projected_one_plus_last := current_line.one_plus_last + text.count;
+    
+    if projected_one_plus_last > BACKLOG_SIZE {
+        // If the current line would overflow the backlog size, then it needs to be wrapped around
+        // the backlog.
 
-        first_source_range  := Source_Range.{ line_head.one_plus_last, line_head.one_plus_last + first_part_length, false };
-        second_source_range := Source_Range.{ 0, second_part_length, false };
-        line_head = remove_overlapping_lines(cmdx, first_source_range);
-        line_head = remove_overlapping_lines(cmdx, second_source_range);
+        // If the line has wrapped before, then the backlog may not have enough space to fit the complete
+        // line. Cut off the new text at the size which can still fit into the backlog.
+        available_text_space := min(BACKLOG_SIZE, text.count);
+        if current_line.wrapped available_text_space = current_line.first - current_line.one_plus_last;
 
-        copy_memory(xx *cmdx.backlog[line_head.one_plus_last], xx *text.data[0], first_part_length);
-        copy_memory(xx *cmdx.backlog[0], xx *text.data[first_part_length], second_part_length);
-
-        // The active color range also needs to be wrapped around the backlog.
-        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-
-        if color_head.source.wrapped color_head.source.first = line_head.first; // Not totally sure if this line here is actually necessary... Need to test it.
-
-        if second_part_length {
-            line_head.one_plus_last = second_source_range.one_plus_last;
-            line_head.wrapped = true;
-
-            color_head.source.one_plus_last = second_source_range.one_plus_last;
-            color_head.source.wrapped = true;
-        } else {
-            line_head.one_plus_last = first_source_range.one_plus_last;
-            line_head.wrapped = false;
-
-            color_head.source.one_plus_last = first_source_range.one_plus_last;
-            color_head.source.wrapped = false;
-        }            
-    } else {
-        // If the line still fits into the backlog, just append it to the current head.
-        new_source_range := Source_Range.{ line_head.one_plus_last, line_head.one_plus_last + text.count, false };
-        line_head = remove_overlapping_lines(cmdx, new_source_range);
-
-        copy_memory(xx *cmdx.backlog[line_head.one_plus_last], xx text.data, text.count);
-        line_head.one_plus_last += text.count;
+        subtext := substring_view(text, 0, available_text_space);
         
-        color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
-        color_head.source.one_plus_last += text.count;
+        // If the current line would grow too big for the backlog, then it needs to be wrapped
+        // around the start.
+        before_wrap_length := BACKLOG_SIZE - current_line.one_plus_last;
+        after_wrap_length  := subtext.count - before_wrap_length;
+
+        // Remove all lines that are between the end of the current line until the end of the backlog,
+        // and the end of the line after that wrap-around
+        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
+        current_line = remove_overlapping_lines(cmdx, to_remove_range);
+
+        // Copy the subtext contents into the backlog
+        copy_memory(*cmdx.backlog[current_line.one_plus_last], *subtext.data[0], before_wrap_length);
+        copy_memory(*cmdx.backlog[0], *subtext.data[before_wrap_length], after_wrap_length);
+        
+        // The current line will now wrap around
+        current_line.wrapped = true;
+        current_line.one_plus_last = after_wrap_length;
+        return;
     }
+
+    if current_line.wrapped && projected_one_plus_last > current_line.first {
+        // If the current line still does entirely fit into the backlog, but we detect it in another way
+        // (it would overlap itself), then we still need to cut off the line and use the complete backlog
+        // for this line
+        available_text_space := current_line.first - current_line.one_plus_last;
+        subtext := substring_view(text, 0, available_text_space);
+
+        // Essentially remove all lines that are not the current one, since we have already figured out
+        // that they cannot fit into the backlog together with this new line
+        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, current_line.first, false };
+        current_line = remove_overlapping_lines(cmdx, to_remove_range);
+        
+        // Copy the subtext contents into the backlog
+        copy_memory(*cmdx.backlog[current_line.one_plus_last], subtext.data, subtext.count);
+
+        // Update the current line end, It now takes over the complete backlog
+        current_line.one_plus_last = current_line.first;
+        return;
+    }
+    
+    first_line := array_get(*cmdx.lines, 0);
+    if projected_one_plus_last > first_line.first {
+        // If the current line would flow into the next line in the backlog (which is actually the first line
+        // in the array), then that line will need to be removed.
+        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, projected_one_plus_last, false };
+        current_line = remove_overlapping_lines(cmdx, to_remove_range);
+    }
+
+    // Copy the text content into the backlog
+    copy_memory(*cmdx.backlog[current_line.one_plus_last], text.data, text.count);
+    
+    // The current line now has grown
+    current_line.one_plus_last = projected_one_plus_last;
 
     render_next_frame(cmdx);
 }
