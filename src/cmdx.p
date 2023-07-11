@@ -235,7 +235,7 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *Color_Range {
     index := 0;
 
-    while index < cmdx.colors.count {
+    while index < cmdx.colors.count - 1 {
         color_range := array_get(*cmdx.colors, index);
 
         if index < cmdx.colors.count - 1 && source_range_enclosed(color_range.source, line_range) {
@@ -265,7 +265,7 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
 
     index := 0; // @Cleanup right now this index is not used, get rid of it?
     
-    while index < cmdx.lines.count {
+    while index < cmdx.lines.count - 1 {
         existing_line := array_get(*cmdx.lines, index);
         
         if source_ranges_overlap(~existing_line, new_line) {
@@ -363,23 +363,20 @@ add_text :: (cmdx: *CmdX, text: string) {
         // If the line has wrapped before, then the backlog may not have enough space to fit the complete
         // line. Cut off the new text at the size which can still fit into the backlog.
         available_text_space := min(BACKLOG_SIZE, text.count);
-        if current_line.wrapped available_text_space = current_line.first - current_line.one_plus_last;
-
-        subtext := substring_view(text, 0, available_text_space);
         
         // If the current line would grow too big for the backlog, then it needs to be wrapped
         // around the start.
         before_wrap_length := BACKLOG_SIZE - current_line.one_plus_last;
-        after_wrap_length  := subtext.count - before_wrap_length;
+        after_wrap_length  := available_text_space - before_wrap_length;
 
         // Remove all lines that are between the end of the current line until the end of the backlog,
         // and the end of the line after that wrap-around
-        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
+        to_remove_range := Source_Range.{ current_line.one_plus_last, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
         current_line = remove_overlapping_lines(cmdx, to_remove_range);
 
         // Copy the subtext contents into the backlog
-        copy_memory(*cmdx.backlog[current_line.one_plus_last], *subtext.data[0], before_wrap_length);
-        copy_memory(*cmdx.backlog[0], *subtext.data[before_wrap_length], after_wrap_length);
+        copy_memory(*cmdx.backlog[current_line.one_plus_last], *text.data[0], before_wrap_length);
+        copy_memory(*cmdx.backlog[0], *text.data[before_wrap_length], after_wrap_length);
         
         // The current line will now wrap around
         current_line.wrapped = true;
@@ -396,7 +393,7 @@ add_text :: (cmdx: *CmdX, text: string) {
 
         // Essentially remove all lines that are not the current one, since we have already figured out
         // that they cannot fit into the backlog together with this new line
-        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, current_line.first, false };
+        to_remove_range := Source_Range.{ current_line.one_plus_last, current_line.first + 1, false };
         current_line = remove_overlapping_lines(cmdx, to_remove_range);
         
         // Copy the subtext contents into the backlog
@@ -408,10 +405,10 @@ add_text :: (cmdx: *CmdX, text: string) {
     }
     
     first_line := array_get(*cmdx.lines, 0);
-    if projected_one_plus_last > first_line.first {
+    if projected_one_plus_last >= first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
         // in the array), then that line will need to be removed.
-        to_remove_range := Source_Range.{ current_line.one_plus_last + 1, projected_one_plus_last, false };
+        to_remove_range := Source_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
         current_line = remove_overlapping_lines(cmdx, to_remove_range);
     }
 
