@@ -38,7 +38,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-BACKLOG_SIZE :: 128; //65536; // In characters @nocheckin
+BACKLOG_SIZE :: 65536; // In characters
 HISTORY_SIZE :: 64;    // In input lines
 SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 
@@ -185,18 +185,25 @@ random_line :: (cmdx: *CmdX) {
 
 /* --- Source Range --- */
 
+source_ranges_equal :: (lhs: Source_Range, rhs: Source_Range) -> bool {
+    return lhs.first == rhs.first && lhs.one_plus_last == rhs.one_plus_last && lhs.wrapped == rhs.wrapped;
+}
+
 // Returns true if both ranges share at least one character in the backlog
 source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
+    if source_ranges_equal(lhs, rhs) return true;
+
     overlap := false;
 
     if lhs.wrapped && rhs.wrapped {
         overlap = true;
     } else if lhs.wrapped {
-        overlap = lhs.first < rhs.one_plus_last || lhs.one_plus_last > rhs.first;
+        overlap = rhs.one_plus_last > lhs.first || rhs.first < lhs.one_plus_last;
     } else if rhs.wrapped {
-        overlap = lhs.first < rhs.one_plus_last || lhs.one_plus_last > rhs.first;
+        overlap = lhs.one_plus_last > rhs.first || lhs.first < rhs.one_plus_last;
     } else {
-        overlap = lhs.first <= rhs.one_plus_last && lhs.one_plus_last > rhs.first;
+        overlap = lhs.first <= rhs.first && lhs.one_plus_last > rhs.first ||
+            rhs.first <= lhs.first && rhs.one_plus_last > lhs.first;
     }
 
     return overlap;
@@ -215,9 +222,11 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
         // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
         // of [0,rhs.one_plus_last]. It should also detect the edge case where lhs is an
         // empty range just at the edge of rhs.one_plus_last (not enclosed).
-        // |--->       -->|
-        // | ->           |
-        enclosed = lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last;
+        // |--->       -->|  rhs
+        // | ->           |  lhs
+        // |            ->|  lhs
+        enclosed = (lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last) ||
+            (lhs.first >= rhs.first && lhs.one_plus_last <= BACKLOG_SIZE);
     } else {
         enclosed = lhs.first >= rhs.first && lhs.first < rhs.one_plus_last && lhs.one_plus_last > rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     }
@@ -322,9 +331,7 @@ set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
     } else {
         line_head.one_plus_last = line_head.first + x - BACKLOG_SIZE;
         color_head.source.one_plus_last = line_head.one_plus_last;
-    }
-    
-    debug_print(cmdx); // @nocheckin
+    }    
 }
 
 set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX) {
@@ -338,8 +345,6 @@ prepare_viewport :: (cmdx: *CmdX) {
 
 close_viewport :: (cmdx: *CmdX) {
     new_line(cmdx); // When the last command finishes, append another new line for more reading clarity
-
-    debug_print(cmdx); // @nocheckin
 }
 
 
@@ -359,15 +364,20 @@ new_line :: (cmdx: *CmdX) {
         // just after the previous line, but only if that previous line does not end on the actual
         // backlog end, which would lead to unfortunate behaviour later on.
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
-        new_line_head.first = old_line_head.one_plus_last;
+
+        if old_line_head.one_plus_last < BACKLOG_SIZE {
+            // The first character is inclusive. If the previous line ends on the BACKLOG_SIZE, that would be
+            // an invalid index for the first character of the next line...
+            new_line_head.first = old_line_head.one_plus_last;
+        } else {
+            new_line_head.first = 0;
+        }            
+
         new_line_head.one_plus_last = new_line_head.first;
-        
     }
     
     ++cmdx.viewport_height;
     cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
-
-    debug_print(cmdx); // @nocheckin
 
     render_next_frame(cmdx);
 }
@@ -438,9 +448,17 @@ add_text :: (cmdx: *CmdX, text: string) {
     }
     
     first_line := array_get(*cmdx.lines, 0);
-    if projected_one_plus_last >= first_line.first {
+    if projected_one_plus_last > first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
         // in the array), then that line will need to be removed.
+        color_head := array_get(*cmdx.colors, 0);
+
+        if first_line.wrapped && !color_head.source.wrapped && cmdx.colors.count > 1
+        x := 0;
+
+        if current_line.one_plus_last == 1 && projected_one_plus_last == 2
+        x := 0;
+        
         to_remove_range := Source_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
         current_line = remove_overlapping_lines(cmdx, to_remove_range);
     }
@@ -894,6 +912,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
 welcome_screen :: (cmdx: *CmdX, run_tree: string) {    
     set_themed_color(cmdx, .Accent);
+
     add_line(cmdx, "    Welcome to cmdX.");
     set_themed_color(cmdx, .Default);
     
@@ -902,6 +921,24 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
+
+    /*
+    array_clear(*cmdx.lines);
+    
+    string0 := "Hello Wo";
+    string1 := "rld";
+    
+    copy_memory(*cmdx.backlog[120], string0.data, 8);
+    copy_memory(*cmdx.backlog[0], string1.data, 3);
+    
+    wrapped_line := Source_Range.{ 120, 20, true };
+    array_add(*cmdx.lines, wrapped_line);
+    new_line(cmdx);
+    
+    set_themed_color(cmdx, .Default);
+    add_line(cmdx, "How you doing");
+    add_line(cmdx, "My guy");
+*/
     
     cmdx.setup = true;
 }
