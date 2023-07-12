@@ -1,3 +1,5 @@
+USE_PSEUDO_CONSOLE :: true;
+
 // Struct copied from the windows terminal (src/wincopty/winconpty.h). The reference handle needs
 // to be closed so that the communication pipes are actually broken when the child process terminates.
 PseudoConsole :: struct {
@@ -12,12 +14,15 @@ Win32 :: struct {
     input_write_pipe:  HANDLE = INVALID_HANDLE_VALUE;
     output_read_pipe:  HANDLE = INVALID_HANDLE_VALUE;
     output_write_pipe: HANDLE = INVALID_HANDLE_VALUE;
-    child_closed_the_pipe: bool;
+    child_closed_the_pipe: bool = false;
     
     // The actual pseudo console and the child handle.
     pseudo_console_handle: HPCON  = INVALID_HANDLE_VALUE;
     child_process_handle:  HANDLE = INVALID_HANDLE_VALUE;
     job_handle:            HANDLE = INVALID_HANDLE_VALUE;
+
+    // Just a little helper required for closing the pseudo-console. See win32_drain_thread for details.
+    drain_thread: HANDLE = INVALID_HANDLE_VALUE;
 }
 
 // This little helper struct is used for parsing Virtual Terminal Sequences in the output read from
@@ -28,7 +33,7 @@ Win32_Input_Parser :: struct {
     input: string;
     index: s64;
     
-    parameters: [8]s32;
+    parameters: [8]s32 = ---;
     parameter_count: u32;
 }
 
@@ -142,6 +147,7 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 count := win32_get_input_parser_parameter(*parser, 0, 1);
                 for i := 0; i < count; ++i    add_character(cmdx, ' ');
             } else if compare_strings(command, "m") {
+                // Foreground color update
                 color_code := win32_get_input_parser_parameter(*parser, 0, 0);
                 win32_set_color_for_code(cmdx, color_code);
             } else {
@@ -164,8 +170,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                 parser.index += 2;
             } else {
                 // If the next character is not the actual new line character, then just reset
-                // the cursor to the beginning of the line. I do not understand why the C runtime
-                // actually does this, but for some god forsaken reason I have to deal with it.
+                // the cursor to the beginning of the line. This can happen if the application wishes to
+                // overwrite the previous output, e.g. for a progress bar.
                 set_cursor_position_to_beginning_of_line(cmdx);
                 ++parser.index;
             }
@@ -228,7 +234,7 @@ win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
     
     // Write the actual line to the pipe
     if !WriteFile(cmdx.win32.input_write_pipe, xx complete_buffer, data.count + 1, null, null) {
-        print("Failed to write to child process :(\n");
+        add_formatted_line(cmdx, "Failed to write to child process (Error: %).", win32_last_error_to_string());
         cmdx.win32.child_closed_the_pipe = true;
     }
     
@@ -262,21 +268,26 @@ win32_cleanup :: (cmdx: *CmdX) {
     // Close the input pipe from us to the child process
     CloseHandle(cmdx.win32.input_write_pipe);
 
+#if USE_PSEUDO_CONSOLE {
     // See the comment above win32_drain_thread for details on this fuckery.
-    drain_thread := CreateThread(null, 0, win32_drain_thread, cmdx, 0, null);
+    cmdx.win32.drain_thread = CreateThread(null, 0, win32_drain_thread, cmdx, 0, null);
     
     // Close the pseudo console. The pseudo console will only close when there is no more data to be read.
     ClosePseudoConsole(cmdx.win32.pseudo_console_handle);
     cmdx.win32.pseudo_console_handle = INVALID_HANDLE_VALUE;
-
+}
+    
     // After the data has been flushed, close the read pipe
     CloseHandle(cmdx.win32.output_read_pipe);
 
     cmdx.win32.input_write_pipe = INVALID_HANDLE_VALUE;
     cmdx.win32.output_read_pipe = INVALID_HANDLE_VALUE;
 
+#if USE_PSEUDO_CONSOLE {
     // Close the drain thread handle, which should have terminated at this point due to a broken pipe.
-    CloseHandle(drain_thread);
+    CloseHandle(cmdx.win32.drain_thread);
+    cmdx.win32.drain_thread = INVALID_HANDLE_VALUE;
+}
     
     // Close the job object
     CloseHandle(cmdx.win32.job_handle);
@@ -299,46 +310,59 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // Set up c strings for file paths
     c_command_string    := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);
-        
-    // Create a pipe to read the output of the child process
-    if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, null, 0) {
-        add_formatted_line(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
-        win32_cleanup(cmdx);
-        return false;
-    }
+
+    pipe_attributes: SECURITY_ATTRIBUTES;
+    pipe_attributes.nLength = size_of(SECURITY_ATTRIBUTES);
+    pipe_attributes.bInheritHandle = !USE_PSEUDO_CONSOLE;
     
     // Create a pipe to write input from this console to the child process
-    if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, null, 0) {
+    if !CreatePipe(*cmdx.win32.input_read_pipe, *cmdx.win32.input_write_pipe, *pipe_attributes, 0) {
         add_formatted_line(cmdx, "Failed to create an input pipe for the child process (Error: %).", GetLastError()); 
         win32_cleanup(cmdx);
         return false;
     }
     
-    // Create the actual pseudo console, using the pipe handles that were just created.
-    // Since the pseudo console apparently has no way of actually disabling the automatic
-    // line wrapping, the size of this buffer is set to some ridiculous value, so that
-    // essentially no line wrapping happens...
-    console_size: COORD;
-    console_size.X = 512;
-    console_size.Y = 512;
-    error_code:= CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 0, *cmdx.win32.pseudo_console_handle);
-    if error_code != S_OK {
-        add_formatted_line(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
+    // Create a pipe to read the output of the child process
+    if !CreatePipe(*cmdx.win32.output_read_pipe, *cmdx.win32.output_write_pipe, *pipe_attributes, 0) {
+        add_formatted_line(cmdx, "Failed to create an output pipe for the child process (Error: %).", GetLastError());
         win32_cleanup(cmdx);
         return false;
     }
     
-    pseudo_console: *PseudoConsole = cast(*PseudoConsole) cmdx.win32.pseudo_console_handle;
+#if USE_PSEUDO_CONSOLE {
+    // Create the actual pseudo console, using the pipe handles that were just created.
+    // Since the pseudo console apparently has no way of actually disabling the automatic
+    // line wrapping, the size of this buffer is set to some ridiculous value, so that
+    // essentially no line wrapping happens...
+    console_size: COORD = ---;
+    console_size.X = 1024;
+    console_size.Y = 1000;
+    error_code := CreatePseudoConsole(console_size, cmdx.win32.input_read_pipe, cmdx.win32.output_write_pipe, 0, *cmdx.win32.pseudo_console_handle);
+    if error_code != S_OK {
+        add_formatted_line(cmdx, "Failed to create pseudo console for the child process (Error: %).", win32_hresult_to_string(error_code));
+        win32_cleanup(cmdx);
+        return false;
+    }    
+} #else {
+    // If we are not using the pseudo console, then the child process must be allowed to actually inherit the
+    // pipes which they should use for communication. Since the pipes were created without a security attribute,
+    // they are not inheritable by default.
+    if !SetHandleInformation(cmdx.win32.input_write_pipe, HANDLE_FLAG_INHERIT, 0) {
+        add_formatted_line(cmdx, "Failed to set the input pipe as non-inheritable (Error: %).", win32_last_error_to_string());
+        win32_cleanup(cmdx);
+        return false;
+    }
     
-    // Close the child side handles which are not needed anymore
-    CloseHandle(cmdx.win32.input_read_pipe);
-    CloseHandle(cmdx.win32.output_write_pipe);
-    cmdx.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
-    cmdx.win32.output_write_pipe = INVALID_HANDLE_VALUE;
-
+    if !SetHandleInformation(cmdx.win32.output_read_pipe, HANDLE_FLAG_INHERIT, 0) {
+        add_formatted_line(cmdx, "Failed to set the output pipe as non-inheritable (Error: %).", win32_last_error_to_string());
+        win32_cleanup(cmdx);
+        return false;
+    }
+}
+        
     // Before the actual child process can be launched, a job object needs to be created. This is done to ensure
-    // that all child processes of the process we just launched also get terminated on a Ctrl+C event. Once again,
-    // windows strikes with its perfect api without any flaws or inconviences, whatsoever.
+    // that all child processes of the process we just launched also get terminated on a Ctrl+C event. Once
+    // again, windows strikes with its perfect api without any flaws or inconviences, whatsoever.
     cmdx.win32.job_handle = CreateJobObjectA(null, null);
     job_info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
     job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -347,7 +371,14 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // Create the startup info for the child process.
     extended_startup_info: STARTUPINFOEX;
     extended_startup_info.StartupInfo.cb = size_of(STARTUPINFOEX);
-    
+
+#if USE_PSEUDO_CONSOLE {
+    // Close the child side handles which are not needed anymore, since the pseudo-console now owns them.
+    CloseHandle(cmdx.win32.input_read_pipe);
+    CloseHandle(cmdx.win32.output_write_pipe);
+    cmdx.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
+    cmdx.win32.output_write_pipe = INVALID_HANDLE_VALUE;
+
     // Create the attribute list. The attribute list is used to pass the actual console handle to the child process.
     attribute_list_count: u64 = 1;
     attribute_list_size: u64 = ---;
@@ -359,27 +390,33 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
         win32_cleanup(cmdx);
         return false;
     }
-    
+
     if !UpdateProcThreadAttribute(extended_startup_info.lpAttributeList, 0, 0x20016, cmdx.win32.pseudo_console_handle,
                                   size_of(HPCON), null, null) { // 0x20016 = PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
         add_formatted_line(cmdx, "Failed to set the pseudo console handle for the child process (Error: %).", GetLastError());
         win32_cleanup(cmdx);
         return false;
     }
-
+} #else {
+    extended_startup_info.StartupInfo.dwFlags    = STARTF_USESTDHANDLES;
+    extended_startup_info.StartupInfo.hStdInput  = cmdx.win32.input_read_pipe;
+    extended_startup_info.StartupInfo.hStdOutput = cmdx.win32.output_write_pipe;
+    extended_startup_info.StartupInfo.hStdError  = cmdx.win32.output_write_pipe;
+}
+    
     // For some god-forsaken reason the working directory must be reset before the hPtyReference handle gets
     // closed, or else opening files won't work??? Thats why we cannot use defer here, and instead must do
     // this absolute tragedy... I do not even fucking know what the hell microsoft...
-    //    - vmat 07.01.23
+    //    - vmat 01.07.23
     previous_working_directory := get_working_directory();
     set_working_directory(cmdx.current_directory);
     
     // Launch the process with the attached information. The child process will inherit the current 
     // std handles if it wants a console connection.
     process: PROCESS_INFORMATION;
-    if !CreateProcessA(null, c_command_string, null, null, false, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
-        add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", GetLastError());
-        DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
+    if !CreateProcessA(null, c_command_string, null, null, !USE_PSEUDO_CONSOLE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
+        add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", win32_last_error_to_string());
+#if USE_PSEUDO_CONSOLE        DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
         set_working_directory(previous_working_directory);
         free_string(previous_working_directory, Default_Allocator);
         win32_cleanup(cmdx);
@@ -390,19 +427,31 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     set_working_directory(previous_working_directory);
     free_string(previous_working_directory, Default_Allocator);
 
+#if USE_PSEUDO_CONSOLE {
     // Delete the proc thread attribute, since that is no longer needed after the process has been spawned
     DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
-    
+}
+        
     // Attach the launched process to our created job, so that all child processes of this process will also be
     // terminated. After that has been done, resume the thread to actually start the child process.
     AssignProcessToJobObject(cmdx.win32.job_handle, process.hProcess);
     ResumeThread(process.hThread);
+    CloseHandle(process.hThread); // The thread handle is no longer needed
     
+#if USE_PSEUDO_CONSOLE {
     // Close this handle here, so that the pseudo console automatically closes when the child
     // process terminates. This is a bit sketchy, since there does not seem to be an api for it,
     // but that is what the windows terminal does
     // (in src/cascadia/terminalconnection/contpyconnection.cpp), and it works, so yeah...
-    if CloseHandle(pseudo_console.hPtyReference) == 0 print("Failed to close pseudo console reference handle.\n");
+    pseudo_console: *PseudoConsole = cast(*PseudoConsole) cmdx.win32.pseudo_console_handle;
+    if !CloseHandle(pseudo_console.hPtyReference) add_formatted_line(cmdx, "Failed to close pseudo console reference handle (Error: %).", win32_last_error_to_string());
+} #else {
+    // Close the child side handles now, since the child has inherited and copied them.
+    CloseHandle(cmdx.win32.input_read_pipe);
+    CloseHandle(cmdx.win32.output_write_pipe);
+    cmdx.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
+    cmdx.win32.output_write_pipe = INVALID_HANDLE_VALUE;
+}
     
     // Prepare the cmdx internal state
     cmdx.child_process_running       = true;
