@@ -314,6 +314,9 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // folder). However, when launching a process, Win32 takes the current directory as first possible path,
     // therefore we need to quickly change the working directory when doing that.
    
+    // Reset the internal win32 state
+    cmdx.win32 = .{};
+
     // Set up c strings for file paths
     c_command_string    := to_cstring(command_string, *cmdx.frame_allocator);
     c_current_directory := to_cstring(cmdx.current_directory, *cmdx.frame_allocator);

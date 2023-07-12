@@ -449,15 +449,7 @@ add_text :: (cmdx: *CmdX, text: string) {
     first_line := array_get(*cmdx.lines, 0);
     if projected_one_plus_last > first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
-        // in the array), then that line will need to be removed.
-        color_head := array_get(*cmdx.colors, 0);
-
-        if first_line.wrapped && !color_head.source.wrapped && cmdx.colors.count > 1
-        x := 0;
-
-        if current_line.one_plus_last == 1 && projected_one_plus_last == 2
-        x := 0;
-        
+        // in the array), then that line will need to be removed.        
         to_remove_range := Source_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
         current_line = remove_overlapping_lines(cmdx, to_remove_range);
     }
@@ -500,6 +492,10 @@ add_formatted_line :: (cmdx: *CmdX, format: string, args: ..any) {
 }
 
 
+compare_color_range :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
+    return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
+}
+
 set_color_internal :: (cmdx: *CmdX, true_color: Color, color_index: Color_Index) {
     if cmdx.colors.count {
         color_head := array_get(*cmdx.colors, cmdx.colors.count - 1);
@@ -507,9 +503,24 @@ set_color_internal :: (cmdx: *CmdX, true_color: Color, color_index: Color_Index)
         if color_head.source.first == color_head.source.one_plus_last && !color_head.source.wrapped {
             // If the previous color was not actually used in any source range, then just overwrite that
             // entry with the new data to save space.
-            color_head.color_index = color_index;
-            color_head.true_color  = true_color;
-        } else if color_head.color_index != color_index || !compare_colors(color_head.true_color, true_color) {
+            merged_with_previous := false;
+
+            if cmdx.colors.count >= 2 {
+                previous_color_head := array_get(*cmdx.colors, cmdx.colors.count - 2);
+                if compare_color_range(~previous_color_head, true_color, color_index) {
+                    previous_color_head.color_index = color_index;
+                    previous_color_head.true_color  = true_color;
+                    merged_with_previous = true;
+                    array_remove(*cmdx.colors, cmdx.colors.count - 1); // Remove the new head, since it is useless
+                }
+            }
+
+            if !merged_with_previous {
+                // If we have not merged with the previous color, then set reuse the current head for the new color.
+                color_head.color_index = color_index;
+                color_head.true_color  = true_color;
+            }
+        } else if !compare_color_range(~color_head, true_color, color_index) {
             // If this newly set color is different than the previous color (which is getting used), append
             // a new color range to the list
             range: Color_Range = .{ .{ color_head.source.one_plus_last, color_head.source.one_plus_last, false }, color_index, true_color };
