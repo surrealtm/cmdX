@@ -301,7 +301,9 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
             break;
     }
 
-    if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, total_removed_range);
+    if total_removed_range.first != -1 {
+        remove_overlapping_color_ranges(cmdx, total_removed_range);
+    }
     
     return array_get(*cmdx.lines, cmdx.lines.count - 1);
 }
@@ -329,8 +331,13 @@ set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
         line_head.one_plus_last = line_head.first + x;
         line_head.wrapped = false;
 
+        while !source_ranges_overlap(~line_head, color_head.source) {
+            array_remove(*cmdx.colors, cmdx.colors.count - 1);
+            color_head = array_get(*cmdx.colors, cmdx.colors.count - 1);
+        }
+        
         color_head.source.one_plus_last = line_head.one_plus_last;
-        color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
+        color_head.source.wrapped = color_head.source.first > color_head.source.one_plus_last;
     } else {
         line_head.one_plus_last = line_head.first + x - BACKLOG_SIZE;
         color_head.source.one_plus_last = line_head.one_plus_last;
@@ -1144,6 +1151,3 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
-
-
-#run cmdx();
