@@ -214,8 +214,11 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     enclosed := false;
     
     if lhs.wrapped && rhs.wrapped {
+        // If both are wrapped, then lhs must start after rhs and end before rhs.
         enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     } else if lhs.wrapped {
+        // If lhs is wrapped and rhs is not, then lhs can only actually be enclosed
+        // if rhs covers the complete available range.
         enclosed = rhs.first == 0 && rhs.one_plus_last == BACKLOG_SIZE;
     } else if rhs.wrapped {
         // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
@@ -227,7 +230,8 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
         enclosed = (lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last) ||
             (lhs.first >= rhs.first && lhs.one_plus_last <= BACKLOG_SIZE);
     } else {
-        enclosed = lhs.first >= rhs.first && lhs.first < rhs.one_plus_last && lhs.one_plus_last > rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
+        // If neither are wrapped, then lhs must start after and end before rhs
+        enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
     }
 
     return enclosed;
@@ -1140,3 +1144,6 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
+
+
+#run cmdx();
