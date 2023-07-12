@@ -23,6 +23,8 @@ Win32 :: struct {
 
     // Just a little helper required for closing the pseudo-console. See win32_drain_thread for details.
     drain_thread: HANDLE = INVALID_HANDLE_VALUE;
+
+    previous_character_was_carriage_return: bool = false;
 }
 
 // This little helper struct is used for parsing Virtual Terminal Sequences in the output read from
@@ -79,6 +81,15 @@ win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, de
     return parser.parameters[index];
 }
 
+win32_maybe_process_carriage_return :: (cmdx: *CmdX, parser: *Win32_Input_Parser) {
+    if parser.input[parser.index] != '\n' && cmdx.win32.previous_character_was_carriage_return {
+        // If there was an \r character before this one, then effectively restart the line.
+        set_cursor_position_to_beginning_of_line(cmdx);
+    }
+
+    cmdx.win32.previous_character_was_carriage_return = false;
+}
+
 win32_process_input_string :: (cmdx: *CmdX, input: string) {
     parser: Win32_Input_Parser = ---;
     parser.cmdx  = cmdx;
@@ -86,6 +97,8 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
     parser.index = 0;
     
     while parser.index < parser.input.count {
+        win32_maybe_process_carriage_return(cmdx, *parser);
+
         if parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5b { // 0x1b is 'ESCAPE',0x5b is '['
             // Parse an escape sequence. An escape sequence is a number [0,n] of parameters,
             // seperated by semicolons, followed by the actual command string.
@@ -135,11 +148,11 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
                                 
                 horizontal_offset := x - get_cursor_position_in_line(cmdx);
                 
-                if horizontal_offset >= 0 {
+                if horizontal_offset > 0 {
                     // If the cursor moves to the right of the current cursor position, then
                     // just append spaces to the current text.
                     for i := 0; i < horizontal_offset; ++i add_character(cmdx, ' ');
-                } else
+                } else if horizontal_offset < 0
                     set_cursor_position_in_line(cmdx, x);
             } else if compare_strings(command, "C") {
                 // Move the cursor to the right. Apparently this also produces white spaces while
@@ -163,27 +176,22 @@ win32_process_input_string :: (cmdx: *CmdX, input: string) {
             
             ++parser.index; // Skip over the final character which was the terminator
         } else if parser.input[parser.index] == '\r' {
-            if parser.index < parser.input.count - 1 && parser.input[parser.index + 1] == '\n' {
-                // If the next character is the actual new line character, then this acts just
-                // as a normal new line...
-                new_line(cmdx);
-                parser.index += 2;
-            } else {
-                // If the next character is not the actual new line character, then just reset
-                // the cursor to the beginning of the line. This can happen if the application wishes to
-                // overwrite the previous output, e.g. for a progress bar.
-                set_cursor_position_to_beginning_of_line(cmdx);
-                ++parser.index;
-            }
+            // Remember this character for later. If the next character is the \n one, then a new line will
+            // be added. In that case, this character can effectively be ignored. If it is some other character,
+            // then the line will be restarted. Since the \r character only makes sense in context with the
+            // next character, and the next character may not be part of this string (if the child cut the buffer
+            // after this character).
+            cmdx.win32.previous_character_was_carriage_return = true;
+            ++parser.index;
         } else if parser.input[parser.index] == '\n' {
             // Normal single new line character, not sure if that actually ever happens...
             new_line(cmdx);
             ++parser.index;
-        } else if parser.input[parser.index] == '\t' {
+        } else if parser.input[parser.index] == '\t' {            
             // If the child outputted tabs, translate them to spaces for better consistency.
             for i := 0; i < 4; ++i add_character(cmdx, ' ');
             ++parser.index;
-        } else {
+        } else {            
             // If this was just a normal character, skip it.
             add_character(cmdx, parser.input[parser.index]);
             ++parser.index;
@@ -217,9 +225,8 @@ win32_read_from_child_process :: (cmdx: *CmdX) {
     }
 
     // There are 'total_bytes_available' to be read in the pipe. Since this is a byte 
-    // oriented pipe, more than a single line may be read. However, since the client 
-    // implementation (probably) only ever flushes after a new-line, the read buffer should 
-    // always end on a new-line.
+    // oriented pipe, The read input may not be aligned to the actual lines, but that
+    // is handled fine by the input parser.
     string := string_view(xx input_buffer, bytes_read);
     win32_process_input_string(cmdx, string);
 }

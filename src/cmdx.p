@@ -37,8 +37,7 @@ REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
-
-BACKLOG_SIZE :: 65536; // In characters
+BACKLOG_SIZE :: 65535; // In characters
 HISTORY_SIZE :: 64;    // In input lines
 SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 
@@ -120,7 +119,7 @@ CmdX :: struct {
     config: Config;
     
     // Platform data
-    win32: Win32 = ---;
+    win32: Win32;
 }
 
 /* --- DEBUGGING --- */
@@ -364,7 +363,7 @@ new_line :: (cmdx: *CmdX) {
         // just after the previous line, but only if that previous line does not end on the actual
         // backlog end, which would lead to unfortunate behaviour later on.
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
-
+        
         if old_line_head.one_plus_last < BACKLOG_SIZE {
             // The first character is inclusive. If the previous line ends on the BACKLOG_SIZE, that would be
             // an invalid index for the first character of the next line...
@@ -475,8 +474,8 @@ add_text :: (cmdx: *CmdX, text: string) {
     render_next_frame(cmdx);
 }
 
-add_character :: (cmdx: *CmdX, character: s8) {
-    character_copy := character; // Since character is a register parameter, we probably cannot take the pointer to that directly...
+add_character :: (cmdx: *CmdX, character: s8) {    
+    character_copy := character; // Since character is a register parameter, we probably cannot take the pointer to that directly... @Cleanup check if that may be possible, dunno
     string: string = ---;
     string.data = *character_copy;
     string.count = 1;
