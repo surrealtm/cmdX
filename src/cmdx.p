@@ -81,10 +81,10 @@ CmdX :: struct {
     
     // Output
     window: Window = ---;
-    renderer: Renderer; // The renderer must be initialized for now or else the vertex buffers will have invalid values...  @Cleanup initialize these values in create_vertex_buffer...
+    renderer: Renderer = ---;
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
     render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
-    ui: UI;
+    ui: UI = ---;
     
     // Text Input
     text_input: Text_Input;
@@ -129,7 +129,7 @@ CmdX :: struct {
     config: Config;
     
     // Platform data
-    win32: Win32;
+    win32: Win32 = ---;
 }
 
 /* --- DEBUGGING --- */

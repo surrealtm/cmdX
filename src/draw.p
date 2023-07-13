@@ -44,6 +44,10 @@ create_renderer :: (renderer: *Renderer) {
     
     renderer.font_vertices = xx allocate(Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
     renderer.font_uvs = xx allocate(Default_Allocator, GLYPH_BUFFER_SIZE * size_of(f32));
+
+    renderer.font_glyph_count = 0;
+    renderer.width  = 0;
+    renderer.height = 0;
 }
 
 destroy_renderer :: (renderer: *Renderer) {
