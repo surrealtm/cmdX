@@ -38,7 +38,7 @@ REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 DEFAULT_BACKLOG_SIZE :: 65535; // In characters
-DEFAULT_HISTORY_SIZE :: 64;    // In input lines @Cleanup make config property
+DEFAULT_HISTORY_SIZE :: 64;    // In input lines
 DEFAULT_SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 DEFAULT_THEME        :: "blue";
 DEFAULT_FONT         :: COURIER_NEW;
@@ -265,16 +265,14 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // wrong now). If a color range partly covered the removed space, but also covers other space,
 // that color range should be adapted to not cover the removed space.
 remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *Color_Range {
-    index := 0; // @Cleanup right now this index is not used, get rid of it?
+    while cmdx.colors.count {
+        color_range := array_get(*cmdx.colors, 0);
 
-    while index < cmdx.colors.count {
-        color_range := array_get(*cmdx.colors, index);
-
-        if index < cmdx.colors.count - 1 && (source_range_empty(line_range) || source_range_enclosed(cmdx, color_range.source, line_range)) {
+        if cmdx.colors.count > 1 && (source_range_empty(line_range) || source_range_enclosed(cmdx, color_range.source, line_range)) {
             // Color range is not used in any remaining line, so it should be removed. This should only
             // happen if it is not the last color range in the list, since the backlog always requires
             // at least one color for rendering.
-            array_remove(*cmdx.colors, index);
+            array_remove(*cmdx.colors, 0);
         } else if source_ranges_overlap(color_range.source, line_range) {
             // Remove the removed space from the color range
             color_range.source.wrapped = color_range.source.one_plus_last < line_range.one_plus_last;
@@ -294,11 +292,9 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *C
 remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
-
-    index := 0; // @Cleanup right now this index is not used, get rid of it?
     
-    while index < cmdx.lines.count - 1 {
-        existing_line := array_get(*cmdx.lines, index);
+    while cmdx.lines.count > 1 {
+        existing_line := array_get(*cmdx.lines, 0);
         
         if source_ranges_overlap(~existing_line, new_line) {
             // If the source ranges overlap, then the existing line must be removed to make space for the
@@ -306,14 +302,12 @@ remove_overlapping_lines :: (cmdx: *CmdX, new_line: Source_Range) -> *Source_Ran
             if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
             total_removed_range.one_plus_last = existing_line.one_plus_last;
             total_removed_range.wrapped      |= existing_line.wrapped;
-            array_remove(*cmdx.lines, index);
+            array_remove(*cmdx.lines, 0);
         } else
             break;
     }
 
-    if total_removed_range.first != -1 {
-        remove_overlapping_color_ranges(cmdx, total_removed_range);
-    }
+    if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, total_removed_range);
     
     return array_get(*cmdx.lines, cmdx.lines.count - 1);
 }
@@ -1178,5 +1172,6 @@ WinMain :: () -> s32 {
     return cmdx();
 }
 
-// @Cleanup edit-property command?
-// @Cleanup respect hashtags as comments in the config file
+// @Incomplete edit-property command
+// @Incomplete respect hashtags as comments in the config file
+// @Incomplete wrong process name gets displayed in the title
