@@ -64,6 +64,11 @@ cd_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     cd(cmdx, new_directory);
 }
 
+cat_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    file_path := get_string_argument(argument_values, 0);
+    cat(cmdx, file_path);
+}
+
 create_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     file_path := get_string_argument(argument_values, 0);
     create_file(cmdx, file_path);
@@ -145,7 +150,10 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_alias(cd, "change_directory");
     register_command_argument(cd, "new_directory", .String);
 
-    cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path.", create_file_handler);
+    cat := register_command(cmdx, "cat", "Dumps the contents of the specified file into the backlog", cat_handler);
+    register_command_argument(cat, "file_path", .String);
+    
+    cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path", create_file_handler);
     register_command_argument(cf, "file_path", .String);
     
     rf := register_command(cmdx, "remove_file", "Deletes the file or folder specified by the relative or absolute path", remove_file_handler);

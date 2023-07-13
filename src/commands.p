@@ -437,6 +437,26 @@ ls :: (cmdx: *CmdX, directory: string) {
     }
 }
 
+cat :: (cmdx: *CmdX, file_path: string) {
+    absolute_path := get_path_relative_to_cd(cmdx, file_path);
+
+    file_contents, file_found := read_file(absolute_path);
+    original_file_contents := file_contents;
+    defer free_file_data(original_file_contents);
+    
+    if !file_found {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Cannot cat file '%': %", absolute_path, error_string);
+        win32_free_last_error_string(*error_string);
+        return;
+    }
+
+    while file_contents.count {
+        line := get_first_line(*file_contents);
+        add_line(cmdx, line);
+    }
+}
+
 cd :: (cmdx: *CmdX, folder_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, folder_path);
 

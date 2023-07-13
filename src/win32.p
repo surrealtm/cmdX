@@ -242,8 +242,11 @@ win32_write_to_child_process :: (cmdx: *CmdX, data: string) {
     
     // Write the actual line to the pipe
     if !WriteFile(cmdx.win32.input_write_pipe, xx complete_buffer, data.count + 1, null, null) {
-        add_formatted_line(cmdx, "Failed to write to child process (Error: %).", win32_last_error_to_string());
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Failed to write to child process (Error: %).", error_string);
+        win32_free_last_error_string(*error_string);
         cmdx.win32.child_closed_the_pipe = true;
+        return;
     }
     
     // Flush the buffer so that the data is actually written into the pipe, and not just the internal 
@@ -359,13 +362,17 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // pipes which they should use for communication. Since the pipes were created without a security attribute,
     // they are not inheritable by default.
     if !SetHandleInformation(cmdx.win32.input_write_pipe, HANDLE_FLAG_INHERIT, 0) {
-        add_formatted_line(cmdx, "Failed to set the input pipe as non-inheritable (Error: %).", win32_last_error_to_string());
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Failed to set the input pipe as non-inheritable (Error: %).", error_string);
+        win32_free_last_error_string(*error_string);
         win32_cleanup(cmdx);
         return false;
     }
     
     if !SetHandleInformation(cmdx.win32.output_read_pipe, HANDLE_FLAG_INHERIT, 0) {
-        add_formatted_line(cmdx, "Failed to set the output pipe as non-inheritable (Error: %).", win32_last_error_to_string());
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Failed to set the output pipe as non-inheritable (Error: %).", error_string);
+        win32_free_last_error_string(*error_string);
         win32_cleanup(cmdx);
         return false;
     }
@@ -426,7 +433,10 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // std handles if it wants a console connection.
     process: PROCESS_INFORMATION;
     if !CreateProcessA(null, c_command_string, null, null, !USE_PSEUDO_CONSOLE, EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
-        add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", win32_last_error_to_string());
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Unknown command. Try :help to see a list of all available commands (Error: %).", error_string);
+        win32_free_last_error_string(*error_string);
+        
 #if USE_PSEUDO_CONSOLE        DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
         set_working_directory(previous_working_directory);
         free_string(previous_working_directory, Default_Allocator);
@@ -455,7 +465,12 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // but that is what the windows terminal does
     // (in src/cascadia/terminalconnection/contpyconnection.cpp), and it works, so yeah...
     pseudo_console: *PseudoConsole = cast(*PseudoConsole) cmdx.win32.pseudo_console_handle;
-    if !CloseHandle(pseudo_console.hPtyReference) add_formatted_line(cmdx, "Failed to close pseudo console reference handle (Error: %).", win32_last_error_to_string());
+    if !CloseHandle(pseudo_console.hPtyReference) {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, "Failed to close pseudo console reference handle (Error: %).", error_string);
+        win32_free_last_error_string(*error_string);
+    }
+        
 } #else {
     // Close the child side handles now, since the child has inherited and copied them.
     CloseHandle(cmdx.win32.input_read_pipe);
