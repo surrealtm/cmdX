@@ -103,9 +103,13 @@ CmdX :: struct {
     backlog: *s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Source_Range;
-    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen.
-    scroll_speed: s64; // In lines per mouse wheel turn
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
+
+    // Backlog scrolling
+    scroll_target: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
+    scroll_position: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
+    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
+    scroll_speed: s64; // In lines per mouse wheel turn
     
     // Command handling
     commands: [..]Command;
@@ -393,7 +397,7 @@ new_line :: (cmdx: *CmdX) {
     }
     
     ++cmdx.viewport_height;
-    cmdx.scroll_offset = cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+    cmdx.scroll_target = xx cmdx.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 
     render_next_frame(cmdx);
 }
@@ -776,12 +780,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     if cmdx.window.key_pressed[Key_Code.Page_Down] {
         // Hotkey to scroll to the bottom of the backlog
-        cmdx.scroll_offset = cmdx.lines.count;
+        cmdx.scroll_target = xx cmdx.lines.count - 1;
     }
 
     if cmdx.window.key_pressed[Key_Code.Page_Up] {
         // Hotkey to scroll to the start of the backlog
-        cmdx.scroll_offset = 0;
+        cmdx.scroll_target = 0;
     }
     
     // Update the internal text input rendering state
@@ -838,24 +842,35 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             handle_input_string(cmdx, input_string);
         }
     }
-    
-    // The amount of visible lines on screen this frame
-    visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
-    if cmdx.scroll_offset < visible_line_count - 1   visible_line_count = cmdx.window.height / cmdx.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
 
-    // The actual amount of lines that will be rendered. If the current line head is empty, don't consider it
-    // to be an actual line yet, and skip drawing it.
-    drawn_line_count: s32 = min(cast(s32) cmdx.lines.count - 1, visible_line_count - 1);
+    // Handle scrolling inside the backlog
     
-    // Handle scrolling with the mouse wheel
+    // Calculate the number of drawn lines at the target scrolling position, so that the target can be
+    // clamped with the correct values.
+    target_visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
+    if cast(s64) floor(cmdx.scroll_target) < target_visible_line_count - 1   target_visible_line_count = cmdx.window.height / cmdx.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
+
+    target_drawn_line_count: s32 = min(cast(s32) cmdx.lines.count - 1, target_visible_line_count - 1);
+    
     previous_scroll_offset := cmdx.scroll_offset;
-    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * cmdx.scroll_speed, drawn_line_count - 1, cmdx.lines.count - 1);
-    if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
 
+    cmdx.scroll_target = clamp(xx cmdx.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed, xx target_drawn_line_count - 1, xx cmdx.lines.count - 1);
+    
+    cmdx.scroll_position += (cmdx.scroll_target - cmdx.scroll_position) * 0.25;
+    cmdx.scroll_offset    = clamp(cast(s64) round(cmdx.scroll_position), target_drawn_line_count - 1, cmdx.lines.count - 1); // Make sure that the interpolated position never goes out of bounds, even when the interpolated scroll position is (because the scrolling is too slow with new lines coming in)
+
+    // Now calculate the number of drawn lines at the current scrolling position
+    actual_visible_line_count: s32 = cast(s32) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
+    if cmdx.scroll_offset < actual_visible_line_count - 1   actual_visible_line_count = cmdx.window.height / cmdx.font.line_height; // If we have scrolled to the top of the backlog, then we want all lines to be fully visible, not only partially. Therefore, forget about the "ceilf", instead round downwards to calculate the amount of lines fully visible
+
+    actual_drawn_line_count: s32 = min(cast(s32) cmdx.lines.count - 1, actual_visible_line_count - 1);
+    
+    if previous_scroll_offset != cmdx.scroll_offset   render_next_frame(cmdx);
+        
     if cmdx.render_frame || cmdx.render_ui {    
         // Set up the first line to be rendered, as well as the highest line index to be rendered
-        line_index: s64 = clamp(cmdx.scroll_offset - drawn_line_count, 0, cmdx.lines.count - 1);
-        max_line_index: s64 = line_index + drawn_line_count - 1;
+        line_index: s64 = clamp(cmdx.scroll_offset - actual_drawn_line_count, 0, cmdx.lines.count - 1);
+        max_line_index: s64 = line_index + actual_drawn_line_count - 1;
 
         // Query the first line in the backlog, and the last line to be rendered
         line_tail  := array_get(*cmdx.lines, 0);
@@ -872,7 +887,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         // Set up coordinates for rendering
         cursor_x: s32 = 5;
-        cursor_y: s32 = cmdx.window.height - drawn_line_count * cmdx.font.line_height - 5;
+        cursor_y: s32 = cmdx.window.height - actual_drawn_line_count * cmdx.font.line_height - 5;
 
         // Set up the color ranges
         color_range_index: s64 = 0;
@@ -1164,3 +1179,4 @@ WinMain :: () -> s32 {
 }
 
 // @Cleanup edit-property command?
+// @Cleanup respect hashtags as comments in the config file
