@@ -31,15 +31,18 @@ CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 ARIAL           :: "C:/windows/fonts/arial.ttf";
-DEFAULT_FONT    :: COURIER_NEW;
 
 REQUESTED_FPS: f32 : 60;
 REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
 
 CONFIG_FILE_NAME :: ".cmdx-config";
-BACKLOG_SIZE :: 65535; // In characters
-HISTORY_SIZE :: 64;    // In input lines
-SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
+
+DEFAULT_BACKLOG_SIZE :: 65535; // In characters
+DEFAULT_HISTORY_SIZE :: 64;    // In input lines @Cleanup make config property
+DEFAULT_SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
+DEFAULT_THEME        :: "blue";
+DEFAULT_FONT         :: COURIER_NEW;
+DEFAULT_FONT_SIZE    :: 15;
 
 Color_Index :: enum {
     Default;
@@ -86,7 +89,8 @@ CmdX :: struct {
     // Text Input
     text_input: Text_Input;
     history: [..]string;
-    history_index: s32 = -1; // -1 means no history is used
+    history_index: s64 = -1; // -1 means no history is used
+    history_size: s64;
 
     // Auto complete
     auto_complete_options: [..]string;
@@ -95,10 +99,12 @@ CmdX :: struct {
     auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
     
     // Backlog
+    backlog_size: s64;
     backlog: *s8 = ---;
     colors: [..]Color_Range;
     lines: [..]Source_Range;
     scroll_offset: s64; // The index for the first line to be rendered at the top of the screen.
+    scroll_speed: s64; // In lines per mouse wheel turn
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
     
     // Command handling
@@ -130,7 +136,7 @@ debug_print_lines :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.lines.count; ++i {
         line := array_get(*cmdx.lines, i);
         print("I %: % -> % ", i, line.first, line.one_plus_last);
-        if line.wrapped print("     '%*%' (wrapped)", string_view(*cmdx.backlog[line.first], BACKLOG_SIZE - line.first), string_view(*cmdx.backlog[0], line.one_plus_last)); 
+        if line.wrapped print("     '%*%' (wrapped)", string_view(*cmdx.backlog[line.first], cmdx.backlog_size - line.first), string_view(*cmdx.backlog[0], line.one_plus_last)); 
         else print("     '%'", string_view(*cmdx.backlog[line.first], line.one_plus_last - line.first));
         print("\n");
     }
@@ -210,7 +216,7 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
 
 // Returns true if lhs is completely enclosed by rhs, meaning that there is no character
 // in lhs that is not also owned by rhs.
-source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
+source_range_enclosed :: (cmdx: *CmdX, lhs: Source_Range, rhs: Source_Range) -> bool {
     enclosed := false;
     
     if lhs.wrapped && rhs.wrapped {
@@ -219,7 +225,7 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     } else if lhs.wrapped {
         // If lhs is wrapped and rhs is not, then lhs can only actually be enclosed
         // if rhs covers the complete available range.
-        enclosed = rhs.first == 0 && rhs.one_plus_last == BACKLOG_SIZE;
+        enclosed = rhs.first == 0 && rhs.one_plus_last == cmdx.backlog_size;
     } else if rhs.wrapped {
         // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
         // of [0,rhs.one_plus_last]. It should also detect the edge case where lhs is an
@@ -228,7 +234,7 @@ source_range_enclosed :: (lhs: Source_Range, rhs: Source_Range) -> bool {
         // | ->           |  lhs
         // |            ->|  lhs
         enclosed = (lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last) ||
-            (lhs.first >= rhs.first && lhs.one_plus_last <= BACKLOG_SIZE);
+            (lhs.first >= rhs.first && lhs.one_plus_last <= cmdx.backlog_size);
     } else {
         // If neither are wrapped, then lhs must start after and end before rhs
         enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
@@ -260,7 +266,7 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, line_range: Source_Range) -> *C
     while index < cmdx.colors.count {
         color_range := array_get(*cmdx.colors, index);
 
-        if index < cmdx.colors.count - 1 && (source_range_empty(line_range) || source_range_enclosed(color_range.source, line_range)) {
+        if index < cmdx.colors.count - 1 && (source_range_empty(line_range) || source_range_enclosed(cmdx, color_range.source, line_range)) {
             // Color range is not used in any remaining line, so it should be removed. This should only
             // happen if it is not the last color range in the list, since the backlog always requires
             // at least one color for rendering.
@@ -327,7 +333,7 @@ set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
 
     assert(line_head.first + x < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
-    if line_head.first + x < BACKLOG_SIZE {
+    if line_head.first + x < cmdx.backlog_size {
         line_head.one_plus_last = line_head.first + x;
         line_head.wrapped = false;
 
@@ -339,7 +345,7 @@ set_cursor_position_in_line :: (cmdx: *CmdX, x: s64) {
         color_head.source.one_plus_last = line_head.one_plus_last;
         color_head.source.wrapped = color_head.source.first > color_head.source.one_plus_last;
     } else {
-        line_head.one_plus_last = line_head.first + x - BACKLOG_SIZE;
+        line_head.one_plus_last = line_head.first + x - cmdx.backlog_size;
         color_head.source.one_plus_last = line_head.one_plus_last;
     }    
 }
@@ -375,8 +381,8 @@ new_line :: (cmdx: *CmdX) {
         // backlog end, which would lead to unfortunate behaviour later on.
         old_line_head := array_get(*cmdx.lines, cmdx.lines.count - 2);
         
-        if old_line_head.one_plus_last < BACKLOG_SIZE {
-            // The first character is inclusive. If the previous line ends on the BACKLOG_SIZE, that would be
+        if old_line_head.one_plus_last < cmdx.backlog_size {
+            // The first character is inclusive. If the previous line ends on the backlog size, that would be
             // an invalid index for the first character of the next line...
             new_line_head.first = old_line_head.one_plus_last;
         } else {
@@ -402,17 +408,17 @@ add_text :: (cmdx: *CmdX, text: string) {
     
     projected_one_plus_last := current_line.one_plus_last + text.count;
     
-    if projected_one_plus_last > BACKLOG_SIZE {
+    if projected_one_plus_last > cmdx.backlog_size {
         // If the current line would overflow the backlog size, then it needs to be wrapped around
         // the backlog.
 
         // If the line has wrapped before, then the backlog may not have enough space to fit the complete
         // line. Cut off the new text at the size which can still fit into the backlog.
-        available_text_space := min(BACKLOG_SIZE, text.count);
+        available_text_space := min(cmdx.backlog_size, text.count);
         
         // If the current line would grow too big for the backlog, then it needs to be wrapped
         // around the start.
-        before_wrap_length := BACKLOG_SIZE - current_line.one_plus_last;
+        before_wrap_length := cmdx.backlog_size - current_line.one_plus_last;
         after_wrap_length  := available_text_space - before_wrap_length;
         
         // Remove all lines that are between the end of the current line until the end of the backlog,
@@ -585,7 +591,7 @@ draw_backlog_line :: (cmdx: *CmdX, start: s64, end: s64, color_range_index: *s64
 
 add_history :: (cmdx: *CmdX, input_string: string) {
     // Make space for the new input string if that is required
-    if cmdx.history.count == HISTORY_SIZE {
+    if cmdx.history.count == cmdx.history_size {
         head := array_get_value(*cmdx.history, cmdx.history.count - 1);
         free_string(head, *cmdx.global_allocator);
         array_remove(*cmdx.history, cmdx.history.count - 1);
@@ -843,7 +849,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Handle scrolling with the mouse wheel
     previous_scroll_offset := cmdx.scroll_offset;
-    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * SCROLL_SPEED, drawn_line_count - 1, cmdx.lines.count - 1);
+    cmdx.scroll_offset = clamp(cmdx.scroll_offset - cmdx.window.mouse_wheel_turns * cmdx.scroll_speed, drawn_line_count - 1, cmdx.lines.count - 1);
     if previous_scroll_offset != cmdx.scroll_offset render_next_frame(cmdx);
 
     if cmdx.render_frame || cmdx.render_ui {    
@@ -884,9 +890,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
                 // If this line wraps, then the line actually contains two parts. The first goes from the start
                 // until the end of the backlog, the second part starts at the beginning of the backlog and goes
                 // until the end of the line. It is easier for draw_backlog_split to do it like this.
-                cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, BACKLOG_SIZE, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+                cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, cmdx.backlog_size, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
                 wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-                cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, cmdx.backlog[BACKLOG_SIZE - 1], cmdx.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
+                cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, cmdx.backlog[cmdx.backlog_size - 1], cmdx.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
                 cursor_x, cursor_y = draw_backlog_line(cmdx, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             } else
                 cursor_x, cursor_y = draw_backlog_line(cmdx, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
@@ -1063,9 +1069,14 @@ cmdx :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
     
     // Set up all the required config properties, and read the config file if it exists
-    create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, 15);
+    // @Cleanup do we actually want a 'default' parameter here, or should the variables not just have a default
+    // value which will not be overriden?
+    create_integer_property(*cmdx.config, "backlog-size", *cmdx.backlog_size, DEFAULT_BACKLOG_SIZE);
+    create_integer_property(*cmdx.config, "history-size", *cmdx.history_size, DEFAULT_HISTORY_SIZE);
+    create_integer_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed, DEFAULT_SCROLL_SPEED);
+    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, DEFAULT_THEME);
     create_string_property(*cmdx.config, "font-name", *cmdx.font_path, DEFAULT_FONT);
-    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, "blue");
+    create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, DEFAULT_FONT_SIZE);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
@@ -1078,7 +1089,7 @@ cmdx :: () -> s32 {
     set_window_icon(*cmdx.window, "data/cmdx.ico");
 
     // Create the backlog array
-    cmdx.backlog = allocate(*cmdx.global_allocator, BACKLOG_SIZE);
+    cmdx.backlog = allocate(*cmdx.global_allocator, cmdx.backlog_size);
     
     // Load the font
     create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
@@ -1151,3 +1162,5 @@ main :: () -> s32 {
 WinMain :: () -> s32 {
     return cmdx();
 }
+
+// @Cleanup edit-property command?
