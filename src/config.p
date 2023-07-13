@@ -6,12 +6,16 @@ Section_Type :: enum {
 
 Property_Type :: enum {
     String;
-    Integer;
+    Bool;
+    S64;
+    U32;
 }
 
 Property_Value :: union {
     _string:  *string;
-    _integer: *s64;
+    _bool: *bool;
+    _s64: *s64;
+    _u32: *u32;
 }
 
 Property :: struct {
@@ -32,15 +36,16 @@ property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
     
     switch type {
-        case .String; result = "String";
-        case .Integer; result = "Integer";
-        case; result = "UnknownPropertyType";
+    case .String; result = "String";
+    case .Bool; result = "Bool";
+    case .S64, .U32; result = "Integer";        
+    case; result = "UnknownPropertyType";
     }
     
     return result;
 }
 
-create_property :: (config: *Config, name: string, type: Property_Type) -> *Property {
+create_property_internal :: (config: *Config, name: string, type: Property_Type) -> *Property {
     property := array_push(*config.properties);
     property.name = name;
     property.type = type;
@@ -48,15 +53,27 @@ create_property :: (config: *Config, name: string, type: Property_Type) -> *Prop
 }
 
 create_string_property :: (config: *Config, name: string, value: *string, default: string) {
-    property := create_property(config, name, .String);
+    property := create_property_internal(config, name, .String);
     property.value._string = value;
     ~property.value._string = copy_string(default, config.allocator);
 }
 
-create_integer_property :: (config: *Config, name: string, value: *s64, default: s64) {
-    property := create_property(config, name, .Integer);
-    property.value._integer = value;
-    ~property.value._integer = default;
+create_bool_property :: (config: *Config, name: string, value: *bool, default: bool) {
+    property := create_property_internal(config, name, .Bool);
+    property.value._bool = value;
+    ~property.value._bool = default;
+}
+
+create_s64_property :: (config: *Config, name: string, value: *s64, default: s64) {
+    property := create_property_internal(config, name, .S64);
+    property.value._s64 = value;
+    ~property.value._s64 = default;
+}
+
+create_u32_property :: (config: *Config, name: string, value: *u32, default: u32) {
+    property := create_property_internal(config, name, .U32);
+    property.value._u32 = value;
+    ~property.value._u32 = default;
 }
 
 find_property :: (config: *Config, name: string) -> *Property {
@@ -92,9 +109,10 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     case .String;
         valid = true;
         ~property.value._string = copy_string(value, config.allocator);
-        
-    case .Integer;            
-        ~property.value._integer, valid = string_to_int(value);
+
+    case .Bool; ~property.value._bool, valid = string_to_bool(value);        
+    case .S64;  ~property.value._s64, valid  = string_to_int(value);
+    case .U32;  ~property.value._u32, valid  = string_to_int(value); 
     }
     
     if !valid {
@@ -167,8 +185,10 @@ write_config_file :: (config: *Config, file_path: string) {
         bprint(*file_printer, "% ", property.name);
         
         switch property.type {
-            case .String;  bprint(*file_printer, ~property.value._string);
-            case .Integer; bprint(*file_printer, "%", ~property.value._integer);
+        case .String;  bprint(*file_printer, ~property.value._string);
+        case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
+        case .S64;     bprint(*file_printer, "%", ~property.value._s64);
+        case .U32;     bprint(*file_printer, "%", ~property.value._u32);
         }
         
         bprint(*file_printer, "\n");

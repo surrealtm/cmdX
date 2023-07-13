@@ -381,8 +381,10 @@ config :: (cmdx: *CmdX) {
         add_formatted_text(cmdx, "    %: % = ", property.name, property_type_to_string(property.type));
 
         switch property.type {
-        case .Integer; add_formatted_line(cmdx, "%", ~property.value._integer);
         case .String; add_formatted_line(cmdx, "\"%\"", ~property.value._string);
+        case .Bool; add_formatted_line(cmdx, "%", ~property.value._bool);
+        case .S64; add_formatted_line(cmdx, "%", ~property.value._s64);
+        case .U32; add_formatted_line(cmdx, "%", ~property.value._u32);
         }
     }
 

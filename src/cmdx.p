@@ -1082,16 +1082,21 @@ cmdx :: () -> s32 {
     // Set up all the required config properties, and read the config file if it exists
     // @Cleanup do we actually want a 'default' parameter here, or should the variables not just have a default
     // value which will not be overriden?
-    create_integer_property(*cmdx.config, "backlog-size", *cmdx.backlog_size, DEFAULT_BACKLOG_SIZE);
-    create_integer_property(*cmdx.config, "history-size", *cmdx.history_size, DEFAULT_HISTORY_SIZE);
-    create_integer_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed, DEFAULT_SCROLL_SPEED);
+    create_s64_property(*cmdx.config, "backlog-size", *cmdx.backlog_size, DEFAULT_BACKLOG_SIZE);
+    create_s64_property(*cmdx.config, "history-size", *cmdx.history_size, DEFAULT_HISTORY_SIZE);
+    create_s64_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed, DEFAULT_SCROLL_SPEED);
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, DEFAULT_THEME);
     create_string_property(*cmdx.config, "font-name", *cmdx.font_path, DEFAULT_FONT);
-    create_integer_property(*cmdx.config, "font-size", xx *cmdx.font_size, DEFAULT_FONT_SIZE);
+    create_s64_property(*cmdx.config, "font-size",     *cmdx.font_size, DEFAULT_FONT_SIZE);
+    create_u32_property(*cmdx.config, "window-x",      *cmdx.window.xposition, WINDOW_DONT_CARE);
+    create_u32_property(*cmdx.config, "window-y",      *cmdx.window.yposition, WINDOW_DONT_CARE);
+    create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width, WINDOW_DONT_CARE);
+    create_u32_property(*cmdx.config, "window-height", *cmdx.window.height, WINDOW_DONT_CARE);
+    create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized, false);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
-    create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), 1280, 720, WINDOW_DONT_CARE, WINDOW_DONT_CARE, false);
+    create_window(*cmdx.window, concatenate_strings("cmdX | ", cmdx.current_directory, *cmdx.frame_allocator), cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized);
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     cmdx.render_frame = true; // Render the first frame
@@ -1176,4 +1181,3 @@ WinMain :: () -> s32 {
 
 // @Incomplete edit-property command
 // @Incomplete respect hashtags as comments in the config file
-// @Incomplete store window position and size in config
