@@ -28,7 +28,7 @@ Config :: struct {
     allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
     actions: [..]Action;
-
+    
     error_messages: [..]string;
 }
 
@@ -36,10 +36,10 @@ property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
     
     switch type {
-    case .String; result = "String";
-    case .Bool; result = "Bool";
-    case .S64, .U32; result = "Integer";        
-    case; result = "UnknownPropertyType";
+        case .String; result = "String";
+        case .Bool; result = "Bool";
+        case .S64, .U32; result = "Integer";        
+        case; result = "UnknownPropertyType";
     }
     
     return result;
@@ -95,6 +95,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     
     name  := trim_string_right(substring_view(line, 0, space));
     value := trim_string(substring_view(line, space + 1, line.count));
+    if value.count > 1 && value[0] == '"' && value[value.count - 1] == '"' value = substring_view(value, 1, value.count - 1);
     
     property := find_property(config, name);
     if !property {
@@ -106,13 +107,13 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     valid := false;
     
     switch property.type {
-    case .String;
+        case .String;
         valid = true;
         ~property.value._string = copy_string(value, config.allocator);
-
-    case .Bool; ~property.value._bool, valid = string_to_bool(value);        
-    case .S64;  ~property.value._s64, valid  = string_to_int(value);
-    case .U32;  ~property.value._u32, valid  = string_to_int(value); 
+        
+        case .Bool; ~property.value._bool, valid = string_to_bool(value);        
+        case .S64;  ~property.value._s64, valid  = string_to_int(value);
+        case .U32;  ~property.value._u32, valid  = string_to_int(value); 
     }
     
     if !valid {
@@ -124,7 +125,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
 read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     config.properties.allocator = config.allocator;
     config.actions.allocator    = config.allocator;
-
+    
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
     
@@ -134,16 +135,16 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     version_line := get_first_line(*file_data);
     
     line_count := 1; // Version line was already read
-
+    
     current_section := Section_Type.count; // Mark as "no section has been encountered yet"
     
     while file_data.count {
         ++line_count;
         
         line := get_first_line(*file_data);
-
+        
         if line.count == 0 || line[0] == '#' continue; // Ignore commented-out lines
-
+        
         if line[0] == ':' && line[1] == '/' {
             // New section identifier. Try to parse the section type and move on to the next line
             identifier := substring_view(line, 2, line.count);
@@ -156,14 +157,14 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
                 config_error(cmdx, "    Unknown section identifier.");
                 current_section = .Unknown;
             }
-
+            
             continue;
         }
-
+        
         switch current_section {
-        case .Unknown; // If an error occurred while parsing the previous section identifier, silently ignore the line
-        case .General; read_property(cmdx, config, line, line_count);
-        case .Actions; read_action(cmdx, config, line, line_count);
+            case .Unknown; // If an error occurred while parsing the previous section identifier, silently ignore the line
+            case .General; read_property(cmdx, config, line, line_count);
+            case .Actions; read_action(cmdx, config, line, line_count);
         }
     }
     
@@ -185,18 +186,18 @@ write_config_file :: (config: *Config, file_path: string) {
         bprint(*file_printer, "% ", property.name);
         
         switch property.type {
-        case .String;  bprint(*file_printer, ~property.value._string);
-        case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
-        case .S64;     bprint(*file_printer, "%", ~property.value._s64);
-        case .U32;     bprint(*file_printer, "%", ~property.value._u32);
+            case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
+            case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
+            case .S64;     bprint(*file_printer, "%", ~property.value._s64);
+            case .U32;     bprint(*file_printer, "%", ~property.value._u32);
         }
         
         bprint(*file_printer, "\n");
     }
-
+    
     bprint(*file_printer, "\n");
     bprint(*file_printer, ":/actions\n");
-
+    
     write_actions_to_file(*config.actions, *file_printer);
     
     close_file_printer(*file_printer);
@@ -218,14 +219,14 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
 
 flush_config_errors :: (cmdx: *CmdX) {
     if !cmdx.config.error_messages.count return;
-
+    
     set_true_color(cmdx, .{ 255, 100, 100, 255 });
     for i := 0; i < cmdx.config.error_messages.count; ++i {
         message := array_get_value(*cmdx.config.error_messages, i);
         add_line(cmdx, message);
         free_string(message, Default_Allocator);
     }
-
+    
     new_line(cmdx);
     set_themed_color(cmdx, .Default);
     

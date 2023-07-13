@@ -957,24 +957,6 @@ welcome_screen :: (cmdx: *CmdX, run_tree: string) {
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     add_formatted_line(cmdx, "The config file can be found under %.", config_location);
     new_line(cmdx);
-
-    /*
-    array_clear(*cmdx.lines);
-    
-    string0 := "Hello Wo";
-    string1 := "rld";
-    
-    copy_memory(*cmdx.backlog[120], string0.data, 8);
-    copy_memory(*cmdx.backlog[0], string1.data, 3);
-    
-    wrapped_line := Source_Range.{ 120, 20, true };
-    array_add(*cmdx.lines, wrapped_line);
-    new_line(cmdx);
-    
-    set_themed_color(cmdx, .Default);
-    add_line(cmdx, "How you doing");
-    add_line(cmdx, "My guy");
-*/
     
     cmdx.setup = true;
 }
@@ -1181,3 +1163,4 @@ WinMain :: () -> s32 {
 
 // @Incomplete edit-property command
 // @Incomplete respect hashtags as comments in the config file
+// @Incomplete reload-config command
