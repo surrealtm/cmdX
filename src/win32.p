@@ -25,6 +25,7 @@ Win32 :: struct {
     drain_thread: HANDLE = INVALID_HANDLE_VALUE;
 
     previous_character_was_carriage_return: bool = false;
+    time_of_last_module_name_update: s64 = 0; // Hardware time
 }
 
 // This little helper struct is used for parsing Virtual Terminal Sequences in the output read from
@@ -498,10 +499,17 @@ win32_update_spawned_process :: (cmdx: *CmdX) -> bool {
 
     // Check if any data is available to be read in the pipe
     win32_read_from_child_process(cmdx);
-    
-    // Get the current process name and display that in the window title
-    process_name: [MAX_PATH]s8 = ---;
-    process_name_length := K32GetModuleBaseNameA(cmdx.win32.child_process_handle, null, process_name, MAX_PATH);
-    update_active_process_name(cmdx, make_string(process_name, process_name_length, *cmdx.global_allocator)); // @Cleanup this gets called once per frame, which leads to a lot of allocations and stuff, which does not seem great
+
+    current_time := get_hardware_time();
+
+    if convert_hardware_time(current_time - cmdx.win32.time_of_last_module_name_update, .Milliseconds) > 500 {
+        // Get the current process name and display that in the window title. Only check every once in a while
+        // to prevent a lot of sys calls and / or unnecessary allocations.
+        process_name: [MAX_PATH]s8 = ---;
+        process_name_length := K32GetModuleBaseNameA(cmdx.win32.child_process_handle, null, process_name, MAX_PATH);
+        update_active_process_name(cmdx, string_view(process_name, process_name_length));
+        cmdx.win32.time_of_last_module_name_update = current_time;
+    }
+
     return true;
 }

@@ -1028,9 +1028,11 @@ update_font :: (cmdx: *CmdX) {
     create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
 }
 
-update_active_process_name :: (cmdx: *CmdX, name: string) {
+update_active_process_name :: (cmdx: *CmdX, process_name: string) {
+    if compare_strings(cmdx.child_process_name, process_name) return;
+    
     if cmdx.child_process_name.count   free_string(cmdx.child_process_name, *cmdx.global_allocator);
-    cmdx.child_process_name = name;
+    cmdx.child_process_name = copy_string(process_name, *cmdx.global_allocator);
     update_window_name(cmdx);
 }
 
@@ -1174,4 +1176,4 @@ WinMain :: () -> s32 {
 
 // @Incomplete edit-property command
 // @Incomplete respect hashtags as comments in the config file
-// @Incomplete wrong process name gets displayed in the title
+// @Incomplete store window position and size in config
