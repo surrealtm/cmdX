@@ -74,6 +74,12 @@ create_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     create_file(cmdx, file_path);
 }
 
+create_big_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    file_path := get_string_argument(argument_values, 0);
+    file_size := get_int_argument(argument_values, 1);
+    create_big_file(cmdx, file_path, file_size);
+}
+
 remove_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     file_path := get_string_argument(argument_values, 0);
     remove_file(cmdx, file_path);
@@ -155,6 +161,10 @@ register_all_commands :: (cmdx: *CmdX) {
     
     cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path", create_file_handler);
     register_command_argument(cf, "file_path", .String);
+
+    cbf := register_command(cmdx, "create_big_file", "Creates a new big file with random content for testing purposes.", create_big_file_handler);
+    register_command_argument(cbf, "file_path", .String);
+    register_command_argument(cbf, "file_size", .Integer);
     
     rf := register_command(cmdx, "remove_file", "Deletes the file or folder specified by the relative or absolute path", remove_file_handler);
     register_command_alias(rf, "rm");

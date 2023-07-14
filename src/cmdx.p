@@ -26,6 +26,7 @@
 #load "commands.p";
 #load "command_handlers.p";
 #load "win32.p";
+#load "create_big_file.p";
 
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
