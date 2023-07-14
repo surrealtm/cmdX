@@ -1,6 +1,5 @@
 Section_Type :: enum {
-    Unknown;
-    General;
+    General :: 1;
     Actions;
 }
 
@@ -35,11 +34,10 @@ Config :: struct {
 property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
     
-    switch type {
+    switch #complete type {
         case .String; result = "String";
         case .Bool; result = "Bool";
         case .S64, .U32; result = "Integer";        
-        case; result = "UnknownPropertyType";
     }
     
     return result;
@@ -106,7 +104,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     
     valid := false;
     
-    switch property.type {
+    switch #complete property.type {
         case .String;
         valid = true;
         ~property.value._string = copy_string(value, config.allocator);
@@ -155,14 +153,13 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
             } else {
                 config_error(cmdx, "Malformed section declaration in line %:", line_count);
                 config_error(cmdx, "    Unknown section identifier.");
-                current_section = .Unknown;
+                current_section = 0;
             }
             
             continue;
         }
         
-        switch current_section {
-            case .Unknown; // If an error occurred while parsing the previous section identifier, silently ignore the line
+        switch #complete current_section {
             case .General; read_property(cmdx, config, line, line_count);
             case .Actions; read_action(cmdx, config, line, line_count);
         }
@@ -185,7 +182,7 @@ write_config_file :: (config: *Config, file_path: string) {
         property := array_get(*config.properties, i);
         bprint(*file_printer, "% ", property.name);
         
-        switch property.type {
+        switch #complete property.type {
             case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
             case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
             case .S64;     bprint(*file_printer, "%", ~property.value._s64);

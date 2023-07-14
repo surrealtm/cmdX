@@ -1,6 +1,5 @@
 Action_Type :: enum {
-    Undefined;
-    Macro;
+    Macro :: 1;
 }
 
 Action_Data :: union {
@@ -74,7 +73,8 @@ parse_key_code :: (string: string) -> Key_Code {
 key_code_to_string :: (key: Key_Code) -> string {
     result: string = ---;
 
-    switch key {
+    switch #complete key {
+    case .None; result = "None";
     case .A; result = "A";
     case .B; result = "B";
     case .C; result = "C";
@@ -113,6 +113,11 @@ key_code_to_string :: (key: Key_Code) -> string {
     case .Control;     result = "Control";
     case .Backspace;   result = "Backspace";
     case .Delete;      result = "Delete";
+    case .Tab;         result = "Tab";
+    case .Page_Up;     result = "Page_Up";
+    case .Page_Down;   result = "Page_Down";
+    case .End;         result = "End";
+    case .Home;        result = "Home";
     case .F1;  result = "F1";
     case .F2;  result = "F2";
     case .F3;  result = "F3";
@@ -132,7 +137,7 @@ key_code_to_string :: (key: Key_Code) -> string {
 }
 
 parse_action_type :: (string: string) -> Action_Type {
-    result: Action_Type = .Undefined;
+    result: Action_Type = 0;;
 
     if compare_strings(string, "Macro") result = .Macro;
 
@@ -142,9 +147,8 @@ parse_action_type :: (string: string) -> Action_Type {
 action_type_to_string :: (type: Action_Type) -> string {
     result: string = ---;
 
-    switch type {
+    switch #complete type {
     case .Macro; result = "Macro";
-    case; result = "UnknownActionType";
     }
     
     return result;
@@ -185,7 +189,7 @@ read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         return;
     }
 
-    if type == .Undefined {
+    if type == 0 {
         config_error(cmdx, "Malformed config action in line %: Unknown action type '%'", line_count, action_type_argument);
         return;
     }
@@ -232,7 +236,7 @@ execute_actions_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
 
     if !action return true;
     
-    switch action.type {
+    switch #complete action.type {
     case .Macro;
         clear_text_input(*cmdx.text_input);
         set_text_input_string(*cmdx.text_input, action.data.macro_text);

@@ -86,11 +86,10 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
 command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
     result: string = ---;
     
-    switch type {
+    switch #complete type {
     case .String; result = "String";
     case .Integer; result = "Integer";
     case .Key_Code; result = "Key";
-    case; result = "Unknown Type";
     }
     
     return result;
@@ -99,7 +98,7 @@ command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
 is_valid_command_argument_value :: (type: Command_Argument_Type, value: string) -> bool {
     valid := false;
     
-    switch type {
+    switch #complete type {
     case .String; valid = true;
         
     case .Integer;
@@ -380,7 +379,7 @@ config :: (cmdx: *CmdX) {
         property := array_get(*cmdx.config.properties, i);
         add_formatted_text(cmdx, "    %: % = ", property.name, property_type_to_string(property.type));
 
-        switch property.type {
+        switch #complete property.type {
         case .String; add_formatted_line(cmdx, "\"%\"", ~property.value._string);
         case .Bool; add_formatted_line(cmdx, "%", ~property.value._bool);
         case .S64; add_formatted_line(cmdx, "%", ~property.value._s64);
@@ -395,7 +394,7 @@ config :: (cmdx: *CmdX) {
         action := array_get(*cmdx.config.actions, i);
         add_formatted_text(cmdx, "    %: % = ", key_code_to_string(action.trigger), action_type_to_string(action.type));
 
-        switch action.type {
+        switch #complete action.type {
         case .Macro; add_formatted_line(cmdx, "\"%\"", action.data.macro_text);
         }
     }
