@@ -409,7 +409,7 @@ new_line :: (cmdx: *CmdX, frame: *CmdX_Frame) {
     }
     
     ++frame.viewport_height;
-    frame.scroll_target = xx frame.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+    frame.scroll_target = xx frame.lines.count - 1; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 
     render_next_frame(cmdx);
 }
@@ -579,16 +579,17 @@ set_themed_color :: (frame: *CmdX_Frame, index: Color_Index) {
 /* --- DRAWING --- */
 
 calculate_number_of_visible_lines :: (cmdx: *CmdX, scroll_offset: s64, available_lines: s64) -> s64 {
-    lines_fitting_on_screen := cast(s64) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
+    // Always subtract one line which will be used for the input and not the backlog
+    lines_fitting_on_screen := cast(s64) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height) - 1;
 
-    if scroll_offset < lines_fitting_on_screen - 1 {
+    if scroll_offset < lines_fitting_on_screen {
         // If the user has scrolled all the way to the top, then the very first line drawn (at the top of the
         // window) should be fully visible, and not only partially. Therefore calculate the number of lines that
         // fully fit into the screen space, by rounding the division down and not up.
-        lines_fitting_on_screen = cmdx.window.height / cmdx.font.line_height;
+        lines_fitting_on_screen = cmdx.window.height / cmdx.font.line_height - 1;
     }
-
-    return min(available_lines, lines_fitting_on_screen) - 1; // Subtract 1 from the result since the very last line in the backbuffer should not actually be drawn, as it is not complete yet.
+    
+    return min(available_lines, lines_fitting_on_screen);
 }
 
 activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
@@ -939,21 +940,23 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     for it := cmdx.frames.first; it != null; it = it.next {
         frame := *it.data;
 
-        current_drawn_line_count := calculate_number_of_visible_lines(cmdx, frame.scroll_offset, frame.lines.count);
+        new_scroll_target: f64 = xx frame.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+        previous_scroll_offset := frame.scroll_offset;
         
+        total_line_count := frame.lines.count - 1; // Do not count the "input echo" line, which is the line head
+        current_drawn_line_count := calculate_number_of_visible_lines(cmdx, cast(s64) round(new_scroll_target), total_line_count); // Estimate the number of drawn lines at the current scroll target
+
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
-        frame.scroll_target    = clamp(xx frame.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed, xx current_drawn_line_count, xx frame.lines.count);    
+        frame.scroll_target    = clamp(new_scroll_target, xx current_drawn_line_count, xx total_line_count);
         frame.scroll_position += (frame.scroll_target - frame.scroll_position) * 0.25;
-        frame.scroll_offset    = clamp(cast(s64) round(frame.scroll_position), current_drawn_line_count, frame.lines.count); // Make sure that the interpolated position never goes out of bounds, even when the interpolated scroll position is (because the scrolling is too slow with new lines coming in)
+        frame.scroll_offset    = clamp(cast(s64) round(frame.scroll_position), current_drawn_line_count, total_line_count);
 
-        frame.drawn_line_count = calculate_number_of_visible_lines(cmdx, frame.scroll_offset, frame.lines.count);
+        frame.drawn_line_count = calculate_number_of_visible_lines(cmdx, frame.scroll_offset, total_line_count);
+
+        if previous_scroll_offset != frame.scroll_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
-        
-    // If the mouse wheel turned, just render the next frame, even if there is a slight chance nothing on screen
-    // actually changed. The user interacted with the window however, so they don't mind a very small activity.
-    if cmdx.window.mouse_scroll_turns != 0 render_next_frame(cmdx);
-
+    
     if cmdx.render_frame || cmdx.render_ui {    
         // Draw all frames at their position
         for it := cmdx.frames.first; it != null; it = it.next {
