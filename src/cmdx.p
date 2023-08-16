@@ -881,12 +881,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Update the internal text input rendering state
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
-        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
-        text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
-        cursor_alpha_previous := screen.text_input.cursor_alpha;
-        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
-        update_text_input_rendering_data(*screen.text_input);
-        if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
     }
         
     // Check for potential control keys
@@ -936,10 +930,19 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
     }
 
-    // Handle scrolling inside the backlog
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
 
+        // Update the text input's cursor rendering data
+        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
+        text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
+        cursor_alpha_previous := screen.text_input.cursor_alpha;
+        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
+        update_text_input_rendering_data(*screen.text_input);
+        if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+        
+
+        // Handle scrolling in this screen
         new_scroll_target: f64 = xx screen.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
         previous_scroll_offset := screen.scroll_offset;
         
