@@ -313,7 +313,7 @@ win32_cleanup :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
     // Set the internal state to be child-less
     screen.child_process_running = false;
-    update_active_process_name(cmdx, ""); // @Cleanup only do this if the given screen is actually the active one
+    update_active_process_name(cmdx, screen, ""); // @Cleanup only do this if the given screen is actually the active one
 }
 
 win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool {
@@ -530,7 +530,7 @@ win32_update_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) -> bool {
         // to prevent a lot of sys calls and / or unnecessary allocations.
         process_name: [MAX_PATH]s8 = ---;
         process_name_length := K32GetModuleBaseNameA(screen.win32.child_process_handle, null, process_name, MAX_PATH);
-        update_active_process_name(cmdx, string_view(process_name, process_name_length)); // @Cleanup only do this if the given screen is actually the active one
+        update_active_process_name(cmdx, screen, string_view(process_name, process_name_length)); // @Cleanup only do this if the given screen is actually the active one
         screen.win32.time_of_last_module_name_update = current_time;
     }
     

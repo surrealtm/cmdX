@@ -69,7 +69,7 @@ Color_Range :: struct {
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
-CmdX_Screen :: struct { // @Cleanup rename to CmdX_Screen
+CmdX_Screen :: struct {
     // Screen rectangle
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
     
@@ -1026,6 +1026,7 @@ activate_screen :: (cmdx: *CmdX, index: s64) {
     assert(index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");    
     cmdx.active_screen_index = index;
     cmdx.active_screen = linked_list_get(*cmdx.screens, index);
+    update_window_name(cmdx);
 }
 
 
@@ -1092,12 +1093,12 @@ update_font :: (cmdx: *CmdX) {
     create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
 }
 
-update_active_process_name :: (cmdx: *CmdX, process_name: string) {
-    // @Cleanup this seems pretty invalid with the screens right now...
-    if compare_strings(cmdx.active_screen.child_process_name, process_name) return;
+update_active_process_name :: (cmdx: *CmdX, screen: *CmdX_Screen, process_name: string) {
+    if compare_strings(screen.child_process_name, process_name) return;
     
-    if cmdx.active_screen.child_process_name.count   free_string(cmdx.active_screen.child_process_name, *cmdx.global_allocator);
-    cmdx.active_screen.child_process_name = copy_string(process_name, *cmdx.global_allocator);
+    if screen.child_process_name.count   free_string(screen.child_process_name, *cmdx.global_allocator);
+    screen.child_process_name = copy_string(process_name, *cmdx.global_allocator);
+
     update_window_name(cmdx);
 }
 
@@ -1156,7 +1157,7 @@ cmdx :: () -> s32 {
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
-    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized);
+    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized); // The title will be replaced when the first screen gets created
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     cmdx.render_frame = true; // Render the first frame
