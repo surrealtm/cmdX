@@ -217,15 +217,15 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
 flush_config_errors :: (cmdx: *CmdX) {
     if !cmdx.config.error_messages.count return;
     
-    set_true_color(cmdx, .{ 255, 100, 100, 255 });
+    set_true_color(cmdx.active_frame, .{ 255, 100, 100, 255 });
     for i := 0; i < cmdx.config.error_messages.count; ++i {
         message := array_get_value(*cmdx.config.error_messages, i);
-        add_line(cmdx, message);
+        add_line(cmdx, cmdx.active_frame, message);
         free_string(message, Default_Allocator);
     }
     
-    new_line(cmdx);
-    set_themed_color(cmdx, .Default);
+    new_line(cmdx, cmdx.active_frame);
+    set_themed_color(cmdx.active_frame, .Default);
     
     array_clear(*cmdx.config.error_messages);
 }
