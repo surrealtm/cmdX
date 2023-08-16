@@ -30,7 +30,7 @@ Command :: struct {
 
 get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
     // If the path appendation is empty, then just take the current directory
-    if file_path.count == 0    return cmdx.active_frame.current_directory;
+    if file_path.count == 0    return cmdx.active_screen.current_directory;
 
     // If the path supplied ends on a slash, it is effectively the same as without the slash, so just ignore it.
     while file_path[file_path.count - 1] == '/' || file_path[file_path.count - 1] == '\\' file_path.count -= 1;
@@ -44,7 +44,7 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
     // Concatenate the relative path with the current directory of cmdx.
     builder: String_Builder = ---;
     create_string_builder(*builder, *cmdx.frame_memory_arena);
-    append_string(*builder, cmdx.active_frame.current_directory);
+    append_string(*builder, cmdx.active_screen.current_directory);
     append_string(*builder, "\\");
     append_string(*builder, file_path);
     concatenation := finish_string_builder(*builder);
@@ -80,7 +80,7 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     }
     
     append_format(*builder, "      // %", command.description);
-    add_line(cmdx, cmdx.active_frame, finish_string_builder(*builder));
+    add_line(cmdx, cmdx.active_screen, finish_string_builder(*builder));
 }
 
 command_argument_type_to_string :: (type: Command_Argument_Type) -> string {
@@ -158,7 +158,7 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
     }
     
     if argument_values.count != command.arguments.count {
-        add_formatted_line(cmdx, cmdx.active_frame, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
+        add_formatted_line(cmdx, cmdx.active_screen, "Invalid number of arguments: The command '%' expected '%' arguments, but got '%' arguments. See syntax:", command.name, command.arguments.count, argument_values.count);
         return false;
     }
     
@@ -166,7 +166,7 @@ dispatch_command :: (cmdx: *CmdX, command: *Command, argument_values: [..]string
         argument := array_get(*command.arguments, i);
         argument_value := array_get_value(*argument_values, i);
         if !is_valid_command_argument_value(argument.type, argument_value) {
-            add_formatted_line(cmdx, cmdx.active_frame, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
+            add_formatted_line(cmdx, cmdx.active_screen, "Invalid argument type: The command '%' expected argument '%' to be of type '%'. See syntax:", command.name, i, command_argument_type_to_string(argument.type));
             return false;
         }
     }
@@ -245,7 +245,7 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
     // Prepare the viewport for the next command, no matter what actually happens
-    prepare_viewport(cmdx, cmdx.active_frame);
+    prepare_viewport(cmdx, cmdx.active_screen);
     
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
@@ -267,7 +267,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
             command_found = true;
-            close_viewport(cmdx, cmdx.active_frame);
+            close_viewport(cmdx, cmdx.active_screen);
             break;
         }
     }
@@ -291,7 +291,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         command_string := finish_string_builder(*string_builder);
         
-        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx, cmdx.active_frame); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
+        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx, cmdx.active_screen); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
     }    
 }
 
@@ -301,21 +301,21 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
 help :: (cmdx: *CmdX, command_name: string) {
     if command_name.count == 0 {
         // Default argument, list all commands
-        add_line(cmdx, cmdx.active_frame, "=== HELP ===");
+        add_line(cmdx, cmdx.active_screen, "=== HELP ===");
         
         for i := 0; i < cmdx.commands.count; ++i {
             command := array_get(*cmdx.commands, i);
             print_command_syntax(cmdx, command);
         }
         
-        add_line(cmdx, cmdx.active_frame, "=== HELP ===");
+        add_line(cmdx, cmdx.active_screen, "=== HELP ===");
     } else {
         // A specific command was specified, display that syntax.
         command := find_command_by_name(cmdx, command_name);
         if command {
             print_command_syntax(cmdx, command);
         } else {
-            add_formatted_line(cmdx, cmdx.active_frame, "No command could be found under the name '%'.", command_name);
+            add_formatted_line(cmdx, cmdx.active_screen, "No command could be found under the name '%'.", command_name);
         }
     }
 }
@@ -325,7 +325,7 @@ quit :: (cmdx: *CmdX) {
 }
 
 clear :: (cmdx: *CmdX) {
-    clear_backlog(cmdx, cmdx.active_frame);
+    clear_backlog(cmdx, cmdx.active_screen);
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
@@ -334,13 +334,13 @@ theme :: (cmdx: *CmdX, theme_name: string) {
 }
 
 theme_lister :: (cmdx: *CmdX) {
-    add_line(cmdx, cmdx.active_frame, "List of available themes:");
+    add_line(cmdx, cmdx.active_screen, "List of available themes:");
     
     for i := 0; i < cmdx.themes.count; ++i {
         theme := array_get(*cmdx.themes, i);
-        add_formatted_text(cmdx, cmdx.active_frame, " > %", theme.name);
-        if theme == cmdx.active_theme    add_text(cmdx, cmdx.active_frame, "   * Active");
-        new_line(cmdx, cmdx.active_frame);
+        add_formatted_text(cmdx, cmdx.active_screen, " > %", theme.name);
+        if theme == cmdx.active_theme    add_text(cmdx, cmdx.active_screen, "   * Active");
+        new_line(cmdx, cmdx.active_screen);
     }
 }
 
@@ -358,51 +358,51 @@ font_name :: (cmdx: *CmdX, path: string) {
 debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
     working_set_size, working_set_unit := convert_to_biggest_memory_unit(allocator.stats.working_set);
     peak_working_set_size, peak_working_set_unit := convert_to_biggest_memory_unit(allocator.stats.peak_working_set);
-    add_formatted_line(cmdx, cmdx.active_frame, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % alive allocations.", name, format_int(working_set_size, false, 3, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 3, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
+    add_formatted_line(cmdx, cmdx.active_screen, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % alive allocations.", name, format_int(working_set_size, false, 3, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 3, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
 }
 
 debug :: (cmdx: *CmdX) {
     static_size, static_size_unit := convert_to_biggest_memory_unit(size_of(CmdX));
-    add_formatted_line(cmdx, cmdx.active_frame, "Static memory usage: %*%", static_size, memory_unit_string(static_size_unit));
+    add_formatted_line(cmdx, cmdx.active_screen, "Static memory usage: %*%", static_size, memory_unit_string(static_size_unit));
 
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 
-    debug_print(cmdx, cmdx.active_frame);
+    debug_print(cmdx, cmdx.active_screen);
 }
 
 config :: (cmdx: *CmdX) {
-    add_line(cmdx, cmdx.active_frame, "Properties:");
+    add_line(cmdx, cmdx.active_screen, "Properties:");
 
     for i := 0; i < cmdx.config.properties.count; ++i {
         property := array_get(*cmdx.config.properties, i);
-        add_formatted_text(cmdx, cmdx.active_frame, "    %: % = ", property.name, property_type_to_string(property.type));
+        add_formatted_text(cmdx, cmdx.active_screen, "    %: % = ", property.name, property_type_to_string(property.type));
 
         switch #complete property.type {
-        case .String; add_formatted_line(cmdx, cmdx.active_frame, "\"%\"", ~property.value._string);
-        case .Bool;   add_formatted_line(cmdx, cmdx.active_frame, "%", ~property.value._bool);
-        case .S64;    add_formatted_line(cmdx, cmdx.active_frame, "%", ~property.value._s64);
-        case .U32;    add_formatted_line(cmdx, cmdx.active_frame, "%", ~property.value._u32);
+        case .String; add_formatted_line(cmdx, cmdx.active_screen, "\"%\"", ~property.value._string);
+        case .Bool;   add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._bool);
+        case .S64;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._s64);
+        case .U32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._u32);
         }
     }
 
-    new_line(cmdx, cmdx.active_frame);
-    add_line(cmdx, cmdx.active_frame, "Actions:");
+    new_line(cmdx, cmdx.active_screen);
+    add_line(cmdx, cmdx.active_screen, "Actions:");
     
     for i := 0; i < cmdx.config.actions.count; ++i {
         action := array_get(*cmdx.config.actions, i);
-        add_formatted_text(cmdx, cmdx.active_frame, "    %: % = ", key_code_to_string(action.trigger), action_type_to_string(action.type));
+        add_formatted_text(cmdx, cmdx.active_screen, "    %: % = ", key_code_to_string(action.trigger), action_type_to_string(action.type));
 
         switch #complete action.type {
-        case .Macro; add_formatted_line(cmdx, cmdx.active_frame, "\"%\"", action.data.macro_text);
+        case .Macro; add_formatted_line(cmdx, cmdx.active_screen, "\"%\"", action.data.macro_text);
         }
     }
 }
 
 add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
     if find_action_with_trigger(cmdx, trigger) != null {
-        add_formatted_line(cmdx, cmdx.active_frame, "An action bound to trigger '%' already exists.", key_code_to_string(trigger));
+        add_formatted_line(cmdx, cmdx.active_screen, "An action bound to trigger '%' already exists.", key_code_to_string(trigger));
         return;
     }
 
@@ -416,25 +416,25 @@ remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
     removed_something := remove_action_by_trigger(cmdx, trigger);
 
     if !removed_something {
-        add_formatted_line(cmdx, cmdx.active_frame, "No action bound to trigger '%' exists.", key_code_to_string(trigger));
+        add_formatted_line(cmdx, cmdx.active_screen, "No action bound to trigger '%' exists.", key_code_to_string(trigger));
         return;
     }
 }
 
 ls :: (cmdx: *CmdX, directory: string) {
-    complete_directory := cmdx.active_frame.current_directory;
+    complete_directory := cmdx.active_screen.current_directory;
 
     if directory.count {
         complete_directory = get_path_relative_to_cd(cmdx, directory);
     }
     
-    add_formatted_line(cmdx, cmdx.active_frame, "Contents of folder '%':", complete_directory);
+    add_formatted_line(cmdx, cmdx.active_screen, "Contents of folder '%':", complete_directory);
     
     files := get_files_in_folder(complete_directory, *cmdx.frame_allocator);
     
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);
-        add_formatted_line(cmdx, cmdx.active_frame, " > %", file_name);
+        add_formatted_line(cmdx, cmdx.active_screen, " > %", file_name);
     }
 }
 
@@ -447,14 +447,14 @@ cat :: (cmdx: *CmdX, file_path: string) {
     
     if !file_found {
         error_string := win32_last_error_to_string();
-        add_formatted_line(cmdx, cmdx.active_frame, "Cannot cat file '%': %", absolute_path, error_string);
+        add_formatted_line(cmdx, cmdx.active_screen, "Cannot cat file '%': %", absolute_path, error_string);
         win32_free_last_error_string(*error_string);
         return;
     }
 
     while file_contents.count {
         line := get_first_line(*file_contents);
-        add_line(cmdx, cmdx.active_frame, line);
+        add_line(cmdx, cmdx.active_screen, line);
     }
 }
 
@@ -462,12 +462,12 @@ cd :: (cmdx: *CmdX, folder_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, folder_path);
 
     if folder_exists(absolute_path) {
-        free_string(cmdx.active_frame.current_directory, *cmdx.global_allocator);
-        cmdx.active_frame.current_directory = copy_string(absolute_path, *cmdx.global_allocator); // The new directory must survive the frame
+        free_string(cmdx.active_screen.current_directory, *cmdx.global_allocator);
+        cmdx.active_screen.current_directory = copy_string(absolute_path, *cmdx.global_allocator); // The new directory must survive the screen
         update_window_name(cmdx);
     } else {
         error_string := win32_last_error_to_string();
-        add_formatted_line(cmdx, cmdx.active_frame, "Cannot change to directory '%': %", absolute_path, error_string);
+        add_formatted_line(cmdx, cmdx.active_screen, "Cannot change to directory '%': %", absolute_path, error_string);
         win32_free_last_error_string(*error_string);
     }
 }
@@ -477,7 +477,7 @@ create_file :: (cmdx: *CmdX, file_path: string) {
     
     if !write_file(absolute_path, "", false) {
         error_string := win32_last_error_to_string();
-        add_formatted_line(cmdx, cmdx.active_frame, "Cannot create file '%': %", absolute_path, error_string);
+        add_formatted_line(cmdx, cmdx.active_screen, "Cannot create file '%': %", absolute_path, error_string);
         win32_free_last_error_string(*error_string);
     }
 }
@@ -487,7 +487,7 @@ remove_file :: (cmdx: *CmdX, file_path: string) {
     
     if !delete_file(absolute_path) && !delete_folder(absolute_path) {
         error_string := win32_last_error_to_string();
-        add_formatted_line(cmdx, cmdx.active_frame, "Cannot remove file or directory '%': %", absolute_path, error_string);
+        add_formatted_line(cmdx, cmdx.active_screen, "Cannot remove file or directory '%': %", absolute_path, error_string);
         win32_free_last_error_string(*error_string);
     }
 }

@@ -238,8 +238,8 @@ execute_actions_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
     
     switch #complete action.type {
     case .Macro;
-        clear_text_input(*cmdx.active_frame.text_input);
-        set_text_input_string(*cmdx.active_frame.text_input, action.data.macro_text);
+        clear_text_input(*cmdx.active_screen.text_input);
+        set_text_input_string(*cmdx.active_screen.text_input, action.data.macro_text);
     }
     
     return true;

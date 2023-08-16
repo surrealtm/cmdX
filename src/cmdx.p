@@ -69,8 +69,8 @@ Color_Range :: struct {
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
-CmdX_Frame :: struct { // @Cleanup rename to CmdX_Screen
-    // Frame rectangle
+CmdX_Screen :: struct { // @Cleanup rename to CmdX_Screen
+    // Screen rectangle
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
     
     // Text Input
@@ -95,7 +95,7 @@ CmdX_Frame :: struct { // @Cleanup rename to CmdX_Screen
     scroll_position: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
 
-    // Drawing data cached for this frame
+    // Drawing data cached for this screen
     drawn_line_count: s32;
     
     // Subprocess data
@@ -139,38 +139,38 @@ CmdX :: struct {
     commands: [..]Command;
     config: Config;
 
-    // Global config variables   @Cleanup maybe copy all of these into each created frame to avoid having to pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to happen anyway
+    // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to happen anyway
     history_size: s64; // The number of history lines to keep
-    backlog_size: s64; // The size of the backlog for each frame in bytes
+    backlog_size: s64; // The size of the backlog for each screen in bytes
     scroll_speed: s64; // In lines per mouse wheel turn
 
-    // Frames
-    frames: Linked_List(CmdX_Frame);
-    active_frame: *CmdX_Frame; // The pointer that is valid for the active_frame_index. Used as a shortcut to avoid an array indexing every time. Since the frames are stored as a linked list, the pointer is valid until the frame gets removed
-    active_frame_index: s64 = 0; // The index of the currently active (meaning text input focused) frame.    
+    // Screens
+    screens: Linked_List(CmdX_Screen);
+    active_screen: *CmdX_Screen; // The pointer that is valid for the active_screen_index. Used as a shortcut to avoid an array indexing every time. Since the screens are stored as a linked list, the pointer is valid until the screen gets removed
+    active_screen_index: s64 = 0; // The index of the currently active (meaning text input focused) screen.    
 }
 
 /* --- DEBUGGING --- */
 
-debug_print_lines :: (cmdx: *CmdX, frame: *CmdX_Frame) {
+debug_print_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     print("=== LINES ===\n");
 
-    for i := 0; i < frame.lines.count; ++i {
-        line := array_get(*frame.lines, i);
+    for i := 0; i < screen.lines.count; ++i {
+        line := array_get(*screen.lines, i);
         print("I %: % -> % ", i, line.first, line.one_plus_last);
-        if line.wrapped print("     '%*%' (wrapped)", string_view(*frame.backlog[line.first], cmdx.backlog_size - line.first), string_view(*frame.backlog[0], line.one_plus_last)); 
-        else print("     '%'", string_view(*frame.backlog[line.first], line.one_plus_last - line.first));
+        if line.wrapped print("     '%*%' (wrapped)", string_view(*screen.backlog[line.first], cmdx.backlog_size - line.first), string_view(*screen.backlog[0], line.one_plus_last)); 
+        else print("     '%'", string_view(*screen.backlog[line.first], line.one_plus_last - line.first));
         print("\n");
     }
 
     print("=== LINES ===\n");
 }
 
-debug_print_colors :: (frame: *CmdX_Frame) {
+debug_print_colors :: (screen: *CmdX_Screen) {
     print("=== COLORS ===\n");
 
-    for i := 0; i < frame.colors.count; ++i {
-        range := array_get(*frame.colors, i);
+    for i := 0; i < screen.colors.count; ++i {
+        range := array_get(*screen.colors, i);
         print("C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
         if range.source.wrapped print(" (wrapped)");
         print("\n");
@@ -179,21 +179,21 @@ debug_print_colors :: (frame: *CmdX_Frame) {
     print("=== COLORS ===\n");
 }
 
-debug_print_history :: (frame: *CmdX_Frame) {
+debug_print_history :: (screen: *CmdX_Screen) {
     print("=== HISTORY ===\n");
 
-    for i := 0; i < frame.history.count; ++i {
-        string := array_get_value(*frame.history, i);
+    for i := 0; i < screen.history.count; ++i {
+        string := array_get_value(*screen.history, i);
         print("H %: '%'\n", i, string);
     }
     
     print("=== HISTORY ===\n");
 }
 
-debug_print :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    debug_print_lines(cmdx, frame);
-    debug_print_colors(frame);
-    //debug_print_history(frame);
+debug_print :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    debug_print_lines(cmdx, screen);
+    debug_print_colors(screen);
+    //debug_print_history(screen);
 }
 
 
@@ -204,8 +204,8 @@ random_line :: (cmdx: *CmdX) {
     color.b = get_random_integer() % 255;
     color.a = 255;
 
-    set_true_color(cmdx.active_frame, color);
-    add_line(cmdx, cmdx.active_frame, "Hello World, these are 40 Characters.!!!");
+    set_true_color(cmdx.active_screen, color);
+    add_line(cmdx, cmdx.active_screen, "Hello World, these are 40 Characters.!!!");
 }
 
 
@@ -282,15 +282,15 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // operated on the now-removed space should also be removed (since they are useless and actually
 // wrong now). If a color range partly covered the removed space, but also covers other space,
 // that color range should be adapted to not cover the removed space.
-remove_overlapping_color_ranges :: (cmdx: *CmdX, frame: *CmdX_Frame, line_range: Source_Range) -> *Color_Range {
-    while frame.colors.count {
-        color_range := array_get(*frame.colors, 0);
+remove_overlapping_color_ranges :: (cmdx: *CmdX, screen: *CmdX_Screen, line_range: Source_Range) -> *Color_Range {
+    while screen.colors.count {
+        color_range := array_get(*screen.colors, 0);
 
-        if frame.colors.count > 1 && (source_range_empty(line_range) || source_range_enclosed(cmdx, color_range.source, line_range)) {
+        if screen.colors.count > 1 && (source_range_empty(line_range) || source_range_enclosed(cmdx, color_range.source, line_range)) {
             // Color range is not used in any remaining line, so it should be removed. This should only
             // happen if it is not the last color range in the list, since the backlog always requires
             // at least one color for rendering.
-            array_remove(*frame.colors, 0);
+            array_remove(*screen.colors, 0);
         } else if source_ranges_overlap(color_range.source, line_range) {
             // Remove the removed space from the color range
             color_range.source.wrapped = color_range.source.one_plus_last < line_range.one_plus_last;
@@ -300,19 +300,19 @@ remove_overlapping_color_ranges :: (cmdx: *CmdX, frame: *CmdX_Frame, line_range:
             break;
     }
     
-    return array_get(*frame.colors, frame.colors.count - 1);
+    return array_get(*screen.colors, screen.colors.count - 1);
 }
 
 // When new text gets added to the backlog but there is more space for it, we need to remove
 // the oldest line in the backlog, to make space for the new text. Remove as many lines as needed
 // so that the new text has enough space in it. After removing the necessary lines, also remove
 // any color ranges that lived in the now freed-up space.
-remove_overlapping_lines :: (cmdx: *CmdX, frame: *CmdX_Frame, new_line: Source_Range) -> *Source_Range {
+remove_overlapping_lines :: (cmdx: *CmdX, screen: *CmdX_Screen, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
     
-    while frame.lines.count > 1 {
-        existing_line := array_get(*frame.lines, 0);
+    while screen.lines.count > 1 {
+        existing_line := array_get(*screen.lines, 0);
         
         if source_ranges_overlap(~existing_line, new_line) {
             // If the source ranges overlap, then the existing line must be removed to make space for the
@@ -320,14 +320,14 @@ remove_overlapping_lines :: (cmdx: *CmdX, frame: *CmdX_Frame, new_line: Source_R
             if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
             total_removed_range.one_plus_last = existing_line.one_plus_last;
             total_removed_range.wrapped      |= existing_line.wrapped;
-            array_remove(*frame.lines, 0);
+            array_remove(*screen.lines, 0);
         } else
             break;
     }
 
-    if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, frame, total_removed_range);
+    if total_removed_range.first != -1    remove_overlapping_color_ranges(cmdx, screen, total_removed_range);
     
-    return array_get(*frame.lines, frame.lines.count - 1);
+    return array_get(*screen.lines, screen.lines.count - 1);
 }
 
 
@@ -337,15 +337,15 @@ render_next_frame :: (cmdx: *CmdX) {
     cmdx.render_frame = true;
 }
 
-get_cursor_position_in_line :: (frame: *CmdX_Frame) -> s64 {
-    line_head := array_get(*frame.lines, frame.lines.count - 1);
+get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
+    line_head := array_get(*screen.lines, screen.lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
 
-set_cursor_position_in_line :: (cmdx: *CmdX, frame: *CmdX_Frame, cursor: s64) {
+set_cursor_position_in_line :: (cmdx: *CmdX, screen: *CmdX_Screen, cursor: s64) {
     // Remove part of the backlog line. The color range must obviously also be adjusted
-    line_head := array_get(*frame.lines, frame.lines.count - 1);
-    color_head := array_get(*frame.colors, frame.colors.count - 1);
+    line_head := array_get(*screen.lines, screen.lines.count - 1);
+    color_head := array_get(*screen.colors, screen.colors.count - 1);
 
     assert(line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
@@ -354,8 +354,8 @@ set_cursor_position_in_line :: (cmdx: *CmdX, frame: *CmdX_Frame, cursor: s64) {
         line_head.wrapped = false;
 
         while !source_ranges_overlap(~line_head, color_head.source) {
-            array_remove(*frame.colors, frame.colors.count - 1);
-            color_head = array_get(*frame.colors, frame.colors.count - 1);
+            array_remove(*screen.colors, screen.colors.count - 1);
+            color_head = array_get(*screen.colors, screen.colors.count - 1);
         }
         
         color_head.source.one_plus_last = line_head.one_plus_last;
@@ -366,36 +366,36 @@ set_cursor_position_in_line :: (cmdx: *CmdX, frame: *CmdX_Frame, cursor: s64) {
     }    
 }
 
-set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    set_cursor_position_in_line(cmdx, frame, 0);
+set_cursor_position_to_beginning_of_line :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    set_cursor_position_in_line(cmdx, screen, 0);
 }
 
 
-prepare_viewport :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    frame.viewport_height = 0;
+prepare_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    screen.viewport_height = 0;
 }
 
-close_viewport :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    new_line(cmdx, frame); // When the last command finishes, append another new line for more reading clarity
+close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    new_line(cmdx, screen); // When the last command finishes, append another new line for more reading clarity
 }
 
 
-clear_backlog :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    array_clear(*frame.lines);
-    array_clear(*frame.colors);
-    new_line(cmdx, frame);
-    set_themed_color(frame, .Default);
+clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    array_clear(*screen.lines);
+    array_clear(*screen.colors);
+    new_line(cmdx, screen);
+    set_themed_color(screen, .Default);
 }
 
-new_line :: (cmdx: *CmdX, frame: *CmdX_Frame) {
+new_line :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Add a new line to the backlog
-    new_line_head := array_push(*frame.lines);
+    new_line_head := array_push(*screen.lines);
     
-    if frame.lines.count > 1 {
+    if screen.lines.count > 1 {
         // If there was a previous line, set the start of the new line in the backlog buffer to point 
         // just after the previous line, but only if that previous line does not end on the actual
         // backlog end, which would lead to unfortunate behaviour later on.
-        old_line_head := array_get(*frame.lines, frame.lines.count - 2);
+        old_line_head := array_get(*screen.lines, screen.lines.count - 2);
         
         if old_line_head.one_plus_last < cmdx.backlog_size {
             // The first character is inclusive. If the previous line ends on the backlog size, that would be
@@ -408,15 +408,15 @@ new_line :: (cmdx: *CmdX, frame: *CmdX_Frame) {
         new_line_head.one_plus_last = new_line_head.first;
     }
     
-    ++frame.viewport_height;
-    frame.scroll_target = xx frame.lines.count - 1; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+    ++screen.viewport_height;
+    screen.scroll_target = xx screen.lines.count - 1; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 
     render_next_frame(cmdx);
 }
 
-add_text :: (cmdx: *CmdX, frame: *CmdX_Frame, text: string) {
+add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     // Append text to the latest line
-    current_line := array_get(*frame.lines, frame.lines.count - 1);
+    current_line := array_get(*screen.lines, screen.lines.count - 1);
 
     // Edge-Case: If the current line already has wrapped, and it completely fills the backlog, then there
     // simply is no more space for this new text, therefore just ignore it.
@@ -440,17 +440,17 @@ add_text :: (cmdx: *CmdX, frame: *CmdX_Frame, text: string) {
         // Remove all lines that are between the end of the current line until the end of the backlog,
         // and the end of the line after that wrap-around
         to_remove_range := Source_Range.{ current_line.one_plus_last, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
-        current_line = remove_overlapping_lines(cmdx, frame, to_remove_range);
+        current_line = remove_overlapping_lines(cmdx, screen, to_remove_range);
 
         // Copy the subtext contents into the backlog
-        copy_memory(*frame.backlog[current_line.one_plus_last], *text.data[0], before_wrap_length);
-        copy_memory(*frame.backlog[0], *text.data[before_wrap_length], after_wrap_length);
+        copy_memory(*screen.backlog[current_line.one_plus_last], *text.data[0], before_wrap_length);
+        copy_memory(*screen.backlog[0], *text.data[before_wrap_length], after_wrap_length);
         
         // The current line will now wrap around
         current_line.wrapped = true;
         current_line.one_plus_last = after_wrap_length;
 
-        color_head := array_get(*frame.colors, frame.colors.count - 1);
+        color_head := array_get(*screen.colors, screen.colors.count - 1);
         color_head.source.wrapped       = true;
         color_head.source.one_plus_last = after_wrap_length;
         return;
@@ -466,62 +466,62 @@ add_text :: (cmdx: *CmdX, frame: *CmdX_Frame, text: string) {
         // Essentially remove all lines that are not the current one, since we have already figured out
         // that they cannot fit into the backlog together with this new line
         to_remove_range := Source_Range.{ current_line.one_plus_last, current_line.first + 1, false };
-        current_line = remove_overlapping_lines(cmdx, frame, to_remove_range);
+        current_line = remove_overlapping_lines(cmdx, screen, to_remove_range);
         
         // Copy the subtext contents into the backlog
-        copy_memory(*frame.backlog[current_line.one_plus_last], subtext.data, subtext.count);
+        copy_memory(*screen.backlog[current_line.one_plus_last], subtext.data, subtext.count);
 
         // Update the current line end, It now takes over the complete backlog
         current_line.one_plus_last = current_line.first;
 
-        color_head := array_get(*frame.colors, frame.colors.count - 1);
+        color_head := array_get(*screen.colors, screen.colors.count - 1);
         color_head.source.one_plus_last = current_line.first;        
         return;
     }
     
-    first_line := array_get(*frame.lines, 0);
+    first_line := array_get(*screen.lines, 0);
     if projected_one_plus_last > first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
         // in the array), then that line will need to be removed.        
         to_remove_range := Source_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
-        current_line = remove_overlapping_lines(cmdx, frame, to_remove_range);
+        current_line = remove_overlapping_lines(cmdx, screen, to_remove_range);
     }
 
     // Copy the text content into the backlog
-    copy_memory(*frame.backlog[current_line.one_plus_last], text.data, text.count);
+    copy_memory(*screen.backlog[current_line.one_plus_last], text.data, text.count);
     
     // The current line now has grown. Increase the source ranges
     current_line.one_plus_last = current_line.one_plus_last + text.count;
 
-    color_head := array_get(*frame.colors, frame.colors.count - 1);
+    color_head := array_get(*screen.colors, screen.colors.count - 1);
     color_head.source.one_plus_last = current_line.one_plus_last;
     
     render_next_frame(cmdx);
 }
 
-add_character :: (cmdx: *CmdX, frame: *CmdX_Frame, character: s8) {    
+add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: s8) {    
     character_copy := character; // Since character is a register parameter, we probably cannot take the pointer to that directly... @Cleanup check if that may be possible, dunno
     string: string = ---;
     string.data = *character_copy;
     string.count = 1;
-    add_text(cmdx, frame, string);
+    add_text(cmdx, screen, string);
 }
 
-add_formatted_text :: (cmdx: *CmdX, frame: *CmdX_Frame, format: string, args: ..any) {
+add_formatted_text :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..any) {
     required_characters := query_required_print_buffer_size(format, ..args);
     string := allocate_string(required_characters, *cmdx.frame_allocator);
     mprint(string, format, ..args);
-    add_text(cmdx, frame, string);
+    add_text(cmdx, screen, string);
 }
 
-add_line :: (cmdx: *CmdX, frame: *CmdX_Frame, text: string) {
-    add_text(cmdx, frame, text);
-    new_line(cmdx, frame);
+add_line :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
+    add_text(cmdx, screen, text);
+    new_line(cmdx, screen);
 }
 
-add_formatted_line :: (cmdx: *CmdX, frame: *CmdX_Frame, format: string, args: ..any) {
-    add_formatted_text(cmdx, frame, format, ..args);
-    new_line(cmdx, frame);
+add_formatted_line :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..any) {
+    add_formatted_text(cmdx, screen, format, ..args);
+    new_line(cmdx, screen);
 }
 
 
@@ -529,22 +529,22 @@ compare_color_range :: (existing: Color_Range, true_color: Color, color_index: C
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
 
-set_color_internal :: (frame: *CmdX_Frame, true_color: Color, color_index: Color_Index) {
-    if frame.colors.count {
-        color_head := array_get(*frame.colors, frame.colors.count - 1);
+set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Color_Index) {
+    if screen.colors.count {
+        color_head := array_get(*screen.colors, screen.colors.count - 1);
 
         if color_head.source.first == color_head.source.one_plus_last && !color_head.source.wrapped {
             // If the previous color was not actually used in any source range, then just overwrite that
             // entry with the new data to save space.
             merged_with_previous := false;
 
-            if frame.colors.count >= 2 {
-                previous_color_head := array_get(*frame.colors, frame.colors.count - 2);
+            if screen.colors.count >= 2 {
+                previous_color_head := array_get(*screen.colors, screen.colors.count - 2);
                 if compare_color_range(~previous_color_head, true_color, color_index) {
                     previous_color_head.color_index = color_index;
                     previous_color_head.true_color  = true_color;
                     merged_with_previous = true;
-                    array_remove(*frame.colors, frame.colors.count - 1); // Remove the new head, since it is useless
+                    array_remove(*screen.colors, screen.colors.count - 1); // Remove the new head, since it is useless
                 }
             }
 
@@ -557,22 +557,22 @@ set_color_internal :: (frame: *CmdX_Frame, true_color: Color, color_index: Color
             // If this newly set color is different than the previous color (which is getting used), append
             // a new color range to the list
             range: Color_Range = .{ .{ color_head.source.one_plus_last, color_head.source.one_plus_last, false }, color_index, true_color };
-            array_add(*frame.colors, range);
+            array_add(*screen.colors, range);
         }
     } else {
         // If this is the first color to be set, it obviously starts at the beginning of the backlog
         range: Color_Range = .{ .{}, color_index, true_color };
-        array_add(*frame.colors, range);
+        array_add(*screen.colors, range);
     }
 }
 
-set_true_color :: (frame: *CmdX_Frame, color: Color) {
-    set_color_internal(frame, color, -1);
+set_true_color :: (screen: *CmdX_Screen, color: Color) {
+    set_color_internal(screen, color, -1);
 }
 
-set_themed_color :: (frame: *CmdX_Frame, index: Color_Index) {
+set_themed_color :: (screen: *CmdX_Screen, index: Color_Index) {
     empty_color: Color;
-    set_color_internal(frame, empty_color, index);
+    set_color_internal(screen, empty_color, index);
 }
 
 
@@ -597,68 +597,68 @@ activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
     else set_foreground_color(*cmdx.renderer, color_range.true_color);
 }
 
-draw_backlog_line :: (cmdx: *CmdX, frame: *CmdX_Frame, start: s64, end: s64, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {   
+draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {   
     set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
 
     for cursor := start; cursor < end; ++cursor {
-        character := frame.backlog[cursor];
+        character := screen.backlog[cursor];
         
-        while cursor_after_range(cursor, wrapped_before, color_range.source) && ~color_range_index + 1 < frame.colors.count {
+        while cursor_after_range(cursor, wrapped_before, color_range.source) && ~color_range_index + 1 < screen.colors.count {
             // Increase the current color range
             ~color_range_index += 1;
-            ~color_range = array_get_value(*frame.colors, ~color_range_index);
+            ~color_range = array_get_value(*screen.colors, ~color_range_index);
 
             // Set the actual foreground color. If the color range has a 
             activate_color_range(cmdx, color_range);
         }
         
         render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-        if cursor + 1 < end     cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, frame.backlog[cursor + 1]);
+        if cursor + 1 < end     cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[cursor + 1]);
     }
 
     return cursor_x, cursor_y;
 }
 
-add_history :: (cmdx: *CmdX, frame: *CmdX_Frame, input_string: string) {
+add_history :: (cmdx: *CmdX, screen: *CmdX_Screen, input_string: string) {
     // Make space for the new input string if that is required
-    if frame.history.count == cmdx.history_size {
-        head := array_get_value(*frame.history, frame.history.count - 1);
+    if screen.history.count == cmdx.history_size {
+        head := array_get_value(*screen.history, screen.history.count - 1);
         free_string(head, *cmdx.global_allocator);
-        array_remove(*frame.history, frame.history.count - 1);
+        array_remove(*screen.history, screen.history.count - 1);
     }
 
     // Since the input_string is just a string_view over the text input's buffer,
     // we need to copy it here.
-    array_add_at(*frame.history, 0, copy_string(input_string, *cmdx.global_allocator));
+    array_add_at(*screen.history, 0, copy_string(input_string, *cmdx.global_allocator));
 }
 
-refresh_auto_complete_options :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    if !frame.auto_complete_dirty return;
+refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    if !screen.auto_complete_dirty return;
     
     // Clear the previous auto complete options and deallocate all strings
-    for i := 0; i < frame.auto_complete_options.count; ++i {
-        string := array_get_value(*frame.auto_complete_options, i);
+    for i := 0; i < screen.auto_complete_options.count; ++i {
+        string := array_get_value(*screen.auto_complete_options, i);
         free_string(string, *cmdx.global_allocator);
     }
     
-    array_clear(*frame.auto_complete_options);
-    frame.auto_complete_index = 0;
+    array_clear(*screen.auto_complete_options);
+    screen.auto_complete_index = 0;
     
     // Gauge the text that should be auto-completed next
-    string_until_cursor := string_view(frame.text_input.buffer, frame.text_input.cursor);    
+    string_until_cursor := string_view(screen.text_input.buffer, screen.text_input.cursor);    
     last_space, space_found := search_string_reverse(string_until_cursor, ' ');
     last_slash, slash_found := search_string_reverse(string_until_cursor, '/');
 
     // Update the auto-complete start index
-    frame.auto_complete_start = 0;
-    if space_found && last_space > frame.auto_complete_start    frame.auto_complete_start = last_space + 1;
-    if slash_found && last_slash > frame.auto_complete_start    frame.auto_complete_start = last_slash + 1;
+    screen.auto_complete_start = 0;
+    if space_found && last_space > screen.auto_complete_start    screen.auto_complete_start = last_space + 1;
+    if slash_found && last_slash > screen.auto_complete_start    screen.auto_complete_start = last_slash + 1;
 
-    if last_space + 1 == frame.text_input.cursor    return; // If the current auto-complete "word" is empty, don't bother completing anything, since it could mean anything and this is probably more annoying than useful to the user.
+    if last_space + 1 == screen.text_input.cursor    return; // If the current auto-complete "word" is empty, don't bother completing anything, since it could mean anything and this is probably more annoying than useful to the user.
     
-    text_to_complete := substring_view(frame.text_input.buffer, frame.auto_complete_start, frame.text_input.cursor);
+    text_to_complete := substring_view(screen.text_input.buffer, screen.auto_complete_start, screen.text_input.cursor);
     
-    if frame.auto_complete_start == 0 {
+    if screen.auto_complete_start == 0 {
         // Add all commands, but only if this could actually be a command (it is actually the first thing in
         // the input string)
         for i := 0; i < cmdx.commands.count; ++i {
@@ -667,21 +667,21 @@ refresh_auto_complete_options :: (cmdx: *CmdX, frame: *CmdX_Frame) {
                 // Since the options array also includes file names which need to be allocated and freed once
                 // they are no longer needed, we also need to copy this name so that it can be freed.
                 command_name_copy := copy_string(command.name, *cmdx.global_allocator);
-                array_add(*frame.auto_complete_options, command_name_copy);
+                array_add(*screen.auto_complete_options, command_name_copy);
             }
         }
     }
 
     // Add all files in the current folder to the auto-complete.
 
-    files_directory := frame.current_directory;
+    files_directory := screen.current_directory;
     directory_start := 0;
     if space_found     directory_start = last_space + 1;
     
     if slash_found && last_slash > directory_start {
         // If the user has already supplied a folder (e.g. some/path/file_), then get the files in that
         // directory, not the current one.
-        files_directory = get_path_relative_to_cd(cmdx, substring_view(frame.text_input.buffer, directory_start, last_slash));
+        files_directory = get_path_relative_to_cd(cmdx, substring_view(screen.text_input.buffer, directory_start, last_slash));
     }
     
     files := get_files_in_folder(files_directory, *cmdx.frame_allocator);
@@ -702,41 +702,41 @@ refresh_auto_complete_options :: (cmdx: *CmdX, frame: *CmdX_Frame) {
             } else
                 file_name_copy = copy_string(file, *cmdx.global_allocator);
             
-            array_add(*frame.auto_complete_options, file_name_copy);
+            array_add(*screen.auto_complete_options, file_name_copy);
         }
     }
 
-    frame.auto_complete_dirty = false;
+    screen.auto_complete_dirty = false;
 }
 
-one_autocomplete_cycle :: (cmdx: *CmdX, frame: *CmdX_Frame) {
-    if !cmdx.active_frame.auto_complete_options.count return;
+one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    if !cmdx.active_screen.auto_complete_options.count return;
     
-    remaining_input_string := substring_view(frame.text_input.buffer, 0, frame.auto_complete_start);
-    auto_completion := array_get_value(*frame.auto_complete_options, frame.auto_complete_index);
+    remaining_input_string := substring_view(screen.text_input.buffer, 0, screen.auto_complete_start);
+    auto_completion := array_get_value(*screen.auto_complete_options, screen.auto_complete_index);
 
     full_string := concatenate_strings(remaining_input_string, auto_completion, *cmdx.frame_allocator);
 
-    set_text_input_string(*frame.text_input, full_string);
+    set_text_input_string(*screen.text_input, full_string);
 
-    frame.auto_complete_index = (frame.auto_complete_index + 1) % frame.auto_complete_options.count;
+    screen.auto_complete_index = (screen.auto_complete_index + 1) % screen.auto_complete_options.count;
 
     // If there was only one option, then we can be sure that the user wanted this one (or at least that
     // there is no other option for the user anyway). In that case, accept this option as the correct one,
     // and resume normal operation. This allows the user to quickly auto-complete paths if there is the
     // supplied information is unique enough.
-    if frame.auto_complete_options.count == 1    frame.auto_complete_dirty = true;
+    if screen.auto_complete_options.count == 1    screen.auto_complete_dirty = true;
 }
 
-draw_cmdx_frame :: (cmdx: *CmdX, frame: *CmdX_Frame) {
+draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Set up the first line to be rendered, as well as the highest line index to be rendered
-    current_line_index: s64 = frame.scroll_offset - frame.drawn_line_count;
-    last_line_index: s64 = current_line_index + frame.drawn_line_count - 1; // The last line (inclusive!) to be drawn
+    current_line_index: s64 = screen.scroll_offset - screen.drawn_line_count;
+    last_line_index: s64 = current_line_index + screen.drawn_line_count - 1; // The last line (inclusive!) to be drawn
 
     // Query the first line in the backlog, and the last line to be rendered
-    line_tail  := array_get(*frame.lines, 0);
-    first_line := array_get(*frame.lines, current_line_index);
-    line_head  := array_get(*frame.lines, frame.lines.count - 1);
+    line_tail  := array_get(*screen.lines, 0);
+    first_line := array_get(*screen.lines, current_line_index);
+    line_head  := array_get(*screen.lines, screen.lines.count - 1);
     
     // If the last line to be rendered is not empty, it means that it is not an empty line. That means that
     // the input string will be appended to the last line, so we can actually fit one more line into the screen.
@@ -748,32 +748,32 @@ draw_cmdx_frame :: (cmdx: *CmdX, frame: *CmdX_Frame) {
     
     // Set up coordinates for rendering
     cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.window.height - frame.drawn_line_count * cmdx.font.line_height - 5;
+    cursor_y: s32 = cmdx.window.height - screen.drawn_line_count * cmdx.font.line_height - 5;
 
     // Set up the color ranges
     color_range_index: s64 = 0;
-    color_range: Color_Range = array_get_value(*frame.colors, color_range_index);
+    color_range: Color_Range = array_get_value(*screen.colors, color_range_index);
     activate_color_range(cmdx, *color_range);
 
-    // Actually prepare the renderer now if we want to render this frame.
+    // Actually prepare the renderer now if we want to render this screen.
     prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
     
     // Draw all visible lines
     while current_line_index <= last_line_index {
-        line := array_get(*frame.lines, current_line_index);
+        line := array_get(*screen.lines, current_line_index);
 
         if line.wrapped {
             // If this line wraps, then the line actually contains two parts. The first goes from the start
             // until the end of the backlog, the second part starts at the beginning of the backlog and goes
             // until the end of the line. It is easier for draw_backlog_split to do it like this.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, frame, line.first, cmdx.backlog_size, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, cmdx.backlog_size, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-            cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, frame.backlog[cmdx.backlog_size - 1], frame.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, frame, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, screen.backlog[cmdx.backlog_size - 1], screen.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, 0, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
         } else
-            cursor_x, cursor_y = draw_backlog_line(cmdx, frame, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, line.one_plus_last, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
         
-        if current_line_index + 1 < frame.lines.count {
+        if current_line_index + 1 < screen.lines.count {
             // If there is another line after this, reset the cursor position. If there isnt, then
             // leave the cursor as is so that the actual text input can be rendered at the correct position
             cursor_y += cmdx.font.line_height;
@@ -784,8 +784,8 @@ draw_cmdx_frame :: (cmdx: *CmdX, frame: *CmdX_Frame) {
     }        
 
     // Render the text input at the end of the backlog
-    prefix_string := get_prefix_string(frame, *cmdx.frame_memory_arena);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *frame.text_input, prefix_string, cursor_x, cursor_y);
+    prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 }
 
 one_cmdx_frame :: (cmdx: *CmdX) {
@@ -795,7 +795,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     update_window(*cmdx.window);
 
     if cmdx.window.resized render_next_frame(cmdx); // If the window got resized, render the next frame
-    if cmdx.window.focused && !cmdx.active_frame.text_input.active render_next_frame(cmdx); // If the user just tabbed back into cmdx, make sure to render one frame
+    if cmdx.window.focused && !cmdx.active_screen.text_input.active render_next_frame(cmdx); // If the user just tabbed back into cmdx, make sure to render one frame
 
     if cmdx.render_ui {
         // Prepare the ui
@@ -816,7 +816,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // straight into the text input. @Cleanup what happens if the 'A' key is a short cut? We probably
     // only want to trigger an action in that case, and not have it go into the text input...
 
-    cmdx.active_frame.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
+    cmdx.active_screen.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
     
     for i := 0; i < cmdx.window.key_pressed.count; ++i {
         if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;
@@ -827,109 +827,109 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     for i := 0; i < cmdx.window.text_input_event_count; ++i {
         event := cmdx.window.text_input_events[i];
         if event.utf32 != 0x9 {
-            handle_text_input_event(*cmdx.active_frame.text_input, event); // Do not handle tab keys in the actual text input
+            handle_text_input_event(*cmdx.active_screen.text_input, event); // Do not handle tab keys in the actual text input
             handled_some_text_input = true;
         }
     }
 
     // The text buffer was updated, update the auto complete options and render the next frame
     if handled_some_text_input {
-        cmdx.active_frame.auto_complete_dirty = true;
+        cmdx.active_screen.auto_complete_dirty = true;
         render_next_frame(cmdx);
     }
         
     // Do one cycle of auto-complete if the tab key has been pressed.
     if cmdx.window.key_pressed[Key_Code.Tab] {
-        refresh_auto_complete_options(cmdx, cmdx.active_frame);
-        one_autocomplete_cycle(cmdx, cmdx.active_frame);
+        refresh_auto_complete_options(cmdx, cmdx.active_screen);
+        one_autocomplete_cycle(cmdx, cmdx.active_screen);
     }
     
     // Go through the history if the arrow keys have been used
     if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
-        if cmdx.active_frame.history_index + 1 < cmdx.active_frame.history.count {
-            ++cmdx.active_frame.history_index;
-            set_text_input_string(*cmdx.active_frame.text_input, array_get_value(*cmdx.active_frame.history, cmdx.active_frame.history_index));
+        if cmdx.active_screen.history_index + 1 < cmdx.active_screen.history.count {
+            ++cmdx.active_screen.history_index;
+            set_text_input_string(*cmdx.active_screen.text_input, array_get_value(*cmdx.active_screen.history, cmdx.active_screen.history_index));
         }
 
-        cmdx.active_frame.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
         render_next_frame(cmdx);
     }
 
     if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
-        if cmdx.active_frame.history_index >= 1 {
-            --cmdx.active_frame.history_index;
-            set_text_input_string(*cmdx.active_frame.text_input, array_get_value(*cmdx.active_frame.history, cmdx.active_frame.history_index));
+        if cmdx.active_screen.history_index >= 1 {
+            --cmdx.active_screen.history_index;
+            set_text_input_string(*cmdx.active_screen.text_input, array_get_value(*cmdx.active_screen.history, cmdx.active_screen.history_index));
         } else {
-            cmdx.active_frame.history_index = -1;
-            set_text_input_string(*cmdx.active_frame.text_input, ""); 
+            cmdx.active_screen.history_index = -1;
+            set_text_input_string(*cmdx.active_screen.text_input, ""); 
         }
                                   
-        cmdx.active_frame.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
         render_next_frame(cmdx);
     }
 
     if cmdx.window.key_pressed[Key_Code.Page_Down] {
         // Hotkey to scroll to the bottom of the backlog
-        cmdx.active_frame.scroll_target = xx cmdx.active_frame.lines.count - 1;
+        cmdx.active_screen.scroll_target = xx cmdx.active_screen.lines.count - 1;
     }
 
     if cmdx.window.key_pressed[Key_Code.Page_Up] {
         // Hotkey to scroll to the start of the backlog
-        cmdx.active_frame.scroll_target = 0;
+        cmdx.active_screen.scroll_target = 0;
     }
     
     // Update the internal text input rendering state
-    for it := cmdx.frames.first; it != null; it = it.next {
-        frame := *it.data;
-        text_until_cursor := get_string_view_until_cursor_from_text_input(*frame.text_input);
+    for it := cmdx.screens.first; it != null; it = it.next {
+        screen := *it.data;
+        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
         text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
-        cursor_alpha_previous := frame.text_input.cursor_alpha;
-        set_text_input_target_position(*frame.text_input, xx text_until_cursor_width);
-        update_text_input_rendering_data(*frame.text_input);
-        if cursor_alpha_previous != frame.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+        cursor_alpha_previous := screen.text_input.cursor_alpha;
+        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
+        update_text_input_rendering_data(*screen.text_input);
+        if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
     }
         
     // Check for potential control keys
-    if cmdx.active_frame.child_process_running {
-        if !win32_update_spawned_process(cmdx, cmdx.active_frame) {
+    if cmdx.active_screen.child_process_running {
+        if !win32_update_spawned_process(cmdx, cmdx.active_screen) {
             // If CmdX is terminating, or if the child process has disconnected from us (either by terminating
             // itself, or by closing the pipes), then close the connectoin to it.
-            win32_detach_spawned_process(cmdx, cmdx.active_frame);
+            win32_detach_spawned_process(cmdx, cmdx.active_screen);
         }
             
         if cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
             // Terminate the current running process
-            win32_terminate_child_process(cmdx, cmdx.active_frame);
+            win32_terminate_child_process(cmdx, cmdx.active_screen);
         }
     }
     
-    // Handle input for this frame
-    if cmdx.active_frame.text_input.entered {
+    // Handle input for this screen
+    if cmdx.active_screen.text_input.entered {
         // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
         // afterwards, we need to make a copy from the input string, so that it may potentially be used later on.
-        input_string := copy_string(get_string_view_from_text_input(*cmdx.active_frame.text_input), *cmdx.frame_allocator);
+        input_string := copy_string(get_string_view_from_text_input(*cmdx.active_screen.text_input), *cmdx.frame_allocator);
 
         // Reset the text input
-        cmdx.active_frame.history_index = -1;
-        clear_text_input(*cmdx.active_frame.text_input);
-        activate_text_input(*cmdx.active_frame.text_input);
+        cmdx.active_screen.history_index = -1;
+        clear_text_input(*cmdx.active_screen.text_input);
+        activate_text_input(*cmdx.active_screen.text_input);
         
-        if cmdx.active_frame.child_process_running {
+        if cmdx.active_screen.child_process_running {
             // Send the input to the child process
-            win32_write_to_child_process(cmdx, cmdx.active_frame, input_string);
+            win32_write_to_child_process(cmdx, cmdx.active_screen, input_string);
         } else if input_string.count {
-            if cmdx.active_frame.history.count {
+            if cmdx.active_screen.history.count {
                 // Only add the new input string to the history if it is not the exact same input
                 // as the previous
-                previous := array_get_value(*cmdx.active_frame.history, 0);
-                if !compare_strings(previous, input_string) add_history(cmdx, cmdx.active_frame, input_string);
-            } else add_history(cmdx, cmdx.active_frame, input_string);
+                previous := array_get_value(*cmdx.active_screen.history, 0);
+                if !compare_strings(previous, input_string) add_history(cmdx, cmdx.active_screen, input_string);
+            } else add_history(cmdx, cmdx.active_screen, input_string);
             
             // Print the complete input line into the backlog
-            set_themed_color(cmdx.active_frame, .Accent);
-            add_text(cmdx, cmdx.active_frame, get_prefix_string(cmdx.active_frame, *cmdx.frame_memory_arena));
-            set_themed_color(cmdx.active_frame, .Default);
-            add_line(cmdx, cmdx.active_frame, input_string);
+            set_themed_color(cmdx.active_screen, .Accent);
+            add_text(cmdx, cmdx.active_screen, get_prefix_string(cmdx.active_screen, *cmdx.frame_memory_arena));
+            set_themed_color(cmdx.active_screen, .Default);
+            add_line(cmdx, cmdx.active_screen, input_string);
 
             // Actually launch the command
             handle_input_string(cmdx, input_string);
@@ -937,30 +937,30 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
 
     // Handle scrolling inside the backlog
-    for it := cmdx.frames.first; it != null; it = it.next {
-        frame := *it.data;
+    for it := cmdx.screens.first; it != null; it = it.next {
+        screen := *it.data;
 
-        new_scroll_target: f64 = xx frame.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
-        previous_scroll_offset := frame.scroll_offset;
+        new_scroll_target: f64 = xx screen.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+        previous_scroll_offset := screen.scroll_offset;
         
-        total_line_count := frame.lines.count - 1; // Do not count the "input echo" line, which is the line head
+        total_line_count := screen.lines.count - 1; // Do not count the "input echo" line, which is the line head
         current_drawn_line_count := calculate_number_of_visible_lines(cmdx, cast(s64) round(new_scroll_target), total_line_count); // Estimate the number of drawn lines at the current scroll target
 
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
-        frame.scroll_target    = clamp(new_scroll_target, xx current_drawn_line_count, xx total_line_count);
-        frame.scroll_position += (frame.scroll_target - frame.scroll_position) * 0.25;
-        frame.scroll_offset    = clamp(cast(s64) round(frame.scroll_position), current_drawn_line_count, total_line_count);
+        screen.scroll_target    = clamp(new_scroll_target, xx current_drawn_line_count, xx total_line_count);
+        screen.scroll_position += (screen.scroll_target - screen.scroll_position) * 0.25;
+        screen.scroll_offset    = clamp(cast(s64) round(screen.scroll_position), current_drawn_line_count, total_line_count);
 
-        frame.drawn_line_count = calculate_number_of_visible_lines(cmdx, frame.scroll_offset, total_line_count);
+        screen.drawn_line_count = calculate_number_of_visible_lines(cmdx, screen.scroll_offset, total_line_count);
 
-        if previous_scroll_offset != frame.scroll_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
+        if previous_scroll_offset != screen.scroll_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
     
     if cmdx.render_frame || cmdx.render_ui {    
-        // Draw all frames at their position
-        for it := cmdx.frames.first; it != null; it = it.next {
-            draw_cmdx_frame(cmdx, *it.data);
+        // Draw all screens at their position
+        for it := cmdx.screens.first; it != null; it = it.next {
+            draw_cmdx_screen(cmdx, *it.data);
         }
         
         // Render the ui on top of the actual terminal stuff
@@ -969,7 +969,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             flush_font_buffer(*cmdx.renderer); // Flush all remaining ui texta
         }
             
-        // Finish the frame, sleep until the next one
+        // Finish the screen, sleep until the next one
         swap_gl_buffers(*cmdx.window);
 
         cmdx.render_frame = false;
@@ -988,65 +988,65 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
 
 
-/* --- FRAME API --- */
+/* --- SCREEN API --- */
 
-create_frame :: (cmdx: *CmdX) {
-    // Actually create the new frame, set the proper allocators for arrays and so forth
-    frame := linked_list_push(*cmdx.frames);
-    frame.history.allocator = *cmdx.global_allocator;
-    frame.colors.allocator  = *cmdx.global_allocator;
-    frame.lines.allocator   = *cmdx.global_allocator;
-    frame.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
-    frame.text_input.active = true;
-    frame.backlog           = allocate(*cmdx.global_allocator, cmdx.backlog_size);
+create_screen :: (cmdx: *CmdX) {
+    // Actually create the new screen, set the proper allocators for arrays and so forth
+    screen := linked_list_push(*cmdx.screens);
+    screen.history.allocator = *cmdx.global_allocator;
+    screen.colors.allocator  = *cmdx.global_allocator;
+    screen.lines.allocator   = *cmdx.global_allocator;
+    screen.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
+    screen.text_input.active = true;
+    screen.backlog           = allocate(*cmdx.global_allocator, cmdx.backlog_size);
 
-    // Set up the backlog for this frame
-    clear_backlog(cmdx, frame);
+    // Set up the backlog for this screen
+    clear_backlog(cmdx, screen);
 
-    // Adjust the position and size of all frames
-    frame_width:     s32 = cmdx.window.width / cmdx.frames.count;
-    frame_height:    s32 = cmdx.window.height;
-    next_frame_left: s32 = 0;
-    next_frame_top:  s32 = 0;
+    // Adjust the position and size of all screens
+    screen_width:     s32 = cmdx.window.width / cmdx.screens.count;
+    screen_height:    s32 = cmdx.window.height;
+    next_screen_left: s32 = 0;
+    next_screen_top:  s32 = 0;
     
-    for it := cmdx.frames.first; it != null; it = it.next {
-        frame := *it.data;
+    for it := cmdx.screens.first; it != null; it = it.next {
+        screen := *it.data;
 
-        frame.rectangle[0] = next_frame_left;
-        frame.rectangle[1] = next_frame_top;
-        frame.rectangle[2] = frame.rectangle[0] + xx frame_width;
-        frame.rectangle[3] = frame.rectangle[1] + xx frame_height;
+        screen.rectangle[0] = next_screen_left;
+        screen.rectangle[1] = next_screen_top;
+        screen.rectangle[2] = screen.rectangle[0] + xx screen_width;
+        screen.rectangle[3] = screen.rectangle[1] + xx screen_height;
 
-        next_frame_left = frame.rectangle[2];
-        next_frame_top  = frame.rectangle[1];
+        next_screen_left = screen.rectangle[2];
+        next_screen_top  = screen.rectangle[1];
     }
 }
 
-activate_frame :: (cmdx: *CmdX, index: s64) {
-    assert(index >= 0 && index < cmdx.frames.count, "Invalid Frame Index");    
-    cmdx.active_frame_index = index;
-    cmdx.active_frame = linked_list_get(*cmdx.frames, index);
+activate_screen :: (cmdx: *CmdX, index: s64) {
+    assert(index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");    
+    cmdx.active_screen_index = index;
+    cmdx.active_screen = linked_list_get(*cmdx.screens, index);
 }
 
 
 
 /* --- SETUP CODE --- */
 
-welcome_screen :: (cmdx: *CmdX, frame: *CmdX_Frame, run_tree: string) {    
+welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {    
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
 
-    set_themed_color(frame, .Accent);
-    add_line(cmdx, frame, "    Welcome to cmdX.");
-    set_themed_color(frame, .Default);    
-    add_line(cmdx, frame, "Use the :help command as a starting point.");    
-    add_formatted_line(cmdx, frame, "The config file can be found under %.", config_location);
-    new_line(cmdx, frame);    
+    set_themed_color(screen, .Accent);
+    add_line(cmdx, screen, "    Welcome to cmdX.");
+    set_themed_color(screen, .Default);    
+    add_line(cmdx, screen, "Use the :help command as a starting point.");    
+    add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
+    new_line(cmdx, screen);    
 }
 
-get_prefix_string :: (frame: *CmdX_Frame, arena: *Memory_Arena) -> string {
+get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
     string_builder: String_Builder = ---;
     create_string_builder(*string_builder, arena);
-    if !frame.child_process_running    append_string(*string_builder, frame.current_directory);
+    if !screen.child_process_running    append_string(*string_builder, screen.current_directory);
     append_string(*string_builder, "> ");
     return finish_string_builder(*string_builder);
 }
@@ -1073,7 +1073,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
     
     // No theme with that name could be found.
     if cmdx.setup {
-        add_formatted_line(cmdx, cmdx.active_frame, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+        add_formatted_line(cmdx, cmdx.active_screen, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     } else
         config_error(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
         
@@ -1093,11 +1093,11 @@ update_font :: (cmdx: *CmdX) {
 }
 
 update_active_process_name :: (cmdx: *CmdX, process_name: string) {
-    // @Cleanup this seems pretty invalid with the frames right now...
-    if compare_strings(cmdx.active_frame.child_process_name, process_name) return;
+    // @Cleanup this seems pretty invalid with the screens right now...
+    if compare_strings(cmdx.active_screen.child_process_name, process_name) return;
     
-    if cmdx.active_frame.child_process_name.count   free_string(cmdx.active_frame.child_process_name, *cmdx.global_allocator);
-    cmdx.active_frame.child_process_name = copy_string(process_name, *cmdx.global_allocator);
+    if cmdx.active_screen.child_process_name.count   free_string(cmdx.active_screen.child_process_name, *cmdx.global_allocator);
+    cmdx.active_screen.child_process_name = copy_string(process_name, *cmdx.global_allocator);
     update_window_name(cmdx);
 }
 
@@ -1105,9 +1105,9 @@ update_window_name :: (cmdx: *CmdX) {
     builder: String_Builder = ---;
     create_string_builder(*builder, *cmdx.frame_memory_arena);
     append_string(*builder, "cmdX | ");
-    append_string(*builder, cmdx.active_frame.current_directory);
+    append_string(*builder, cmdx.active_screen.current_directory);
     
-    if cmdx.active_frame.child_process_name.count append_format(*builder, " (%)", cmdx.active_frame.child_process_name);
+    if cmdx.active_screen.child_process_name.count append_format(*builder, " (%)", cmdx.active_screen.child_process_name);
     
     set_window_name(*cmdx.window, finish_string_builder(*builder));
 }
@@ -1127,7 +1127,7 @@ cmdx :: () -> s32 {
     // Link the allocators to all important data structures
     cmdx.themes.allocator   = *cmdx.global_allocator;
     cmdx.commands.allocator = *cmdx.global_allocator;
-    cmdx.frames.allocator   = *cmdx.global_allocator;
+    cmdx.screens.allocator   = *cmdx.global_allocator;
     
     // Register all commands
     register_all_commands(*cmdx);
@@ -1199,10 +1199,10 @@ cmdx :: () -> s32 {
     // window takes a little longer to show up, but it immediatly gets filled with the first frame.
     show_window(*cmdx.window);
     
-    // Create the main frame and display the welcome message
-    create_frame(*cmdx);
-    activate_frame(*cmdx, 0);
-    welcome_screen(*cmdx, cmdx.active_frame, run_tree);
+    // Create the main screen and display the welcome message
+    create_screen(*cmdx);
+    activate_screen(*cmdx, 0);
+    welcome_screen(*cmdx, cmdx.active_screen, run_tree);
     flush_config_errors(*cmdx);
 
     cmdx.setup = true;
