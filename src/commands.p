@@ -384,6 +384,7 @@ config :: (cmdx: *CmdX) {
         case .Bool;   add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._bool);
         case .S64;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._s64);
         case .U32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._u32);
+        case .F32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._f32);
         }
     }
 

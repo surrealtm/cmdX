@@ -8,6 +8,7 @@ Property_Type :: enum {
     Bool;
     S64;
     U32;
+    F32;
 }
 
 Property_Value :: union {
@@ -15,6 +16,7 @@ Property_Value :: union {
     _bool: *bool;
     _s64: *s64;
     _u32: *u32;
+    _f32: *f32;
 }
 
 Property :: struct {
@@ -35,9 +37,10 @@ property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
     
     switch #complete type {
-        case .String; result = "String";
-        case .Bool; result = "Bool";
-        case .S64, .U32; result = "Integer";        
+    case .String; result = "String";
+    case .Bool; result = "Bool";
+    case .S64, .U32; result = "Integer";        
+    case .F32; result = "Float";
     }
     
     return result;
@@ -74,6 +77,12 @@ create_u32_property :: (config: *Config, name: string, value: *u32, default: u32
     ~property.value._u32 = default;
 }
 
+create_f32_property :: (config: *Config, name: string, value: *f32, default: f32) {
+    property := create_property_internal(config, name, .F32);
+    property.value._f32 = value;
+    ~property.value._f32 = default;
+}
+
 find_property :: (config: *Config, name: string) -> *Property {
     for i := 0; i < config.properties.count; ++i {
         property := array_get(*config.properties, i);
@@ -105,13 +114,18 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     valid := false;
     
     switch #complete property.type {
-        case .String;
+    case .String;
         valid = true;
         ~property.value._string = copy_string(value, config.allocator);
         
-        case .Bool; ~property.value._bool, valid = string_to_bool(value);        
-        case .S64;  ~property.value._s64, valid  = string_to_int(value);
-        case .U32;  ~property.value._u32, valid  = string_to_int(value); 
+    case .Bool; ~property.value._bool, valid = string_to_bool(value);        
+    case .S64;  ~property.value._s64, valid  = string_to_int(value);
+    case .U32;  ~property.value._u32, valid  = string_to_int(value); 
+    case .F32;
+        double: f64;
+        double, valid = string_to_float(value);
+
+        if valid ~property.value._f32 = xx double;
     }
     
     if !valid {
@@ -183,10 +197,11 @@ write_config_file :: (config: *Config, file_path: string) {
         bprint(*file_printer, "% ", property.name);
         
         switch #complete property.type {
-            case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
-            case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
-            case .S64;     bprint(*file_printer, "%", ~property.value._s64);
-            case .U32;     bprint(*file_printer, "%", ~property.value._u32);
+        case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
+        case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
+        case .S64;     bprint(*file_printer, "%", ~property.value._s64);
+        case .U32;     bprint(*file_printer, "%", ~property.value._u32);
+        case .F32;     bprint(*file_printer, "%", ~property.value._f32);
         }
         
         bprint(*file_printer, "\n");

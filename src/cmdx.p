@@ -28,22 +28,22 @@
 #load "win32.p";
 #load "create_big_file.p";
 
+// Some default font paths to remember
 CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
 TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
 COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
 ARIAL           :: "C:/windows/fonts/arial.ttf";
 
-REQUESTED_FPS: f32 : 60; // @Cleanup config property for this?
-REQUESTED_FRAME_TIME_MILLISECONDS: f32 : 1000 / REQUESTED_FPS;
-
 CONFIG_FILE_NAME :: ".cmdx-config";
 
+// Default values for the config properties.
 DEFAULT_BACKLOG_SIZE :: 65535; // In characters
 DEFAULT_HISTORY_SIZE :: 64;    // In input lines
 DEFAULT_SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
 DEFAULT_THEME        :: "blue";
 DEFAULT_FONT         :: COURIER_NEW;
 DEFAULT_FONT_SIZE    :: 15;
+DEFAULT_FPS: f32      : 60;
 
 Color_Index :: enum {
     Default;
@@ -143,10 +143,11 @@ CmdX :: struct {
     // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to
     // pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to
     // happen anyway
-    history_size: s64; // The number of history lines to keep
-    backlog_size: s64; // The size of the backlog for each screen in bytes
-    scroll_speed: s64; // In lines per mouse wheel turn
-
+    history_size: s64;  // The number of history lines to keep
+    backlog_size: s64;  // The size of the backlog for each screen in bytes
+    scroll_speed: s64;  // In lines per mouse wheel turn
+    requested_fps: f32;
+    
     // Screens
     screens: Linked_List(CmdX_Screen);
     active_screen: *CmdX_Screen; // The pointer that is valid for the active_screen_index. Used as a shortcut to avoid an array indexing every time. Since the screens are stored as a linked list, the pointer is valid until the screen gets removed
@@ -809,7 +810,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Poll window updates
     update_window(*cmdx.window);
 
-    if cmdx.window.resized render_next_frame(cmdx); // If the window got resized, render the next frame
+    if cmdx.window.resized {
+        adjust_screen_rectangles(cmdx);
+        render_next_frame(cmdx); // If the window got resized, render the next frame
+    }
+
     if cmdx.window.focused && !cmdx.active_screen.text_input.active render_next_frame(cmdx); // If the user just tabbed back into cmdx, make sure to render one frame
 
     if cmdx.render_ui {
@@ -1006,8 +1011,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Measure the frame time and sleep accordingly
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
-    if active_frame_time < REQUESTED_FRAME_TIME_MILLISECONDS - 1 {
-        time_to_sleep: f32 = REQUESTED_FRAME_TIME_MILLISECONDS - active_frame_time;
+    requested_frame_time := 1000 / cmdx.requested_fps;
+    if cmdx.requested_fps == 0 requested_frame_time = 0; // Unlimited fps
+    
+    if active_frame_time < requested_frame_time - 1 {
+        time_to_sleep: f32 = requested_frame_time - active_frame_time;
         Sleep(xx floorf(time_to_sleep) - 1);
     }
 }
@@ -1220,6 +1228,7 @@ cmdx :: () -> s32 {
     create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width, WINDOW_DONT_CARE);
     create_u32_property(*cmdx.config, "window-height", *cmdx.window.height, WINDOW_DONT_CARE);
     create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized, false);
+    create_f32_property(*cmdx.config, "window-fps", *cmdx.requested_fps, DEFAULT_FPS);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
