@@ -53,34 +53,29 @@ create_property_internal :: (config: *Config, name: string, type: Property_Type)
     return property;
 }
 
-create_string_property :: (config: *Config, name: string, value: *string, default: string) {
+create_string_property :: (config: *Config, name: string, value: *string) {
     property := create_property_internal(config, name, .String);
     property.value._string = value;
-    ~property.value._string = copy_string(default, config.allocator);
 }
 
-create_bool_property :: (config: *Config, name: string, value: *bool, default: bool) {
+create_bool_property :: (config: *Config, name: string, value: *bool) {
     property := create_property_internal(config, name, .Bool);
     property.value._bool = value;
-    ~property.value._bool = default;
 }
 
-create_s64_property :: (config: *Config, name: string, value: *s64, default: s64) {
+create_s64_property :: (config: *Config, name: string, value: *s64) {
     property := create_property_internal(config, name, .S64);
     property.value._s64 = value;
-    ~property.value._s64 = default;
 }
 
-create_u32_property :: (config: *Config, name: string, value: *u32, default: u32) {
+create_u32_property :: (config: *Config, name: string, value: *u32) {
     property := create_property_internal(config, name, .U32);
     property.value._u32 = value;
-    ~property.value._u32 = default;
 }
 
-create_f32_property :: (config: *Config, name: string, value: *f32, default: f32) {
+create_f32_property :: (config: *Config, name: string, value: *f32) {
     property := create_property_internal(config, name, .F32);
     property.value._f32 = value;
-    ~property.value._f32 = default;
 }
 
 find_property :: (config: *Config, name: string) -> *Property {

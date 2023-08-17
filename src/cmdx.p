@@ -36,15 +36,6 @@ ARIAL           :: "C:/windows/fonts/arial.ttf";
 
 CONFIG_FILE_NAME :: ".cmdx-config";
 
-// Default values for the config properties.
-DEFAULT_BACKLOG_SIZE :: 65535; // In characters
-DEFAULT_HISTORY_SIZE :: 64;    // In input lines
-DEFAULT_SCROLL_SPEED :: 3;     // In amount of lines per mouse wheel turn
-DEFAULT_THEME        :: "blue";
-DEFAULT_FONT         :: COURIER_NEW;
-DEFAULT_FONT_SIZE    :: 15;
-DEFAULT_FPS: f32      : 60;
-
 Color_Index :: enum {
     Default;
     Cursor;
@@ -96,7 +87,7 @@ CmdX_Screen :: struct {
     scroll_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
 
     // Drawing data cached for this screen
-    drawn_line_count: s32;
+    drawn_line_count: s64;
     
     // Subprocess data
     current_directory: string;
@@ -120,19 +111,19 @@ CmdX :: struct {
     frame_allocator: Allocator;
     
     // Output
-    window: Window = ---;
+    window: Window;
     renderer: Renderer = ---;
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
     render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
     ui: UI = ---;
        
     // Font
-    font_size: s64;
-    font_path: string;
+    font_size: s64 = 15;
+    font_path: string = COURIER_NEW;
     font: Font;
 
     // Themes
-    active_theme_name: string;
+    active_theme_name: string = "blue";
     active_theme: *Theme;
     themes: [..]Theme;
 
@@ -143,10 +134,10 @@ CmdX :: struct {
     // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to
     // pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to
     // happen anyway
-    history_size: s64;  // The number of history lines to keep
-    backlog_size: s64;  // The size of the backlog for each screen in bytes
-    scroll_speed: s64;  // In lines per mouse wheel turn
-    requested_fps: f32;
+    history_size:  s64 = 64;    // The number of history lines to keep
+    backlog_size:  s64 = 65535; // The size of the backlog for each screen in bytes
+    scroll_speed:  s64 = 3;     // In lines per mouse wheel turn
+    requested_fps: f32 = 60;
     
     // Screens
     screens: Linked_List(CmdX_Screen);
@@ -1217,18 +1208,18 @@ cmdx :: () -> s32 {
     // Set up all the required config properties, and read the config file if it exists
     // @Cleanup do we actually want a 'default' parameter here, or should the variables not just have a default
     // value which will not be overriden?
-    create_s64_property(*cmdx.config, "backlog-size", *cmdx.backlog_size, DEFAULT_BACKLOG_SIZE);
-    create_s64_property(*cmdx.config, "history-size", *cmdx.history_size, DEFAULT_HISTORY_SIZE);
-    create_s64_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed, DEFAULT_SCROLL_SPEED);
-    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name, DEFAULT_THEME);
-    create_string_property(*cmdx.config, "font-name", *cmdx.font_path, DEFAULT_FONT);
-    create_s64_property(*cmdx.config, "font-size",     *cmdx.font_size, DEFAULT_FONT_SIZE);
-    create_u32_property(*cmdx.config, "window-x",      *cmdx.window.xposition, WINDOW_DONT_CARE);
-    create_u32_property(*cmdx.config, "window-y",      *cmdx.window.yposition, WINDOW_DONT_CARE);
-    create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width, WINDOW_DONT_CARE);
-    create_u32_property(*cmdx.config, "window-height", *cmdx.window.height, WINDOW_DONT_CARE);
-    create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized, false);
-    create_f32_property(*cmdx.config, "window-fps", *cmdx.requested_fps, DEFAULT_FPS);
+    create_s64_property(*cmdx.config, "backlog-size", *cmdx.backlog_size);
+    create_s64_property(*cmdx.config, "history-size", *cmdx.history_size);
+    create_s64_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed);
+    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name);
+    create_string_property(*cmdx.config, "font-name", *cmdx.font_path);
+    create_s64_property(*cmdx.config, "font-size",     *cmdx.font_size);
+    create_u32_property(*cmdx.config, "window-x",      *cmdx.window.xposition);
+    create_u32_property(*cmdx.config, "window-y",      *cmdx.window.yposition);
+    create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width);
+    create_u32_property(*cmdx.config, "window-height", *cmdx.window.height);
+    create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized);
+    create_f32_property(*cmdx.config, "window-fps", *cmdx.requested_fps);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
