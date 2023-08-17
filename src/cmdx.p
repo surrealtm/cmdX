@@ -1018,6 +1018,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 create_screen :: (cmdx: *CmdX) -> s64 {
     // Actually create the new screen, set the proper allocators for arrays and so forth
     screen := linked_list_push(*cmdx.screens);
+    screen.auto_complete_options.allocator = *cmdx.global_allocator;
     screen.history.allocator = *cmdx.global_allocator;
     screen.colors.allocator  = *cmdx.global_allocator;
     screen.lines.allocator   = *cmdx.global_allocator;
@@ -1191,7 +1192,7 @@ cmdx :: () -> s32 {
     // Link the allocators to all important data structures
     cmdx.themes.allocator   = *cmdx.global_allocator;
     cmdx.commands.allocator = *cmdx.global_allocator;
-    cmdx.screens.allocator   = *cmdx.global_allocator;
+    cmdx.screens.allocator  = *cmdx.global_allocator;
 
     cmdx.startup_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     
@@ -1206,8 +1207,6 @@ cmdx :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
     
     // Set up all the required config properties, and read the config file if it exists
-    // @Cleanup do we actually want a 'default' parameter here, or should the variables not just have a default
-    // value which will not be overriden?
     create_s64_property(*cmdx.config, "backlog-size", *cmdx.backlog_size);
     create_s64_property(*cmdx.config, "history-size", *cmdx.history_size);
     create_s64_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed);
@@ -1226,7 +1225,7 @@ cmdx :: () -> s32 {
     create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized); // The title will be replaced when the first screen gets created
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
-    cmdx.render_frame = true; // Render the first frame
+    render_next_frame(*cmdx);
 
     // Now set the taskbar for the window, cause win32 sucks some ass.
     set_window_icon(*cmdx.window, "data/cmdx.ico");
