@@ -58,6 +58,10 @@ split_screen_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     split_screen(cmdx);
 }
 
+close_active_screen_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    close_active_screen(cmdx);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     directory := get_string_argument(argument_values, 0);
     ls(cmdx, directory);
@@ -153,6 +157,7 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_argument(remove_macro, "trigger", .Key_Code);
 
     register_command(cmdx, ":split-screen", "Creates a new screen", split_screen_handler);
+    register_command(cmdx, ":close-screen", "Closes the current screen", close_active_screen_handler);
     
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
     register_optional_command_argument(ls, "directory", .String, "");

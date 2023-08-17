@@ -422,8 +422,11 @@ remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
 }
 
 split_screen :: (cmdx: *CmdX) {
-    create_screen(cmdx);
-    activate_screen(cmdx, cmdx.screens.count - 1);
+    create_and_activate_screen(cmdx);
+}
+
+close_active_screen :: (cmdx: *CmdX) {
+    if cmdx.screens.count > 1 close_screen(cmdx, cmdx.active_screen);
 }
 
 ls :: (cmdx: *CmdX, directory: string) {

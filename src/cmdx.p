@@ -830,18 +830,23 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
     // straight into the text input. @Cleanup what happens if the 'A' key is a short cut? We probably
     // only want to trigger an action in that case, and not have it go into the text input...
-
     cmdx.active_screen.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
-    
+
+    // Check if any actions have been triggered in the past frame
     for i := 0; i < cmdx.window.key_pressed.count; ++i {
         if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;
     }
 
-    // Go to the next screen if ctrl+comma was pressed. @Cleanup put this hotkey into the config file somehow
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.Comma] {
-        activate_next_screen(cmdx);
-    }
+    // @Cleanup put all these screen hotkeys into the config file somehow
+    // Go to the next screen if ctrl+comma was pressed.
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.Comma]  activate_next_screen(cmdx);
 
+    // Close the current screen if ctrl+0 was pressed.
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._0] && cmdx.screens.count > 1  close_screen(cmdx, cmdx.active_screen);
+
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._1] create_and_activate_screen(cmdx);
+    
+    // Handle the actual characters written by the user into the current text input
     handled_some_text_input: bool = false;
     
     for i := 0; i < cmdx.window.text_input_event_count; ++i {
@@ -888,21 +893,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         render_next_frame(cmdx);
     }
 
-    if cmdx.window.key_pressed[Key_Code.Page_Down] {
-        // Hotkey to scroll to the bottom of the backlog
-        cmdx.active_screen.scroll_target = xx cmdx.active_screen.lines.count - 1;
-    }
-
-    if cmdx.window.key_pressed[Key_Code.Page_Up] {
-        // Hotkey to scroll to the start of the backlog
-        cmdx.active_screen.scroll_target = 0;
-    }
-    
-    // Update the internal text input rendering state
-    for it := cmdx.screens.first; it != null; it = it.next {
-        screen := *it.data;
-    }
-        
     // Check for potential control keys
     if cmdx.active_screen.child_process_running {
         if !win32_update_spawned_process(cmdx, cmdx.active_screen) {
@@ -950,9 +940,10 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
     }
 
+    // Update each individual screen
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
-
+        
         // Update the text input's cursor rendering data
         text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
         text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
@@ -963,9 +954,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
 
         // Handle scrolling in this screen
-        new_scroll_target: f64 = xx screen.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
-        previous_scroll_offset := screen.scroll_offset;
+        new_scroll_target := screen.scroll_target;
+
+        if cmdx.active_screen == screen || cmdx.window.key_held[Key_Code.Shift] {
+            // Only actually do scrolling if this is either the active screen, or the shift key is held,
+            // indicating that all screens should be scrolled simultaneously
+            new_scroll_target = xx screen.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+            if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.lines.count - 1; // Scroll to the bottom of the backlog.
+            if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog. While 0 is not actually a valid scroll target, it makes sure that it goes all the way to the top in the calculate_number_of_visible_lines procedure. The value will be clamped below.
+        }
         
+        previous_scroll_offset := screen.scroll_offset;
         total_line_count := screen.lines.count - 1; // Do not count the "input echo" line, which is the line head
         current_drawn_line_count := calculate_number_of_visible_lines(cmdx, cast(s64) round(new_scroll_target), total_line_count); // Estimate the number of drawn lines at the current scroll target
 
@@ -1003,7 +1002,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
     // Reset the frame arena
     reset_allocator(*cmdx.frame_allocator);
-    
+
+    // Measure the frame time and sleep accordingly
     frame_end := get_hardware_time();
     active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
     if active_frame_time < REQUESTED_FRAME_TIME_MILLISECONDS - 1 {
@@ -1016,7 +1016,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
 /* --- SCREEN API --- */
 
-create_screen :: (cmdx: *CmdX) {
+create_screen :: (cmdx: *CmdX) -> s64 {
     // Actually create the new screen, set the proper allocators for arrays and so forth
     screen := linked_list_push(*cmdx.screens);
     screen.history.allocator = *cmdx.global_allocator;
@@ -1031,6 +1031,13 @@ create_screen :: (cmdx: *CmdX) {
 
     // Readjust the screen rectangles with the new screen
     adjust_screen_rectangles(cmdx);
+
+    return cmdx.screens.count - 1;
+}
+
+create_and_activate_screen :: (cmdx: *CmdX) {
+    index := create_screen(cmdx);
+    activate_screen(cmdx, index);
 }
 
 close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
@@ -1041,6 +1048,9 @@ close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Remove the screen from the linked list
     linked_list_remove_pointer(*cmdx.screens, screen);
 
+    cmdx.active_screen_index = cmdx.active_screen_index % cmdx.screens.count; // Make sure the active screen index is still in bounds
+    cmdx.active_screen = linked_list_get(*cmdx.screens, cmdx.active_screen_index);
+    
     // Readjust the screen rectangles of the remaining screens
     adjust_screen_rectangles(cmdx);
 }
