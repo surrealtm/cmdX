@@ -54,6 +54,10 @@ remove_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     remove_macro(cmdx, trigger);
 }
 
+split_screen_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    split_screen(cmdx);
+}
+
 ls_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     directory := get_string_argument(argument_values, 0);
     ls(cmdx, directory);
@@ -147,6 +151,8 @@ register_all_commands :: (cmdx: *CmdX) {
 
     remove_macro := register_command(cmdx, ":remove-macro", "Removes a macro from the configuration", remove_macro_handler);
     register_command_argument(remove_macro, "trigger", .Key_Code);
+
+    register_command(cmdx, ":split-screen", "Creates a new screen", split_screen_handler);
     
     ls := register_command(cmdx, "ls", "Lists the contents of the current directory", ls_handler);
     register_optional_command_argument(ls, "directory", .String, "");

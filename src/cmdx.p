@@ -750,16 +750,16 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     wrapped_before := first_line.first < line_tail.first; 
     
     // Set up coordinates for rendering
-    cursor_x: s32 = 5;
-    cursor_y: s32 = cmdx.window.height - screen.drawn_line_count * cmdx.font.line_height - 5;
+    cursor_x: s32 = screen.rectangle[0] + 5;
+    cursor_y: s32 = screen.rectangle[3] - screen.drawn_line_count * cmdx.font.line_height - 5;
 
     // Set up the color ranges
     color_range_index: s64 = 0;
     color_range: Color_Range = array_get_value(*screen.colors, color_range_index);
     activate_color_range(cmdx, *color_range);
 
-    // Actually prepare the renderer now if we want to render this screen.
-    prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
+    // Set scissors to avoid drawing into other screens' spaces.
+    set_scissors(screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], cmdx.window.height);
     
     // Draw all visible lines
     while current_line_index <= last_line_index {
@@ -780,7 +780,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             // If there is another line after this, reset the cursor position. If there isnt, then
             // leave the cursor as is so that the actual text input can be rendered at the correct position
             cursor_y += cmdx.font.line_height;
-            cursor_x = 5;
+            cursor_x = screen.rectangle[0] + 5;
         }
         
         ++current_line_index;
@@ -789,6 +789,18 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Render the text input at the end of the backlog
     prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
+
+    // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
+    // see that this is not the active one.
+    if cmdx.active_screen != screen {
+        deactive_color := Color.{ 0, 0, 0, 100 };
+        draw_quad(*cmdx.renderer, screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], deactive_color);
+    }
+        
+    // Disable scissors after the screen has been rendered to avoid some weird artifacts. To avoid some left-over
+    // text being rendered after this with invalid scissors, flush the font buffer now.
+    flush_font_buffer(*cmdx.renderer);
+    disable_scissors();
 }
 
 one_cmdx_frame :: (cmdx: *CmdX) {
@@ -823,6 +835,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     for i := 0; i < cmdx.window.key_pressed.count; ++i {
         if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;
+    }
+
+    // Go to the next screen if ctrl+comma was pressed. @Cleanup put this hotkey into the config file somehow
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.Comma] {
+        activate_next_screen(cmdx);
     }
 
     handled_some_text_input: bool = false;
@@ -964,6 +981,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
     
     if cmdx.render_frame || cmdx.render_ui {    
+        // Actually prepare the renderer now if we want to render this screen.
+        prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
+
         // Draw all screens at their position
         for it := cmdx.screens.first; it != null; it = it.next {
             draw_cmdx_screen(cmdx, *it.data);
@@ -1009,6 +1029,41 @@ create_screen :: (cmdx: *CmdX) {
     // Set up the backlog for this screen
     clear_backlog(cmdx, screen);
 
+    // Readjust the screen rectangles with the new screen
+    adjust_screen_rectangles(cmdx);
+}
+
+close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    // Deallocate all the data that was allocated for this screen when it was created
+    deallocate(*cmdx.global_allocator, screen.backlog);
+    free_string(screen.current_directory, *cmdx.global_allocator);
+
+    // Remove the screen from the linked list
+    linked_list_remove_pointer(*cmdx.screens, screen);
+
+    // Readjust the screen rectangles of the remaining screens
+    adjust_screen_rectangles(cmdx);
+}
+
+activate_screen :: (cmdx: *CmdX, index: s64) {
+    assert(index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");    
+
+    if cmdx.active_screen cmdx.active_screen.text_input.active = false;
+    
+    cmdx.active_screen_index = index;
+    cmdx.active_screen = linked_list_get(*cmdx.screens, index);
+
+    cmdx.active_screen.text_input.active = true;
+
+    update_window_name(cmdx);
+    render_next_frame(cmdx);
+}
+
+activate_next_screen :: (cmdx: *CmdX) {
+    activate_screen(cmdx, (cmdx.active_screen_index + 1) % cmdx.screens.count);
+}
+
+adjust_screen_rectangles :: (cmdx: *CmdX) {
     // Adjust the position and size of all screens
     screen_width:     s32 = cmdx.window.width / cmdx.screens.count;
     screen_height:    s32 = cmdx.window.height;
@@ -1026,13 +1081,6 @@ create_screen :: (cmdx: *CmdX) {
         next_screen_left = screen.rectangle[2];
         next_screen_top  = screen.rectangle[1];
     }
-}
-
-activate_screen :: (cmdx: *CmdX, index: s64) {
-    assert(index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");    
-    cmdx.active_screen_index = index;
-    cmdx.active_screen = linked_list_get(*cmdx.screens, index);
-    update_window_name(cmdx);
 }
 
 

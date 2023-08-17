@@ -42,6 +42,10 @@ parse_key_code :: (string: string) -> Key_Code {
     else if compare_strings(string, "X") result = .X;
     else if compare_strings(string, "Y") result = .Y;
     else if compare_strings(string, "Z") result = .Z;
+    else if compare_strings(string, ".") result = .Period;
+    else if compare_strings(string, ",") result = .Comma;
+    else if compare_strings(string, "-") result = .Minus;
+    else if compare_strings(string, "+") result = .Plus;
     else if compare_strings(string, "Up")        result = .Arrow_Up;
     else if compare_strings(string, "Down")      result = .Arrow_Down;
     else if compare_strings(string, "Left")      result = .Arrow_Left;
@@ -101,6 +105,10 @@ key_code_to_string :: (key: Key_Code) -> string {
     case .X; result = "X";
     case .Y; result = "Y";
     case .Z; result = "Z";
+    case .Period; result = ".";
+    case .Comma;  result = ",";
+    case .Minus;  result = "-";
+    case .Plus;   result = "+";
     case .Arrow_Up;    result = "Up";
     case .Arrow_Down;  result = "Down";
     case .Arrow_Left;  result = "Left";

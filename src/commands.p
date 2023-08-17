@@ -421,6 +421,11 @@ remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
     }
 }
 
+split_screen :: (cmdx: *CmdX) {
+    create_screen(cmdx);
+    activate_screen(cmdx, cmdx.screens.count - 1);
+}
+
 ls :: (cmdx: *CmdX, directory: string) {
     complete_directory := cmdx.active_screen.current_directory;
 
