@@ -109,7 +109,8 @@ CmdX_Screen :: struct {
 
 CmdX :: struct {
     setup: bool = false; // This flag gets set to true once the welcome screen was displayed. It indicates that everything has been loaded and initialized, and the terminal will behave as expected. Before this happens, the config may not be loaded yet, the backlog may not exist yet...
-
+    startup_directory: string; // Remember the startup directory, since newly created screens should start in this directory. CmdX sets the working directory to its run_tree folder to have the asset files ready
+    
     // Memory management
     global_memory_arena: Memory_Arena;
     global_memory_pool: Memory_Pool;
@@ -139,7 +140,9 @@ CmdX :: struct {
     commands: [..]Command;
     config: Config;
 
-    // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to happen anyway
+    // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to
+    // pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to
+    // happen anyway
     history_size: s64; // The number of history lines to keep
     backlog_size: s64; // The size of the backlog for each screen in bytes
     scroll_speed: s64; // In lines per mouse wheel turn
@@ -999,7 +1002,7 @@ create_screen :: (cmdx: *CmdX) {
     screen.history.allocator = *cmdx.global_allocator;
     screen.colors.allocator  = *cmdx.global_allocator;
     screen.lines.allocator   = *cmdx.global_allocator;
-    screen.current_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
+    screen.current_directory = copy_string(cmdx.startup_directory, *cmdx.global_allocator);
     screen.text_input.active = true;
     screen.backlog           = allocate(*cmdx.global_allocator, cmdx.backlog_size);
 
@@ -1132,6 +1135,8 @@ cmdx :: () -> s32 {
     cmdx.themes.allocator   = *cmdx.global_allocator;
     cmdx.commands.allocator = *cmdx.global_allocator;
     cmdx.screens.allocator   = *cmdx.global_allocator;
+
+    cmdx.startup_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
     
     // Register all commands
     register_all_commands(*cmdx);
