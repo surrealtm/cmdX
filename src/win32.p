@@ -10,19 +10,19 @@ PseudoConsole :: struct {
 
 Win32 :: struct {
     // The pipes which are set as the std handles while the child process is running
-    input_read_pipe:   HANDLE = INVALID_HANDLE_VALUE;
-    input_write_pipe:  HANDLE = INVALID_HANDLE_VALUE;
-    output_read_pipe:  HANDLE = INVALID_HANDLE_VALUE;
-    output_write_pipe: HANDLE = INVALID_HANDLE_VALUE;
+    input_read_pipe:   HANDLE = xx INVALID_HANDLE_VALUE;
+    input_write_pipe:  HANDLE = xx INVALID_HANDLE_VALUE;
+    output_read_pipe:  HANDLE = xx INVALID_HANDLE_VALUE;
+    output_write_pipe: HANDLE = xx INVALID_HANDLE_VALUE;
     child_closed_the_pipe: bool = false;
     
     // The actual pseudo console and the child handle.
-    pseudo_console_handle: HPCON  = INVALID_HANDLE_VALUE;
-    child_process_handle:  HANDLE = INVALID_HANDLE_VALUE;
-    job_handle:            HANDLE = INVALID_HANDLE_VALUE;
+    pseudo_console_handle: HPCON  = xx INVALID_HANDLE_VALUE;
+    child_process_handle:  HANDLE = xx INVALID_HANDLE_VALUE;
+    job_handle:            HANDLE = xx INVALID_HANDLE_VALUE;
     
     // Just a little helper required for closing the pseudo-console. See win32_drain_thread for details.
-    drain_thread: HANDLE = INVALID_HANDLE_VALUE;
+    drain_thread: HANDLE = xx INVALID_HANDLE_VALUE;
     
     previous_character_was_carriage_return: bool = false;
     time_of_last_module_name_update: s64 = 0; // Hardware time
@@ -288,28 +288,28 @@ win32_cleanup :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     
     // Close the pseudo console. The pseudo console will only close when there is no more data to be read.
     ClosePseudoConsole(screen.win32.pseudo_console_handle);
-    screen.win32.pseudo_console_handle = INVALID_HANDLE_VALUE;
+    screen.win32.pseudo_console_handle = xx INVALID_HANDLE_VALUE;
 }
 
     // After the data has been flushed, close the read pipe
     CloseHandle(screen.win32.output_read_pipe);
 
-    screen.win32.input_write_pipe = INVALID_HANDLE_VALUE;
-    screen.win32.output_read_pipe = INVALID_HANDLE_VALUE;
+    screen.win32.input_write_pipe = xx INVALID_HANDLE_VALUE;
+    screen.win32.output_read_pipe = xx INVALID_HANDLE_VALUE;
 
 #if USE_PSEUDO_CONSOLE {
     // Close the drain thread handle, which should have terminated at this point due to a broken pipe.
     CloseHandle(screen.win32.drain_thread);
-    screen.win32.drain_thread = INVALID_HANDLE_VALUE;
+    screen.win32.drain_thread = xx INVALID_HANDLE_VALUE;
 }
 
     // Close the job object
     CloseHandle(screen.win32.job_handle);
-    screen.win32.job_handle = INVALID_HANDLE_VALUE;
+    screen.win32.job_handle = xx INVALID_HANDLE_VALUE;
 
     // Close the child process handles
     CloseHandle(screen.win32.child_process_handle);
-    screen.win32.child_process_handle = INVALID_HANDLE_VALUE;
+    screen.win32.child_process_handle = xx INVALID_HANDLE_VALUE;
 
     // Set the internal state to be child-less
     screen.child_process_running = false;
@@ -393,8 +393,8 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // Close the child side handles which are not needed anymore, since the pseudo-console now owns them.
     CloseHandle(screen.win32.input_read_pipe);
     CloseHandle(screen.win32.output_write_pipe);
-    screen.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
-    screen.win32.output_write_pipe = INVALID_HANDLE_VALUE;
+    screen.win32.input_read_pipe   = xx INVALID_HANDLE_VALUE;
+    screen.win32.output_write_pipe = xx INVALID_HANDLE_VALUE;
 
     // Create the attribute list. The attribute list is used to pass the actual console handle to the child process.
     attribute_list_count: u64 = 1;
@@ -483,8 +483,8 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // Close the child side handles now, since the child has inherited and copied them.
     CloseHandle(screen.win32.input_read_pipe);
     CloseHandle(screen.win32.output_write_pipe);
-    screen.win32.input_read_pipe   = INVALID_HANDLE_VALUE;
-    screen.win32.output_write_pipe = INVALID_HANDLE_VALUE;
+    screen.win32.input_read_pipe   = xx INVALID_HANDLE_VALUE;
+    screen.win32.output_write_pipe = xx INVALID_HANDLE_VALUE;
 }
 
     // Prepare the cmdx internal state
