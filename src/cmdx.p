@@ -66,6 +66,7 @@ CmdX_Screen :: struct {
     text_input: Text_Input;
     history: [..]string;
     history_index: s64 = -1; // -1 means no history is used
+    history_size: s64; // Similar to the backlog_size, this gets copied from the global cmdx setting.
     
     // Auto complete
     auto_complete_options: [..]string;
@@ -76,7 +77,7 @@ CmdX_Screen :: struct {
     // Backlog
     backlog: *s8 = ---;
     backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
-
+    
     colors: [..]Color_Range;
     lines: [..]Source_Range;
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
@@ -131,9 +132,8 @@ CmdX :: struct {
     commands: [..]Command;
     config: Config;
     
-    // Global config variables   @Cleanup maybe copy all of these into each created screen to avoid having to
-    // pass cmdX as parameter everywhere? If these are changed by the config at runtime, a lot of stuff needs to
-    // happen anyway
+    // Global config variables. The history and backlog size are copied into each screen for easier access
+    // and also to have a definitive number which is correct, when the sizes get changed by the config.
     history_size:  s64 = 64;    // The number of history lines to keep
     backlog_size:  s64 = 65535; // The size of the backlog for each screen in bytes
     scroll_speed:  s64 = 3;     // In lines per mouse wheel turn
@@ -576,9 +576,8 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
 }
 
 add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: s8) {    
-    character_copy := character; // Since character is a register parameter, we probably cannot take the pointer to that directly... @Cleanup check if that may be possible, dunno
     string: string = ---;
-    string.data = *character_copy;
+    string.data = *character;
     string.count = 1;
     add_text(cmdx, screen, string);
 }
@@ -697,7 +696,7 @@ draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, c
 
 add_history :: (cmdx: *CmdX, screen: *CmdX_Screen, input_string: string) {
     // Make space for the new input string if that is required
-    if screen.history.count == cmdx.history_size {
+    if screen.history.count == screen.history_size {
         head := array_get_value(*screen.history, screen.history.count - 1);
         free_string(head, *cmdx.global_allocator);
         array_remove(*screen.history, screen.history.count - 1);
@@ -1108,6 +1107,7 @@ create_screen :: (cmdx: *CmdX) -> s64 {
     screen.text_input.active = true;
     screen.backlog_size      = cmdx.backlog_size;
     screen.backlog           = allocate(*cmdx.global_allocator, screen.backlog_size);
+    screen.history_size      = cmdx.history_size;
     
     // Set up the backlog for this screen
     clear_backlog(cmdx, screen);
@@ -1283,6 +1283,7 @@ update_history_size :: (cmdx: *CmdX) {
     for it := cmdx.screens.first; it; it = it.next {
         screen := *it.data;
         if screen.history.count > cmdx.history_size    array_remove_range(*screen.history, cmdx.history_size, screen.history.count - 1);
+        screen.history_size = cmdx.history_size;
     }
 }
 
