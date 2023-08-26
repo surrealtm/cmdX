@@ -55,7 +55,7 @@ remove_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
 }
 
 reload_config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
-    reload_config(cmdx);
+    reload_config(cmdx, true);
 }
 
 split_screen_handler :: (cmdx: *CmdX, argument_values: *[..]string) {

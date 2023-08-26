@@ -43,7 +43,9 @@ Config :: struct {
     properties: [..]Property;
     actions: [..]Action;
     
+    accumulate_errors: bool; // When the config file is currently being read, then all errors should be accumulated and reported together for better formatting. If some other process uses the config_error, then it should be immediately printed onto the screen.
     error_messages: [..]string;
+
     last_modification_check: s64; // In hardware time. Do not check the file for modification each frame, as that is unnecessary and expensive. Instead, check in regular intervals
     last_modification_time: s64; // In File Time (see File_Information). This is compared against the filesystems idea of the last modification time, and if the stored time is older, then the config gets reloaded and this time updated.
 }
@@ -177,6 +179,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     // Set the proper allocat for both arrays
     config.properties.allocator = config.allocator;
     config.actions.allocator    = config.allocator;
+    config.accumulate_errors    = true;
     
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
@@ -298,7 +301,7 @@ check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
         if success && config.last_modification_time < file_info.last_modified_time {
             // If the file has changed since the last time we read it, then reload the config.
             // This will set the last modification time for this config.
-            reload_config(cmdx);
+            reload_config(cmdx, false);
         }
     }
 }
@@ -323,7 +326,7 @@ free_config_data :: (config: *Config) {
     array_clear(*config.actions);
 }
 
-reload_config :: (cmdx: *CmdX) {
+reload_config :: (cmdx: *CmdX, reload_command: bool) {
     // Free and reload the config
     free_config_data(*cmdx.config);
     read_config_file(cmdx, *cmdx.config, CONFIG_FILE_NAME);
@@ -337,20 +340,27 @@ reload_config :: (cmdx: *CmdX) {
     set_window_position_and_size(*cmdx.window, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.width, cmdx.window.height, cmdx.window.maximized); // The config changes all the attributes of the window directly, but of course changing them does not have an immediate effect, so we need to actually tell win32 about that change
     adjust_screen_rectangles(cmdx);
 
-    flush_config_errors(cmdx, true); // Now display any config errors that may have been encountered during the last parse
+    flush_config_errors(cmdx, reload_command); // Now display any config errors that may have been encountered during the last parse
     render_next_frame(cmdx);
 }
 
 
 config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
-    // Since the cmdx backbuffer has not been set up at the time the config gets loaded (since the backbuffer
-    // size actually depends on the config, and so on...), we can't just add messages to the backlog.
-    // Instead, print them out on the console (in case cmdx actually has a console attached), and add them
-    // to a list which will be printed to the actual backbuffer once it has been set up.
-    size := query_required_print_buffer_size(format, ..parameters);
-    string := allocate_string(size, Default_Allocator);
-    mprint(string, format, ..parameters);
-    array_add(*cmdx.config.error_messages, string);
+    if !cmdx.setup || cmdx.config.accumulate_errors {
+        // Since the cmdx backbuffer has not been set up at the time the config gets loaded (since the backbuffer
+        // size actually depends on the config, and so on...), we can't just add messages to the backlog.
+        // Instead, print them out on the console (in case cmdx actually has a console attached), and add them
+        // to a list which will be printed to the actual backbuffer once it has been set up.
+        size := query_required_print_buffer_size(format, ..parameters);
+        string := allocate_string(size, Default_Allocator);
+        mprint(string, format, ..parameters);
+        array_add(*cmdx.config.error_messages, string);
+    } else {
+        set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
+        add_formatted_text(cmdx, cmdx.active_screen, format, ..parameters);
+        new_line(cmdx, cmdx.active_screen);
+        set_themed_color(cmdx.active_screen, .Default);    
+    }
 }
 
 // If the config was loaded in the startup, then the welcome screen has already done a new-line which this
@@ -374,5 +384,7 @@ flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
     
     set_themed_color(cmdx.active_screen, .Default);    
     array_clear(*cmdx.config.error_messages);
+    cmdx.config.accumulate_errors = false;
+
     return true;
 }
