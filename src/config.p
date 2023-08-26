@@ -1,4 +1,5 @@
 CONFIG_FILE_NAME :: ".cmdx-config";
+CONFIG_HOTLOAD_CHECK_INTERVAL: f32 : 1000; // In milliseconds
 
 Section_Type :: enum {
     Unknown :: 0;
@@ -43,6 +44,8 @@ Config :: struct {
     actions: [..]Action;
     
     error_messages: [..]string;
+    last_modification_check: s64; // In hardware time. Do not check the file for modification each frame, as that is unnecessary and expensive. Instead, check in regular intervals
+    last_modification_time: s64; // In File Time (see File_Information). This is compared against the filesystems idea of the last modification time, and if the stored time is older, then the config gets reloaded and this time updated.
 }
 
 property_type_to_string :: (type: Property_Type) -> string {
@@ -240,6 +243,13 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
             config_error(cmdx, "    Expected a section identifier.");
         }
     }
+
+    // Update the last modification time for the config
+    file_info, success := get_file_information(file_path);
+    if success {
+        config.last_modification_check = get_hardware_time();
+        config.last_modification_time = file_info.last_modified_time;
+    }
     
     return true;
 }
@@ -277,6 +287,23 @@ write_config_file :: (config: *Config, file_path: string) {
     close_file_printer(*file_printer);
 }
 
+check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
+    current_hardware_time := get_hardware_time();
+    time_since_last_check := convert_hardware_time(current_hardware_time - config.last_modification_check, .Milliseconds);
+
+    if time_since_last_check > CONFIG_HOTLOAD_CHECK_INTERVAL {
+        file_info, success := get_file_information(CONFIG_FILE_NAME); // @@Speed maybe only query the time here, not the complete file information.
+        config.last_modification_check = current_hardware_time;
+        
+        if success && config.last_modification_time < file_info.last_modified_time {
+            // If the file has changed since the last time we read it, then reload the config.
+            // This will set the last modification time for this config.
+            reload_config(cmdx);
+        }
+    }
+}
+
+
 // Free all allocated data currently in the config file. This is done to avoid memory leaks when reloading
 // the config. For now, the only allocated data are string properties.
 // The property array is created once at startup with all properties and therefore should not be cleared, only
@@ -311,6 +338,7 @@ reload_config :: (cmdx: *CmdX) {
     adjust_screen_rectangles(cmdx);
 
     flush_config_errors(cmdx, true); // Now display any config errors that may have been encountered during the last parse
+    render_next_frame(cmdx);
 }
 
 

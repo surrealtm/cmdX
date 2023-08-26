@@ -881,6 +881,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     
     // Poll window updates
     update_window(*cmdx.window);
+    check_for_config_reload(cmdx, *cmdx.config);
     
     if cmdx.window.resized {
         adjust_screen_rectangles(cmdx);
