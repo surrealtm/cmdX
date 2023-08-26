@@ -233,6 +233,10 @@ read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     action.data    = data;
 }
 
+free_action :: (action: *Action, allocator: *Allocator) {
+    if action.type == .Macro    free_string(action.data.macro_text, allocator);
+}
+
 write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
     for i := 0; i < list.count; ++i {
         action := array_get(list, i);

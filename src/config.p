@@ -1,3 +1,5 @@
+CONFIG_FILE_NAME :: ".cmdx-config";
+
 Section_Type :: enum {
     General :: 1;
     Actions;
@@ -12,17 +14,26 @@ Property_Type :: enum {
 }
 
 Property_Value :: union {
-    _string:  *string;
-    _bool: *bool;
-    _s64: *s64;
-    _u32: *u32;
-    _f32: *f32;
+    _string: *string;
+    _bool:   *bool;
+    _s64:    *s64;
+    _u32:    *u32;
+    _f32:    *f32;
+}
+
+Property_Default :: union {
+    _string: string;
+    _bool:   bool;
+    _s64:    s64;
+    _u32:    u32;
+    _f32:    f32;
 }
 
 Property :: struct {
     name: string;
     type: Property_Type;
     value: Property_Value;
+    default: Property_Default; // This is used to initialize the property whenever the config is loaded, and the value is not present in the config file. Since reloading the config can happen multiple times, the default value from when the property was created needs to be remembered
 }
 
 Config :: struct {
@@ -53,29 +64,40 @@ create_property_internal :: (config: *Config, name: string, type: Property_Type)
     return property;
 }
 
+// Strings as properties are always annoying, since they must be dynamically allocated and freed again.
+// The freeing of the the string value occurs when the config is reloaded. The value is then assigned
+// its default value, which is another string. The config could however also overwrite the value with
+// a string from the file, which needs to be freed. Therefore, all other assignments to the properties
+// value will also be freed at some point, and therefore need to be copies.
 create_string_property :: (config: *Config, name: string, value: *string) {
     property := create_property_internal(config, name, .String);
-    property.value._string = value;
+    property.value._string   = value; // Set the pointer for the property value
+    ~property.value._string  = copy_string(~value, config.allocator); // Copy the string into the value, so that this string can later be freed
+    property.default._string = copy_string(~value, config.allocator);
 }
 
 create_bool_property :: (config: *Config, name: string, value: *bool) {
     property := create_property_internal(config, name, .Bool);
-    property.value._bool = value;
+    property.value._bool   = value;
+    property.default._bool = ~value;
 }
 
 create_s64_property :: (config: *Config, name: string, value: *s64) {
     property := create_property_internal(config, name, .S64);
-    property.value._s64 = value;
+    property.value._s64   = value;
+    property.default._s64 = ~value;
 }
 
 create_u32_property :: (config: *Config, name: string, value: *u32) {
     property := create_property_internal(config, name, .U32);
-    property.value._u32 = value;
+    property.value._u32   = value;
+    property.default._u32 = ~value;
 }
 
 create_f32_property :: (config: *Config, name: string, value: *f32) {
     property := create_property_internal(config, name, .F32);
-    property.value._f32 = value;
+    property.value._f32   = value;
+    property.default._f32 = ~value;
 }
 
 find_property :: (config: *Config, name: string) -> *Property {
@@ -110,8 +132,8 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     
     switch #complete property.type {
     case .String;
-        valid = true;
         ~property.value._string = copy_string(value, config.allocator);
+        valid = true;
         
     case .Bool; ~property.value._bool, valid = string_to_bool(value);        
     case .S64;  ~property.value._s64, valid  = string_to_int(value);
@@ -130,12 +152,29 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
 }
 
 read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
+    // Set the proper allocat for both arrays
     config.properties.allocator = config.allocator;
     config.actions.allocator    = config.allocator;
     
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
-    
+
+    // Reset the default values for all properties.
+    // Only do this if the config file could indeed be found, since only then the config can successfully be
+    // reloaded. If the config file was deleted, then don't do anything (for now).
+    for i := 0; i < config.properties.count; ++i {
+        property := array_get(*config.properties, i);
+
+        switch #complete property.type {
+        case .String; ~property.value._string = copy_string(property.default._string, config.allocator);
+        case .Bool; ~property.value._bool = property.default._bool;
+        case .S64; ~property.value._s64 = property.default._s64;
+        case .U32; ~property.value._u32 = property.default._u32;
+        case .F32; ~property.value._f32 = property.default._f32;
+        }
+    }
+
+    // Start parsing the config file
     original_file_data := file_data;
     defer free_file_data(original_file_data);
     
@@ -150,7 +189,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         
         line := get_first_line(*file_data);
         
-        if line.count == 0 || line[0] == '#' continue; // Ignore commented-out lines
+        if line.count == 0 || line[0] == '#' continue; // Ignore empty or commented-out lines
         
         if line[0] == ':' && line[1] == '/' {
             // New section identifier. Try to parse the section type and move on to the next line
@@ -169,8 +208,9 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         }
         
         switch #complete current_section {
-            case .General; read_property(cmdx, config, line, line_count);
-            case .Actions; read_action(cmdx, config, line, line_count);
+        case .General; read_property(cmdx, config, line, line_count);
+        case .Actions; read_action(cmdx, config, line, line_count);
+            // @Cleanup Maybe report an error if any line outside of a section is encountered?
         }
     }
     
@@ -210,6 +250,36 @@ write_config_file :: (config: *Config, file_path: string) {
     close_file_printer(*file_printer);
 }
 
+// Free all allocated data currently in the config file. This is done to avoid memory leaks when reloading
+// the config. For now, the only allocated data are string properties.
+// The property array is created once at startup with all properties and therefore should not be cleared, only
+// data in their values should (since that will be overwritten).
+// The action array however is created through reading the config, and should therefore be cleared
+free_config_data :: (config: *Config) {
+    for i := 0; i < config.properties.count; ++i {
+        property := array_get(*config.properties, i);
+        if property.type == .String    free_string(~property.value._string, config.allocator);
+    }
+
+    for i := 0; i < config.actions.count; ++i {
+        action := array_get(*config.actions, i);
+        free_action(action, config.allocator);
+    }
+
+    array_clear(*config.actions);
+}
+
+reload_config :: (cmdx: *CmdX) {
+    // Free and reload the config
+    free_config_data(*cmdx.config);
+    read_config_file(cmdx, *cmdx.config, CONFIG_FILE_NAME);
+
+    // Now that the values of the config have been updated, we need to actually apply these new values to cmdX.
+    update_active_theme_pointer(cmdx);
+    update_font(cmdx);
+    update_backlog_size(cmdx);
+    // @Incomplete history size, window position/size/maximized
+}
 
 
 config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {

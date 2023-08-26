@@ -121,7 +121,7 @@ get_string_argument :: (argument_values: *[..]string, index: u32) -> string {
 
 get_int_argument :: (argument_values: *[..]string, index: u32) -> s64 {
     string := array_get_value(argument_values, index);
-    int, valid := string_to_int(string);
+    int, valid := string_to_int(string); // The arguments validity was already ensured in is_valid_command_argument_value before the arguments get parsed
     return int;
 }
 
@@ -245,7 +245,7 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
     // Prepare the viewport for the next command, no matter what actually happens
-    prepare_viewport(cmdx, cmdx.active_screen);
+    prepare_viewport(cmdx.active_screen);
     
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
@@ -369,7 +369,7 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 
-    debug_print(cmdx, cmdx.active_screen);
+    debug_print(cmdx.active_screen);
 }
 
 config :: (cmdx: *CmdX) {

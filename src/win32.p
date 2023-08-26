@@ -86,7 +86,7 @@ win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, de
 win32_maybe_process_carriage_return :: (parser: *Win32_Input_Parser) {
     if parser.input[parser.index] != '\n' && parser.screen.win32.previous_character_was_carriage_return {
         // If there was an \r character before this one, then effectively restart the line.
-        set_cursor_position_to_beginning_of_line(parser.cmdx, parser.screen);
+        set_cursor_position_to_beginning_of_line(parser.screen);
     }
     
     parser.screen.win32.previous_character_was_carriage_return = false;
@@ -156,7 +156,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
                     // just append spaces to the current text.
                     for i := 0; i < horizontal_offset; ++i add_character(cmdx, screen, ' ');
                 } else if horizontal_offset < 0
-                set_cursor_position_in_line(cmdx, screen, x);
+                set_cursor_position_in_line(screen, x);
             } else if compare_strings(command, "C") {
                 // Move the cursor to the right. Apparently this also produces white spaces while
                 // moving the cursor, and unfortunately the C runtime makes use of this feature...

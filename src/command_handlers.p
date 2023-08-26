@@ -54,6 +54,10 @@ remove_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     remove_macro(cmdx, trigger);
 }
 
+reload_config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    reload_config(cmdx);
+}
+
 split_screen_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     split_screen(cmdx);
 }
@@ -156,6 +160,8 @@ register_all_commands :: (cmdx: *CmdX) {
     remove_macro := register_command(cmdx, ":remove-macro", "Removes a macro from the configuration", remove_macro_handler);
     register_command_argument(remove_macro, "trigger", .Key_Code);
 
+    register_command(cmdx, ":reload-config", "Reloads the config file from disk", reload_config_handler);
+    
     register_command(cmdx, ":split-screen", "Creates a new screen", split_screen_handler);
     register_command(cmdx, ":close-screen", "Closes the current screen", close_active_screen_handler);
     
