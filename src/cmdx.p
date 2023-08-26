@@ -1415,6 +1415,4 @@ WinMain :: () -> s32 {
 }
 
 // @Incomplete edit-property command
-// @Incomplete respect hashtags as comments in the config file
-// @Incomplete reload-config command
 // @Incomplete store history in a file to restore it after program restart

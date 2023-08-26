@@ -1,6 +1,7 @@
 CONFIG_FILE_NAME :: ".cmdx-config";
 
 Section_Type :: enum {
+    Unknown :: 0;
     General :: 1;
     Actions;
 }
@@ -182,14 +183,20 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     
     line_count := 1; // Version line was already read
     
-    current_section := Section_Type.count; // Mark as "no section has been encountered yet"
+    current_section := Section_Type.Unknown; // Mark as "no section has been encountered yet"
     
     while file_data.count {
         ++line_count;
         
         line := get_first_line(*file_data);
+
+        hashtag, found_hashtag := search_string(line, '#');
+
+        if found_hashtag line = substring_view(line, 0, hashtag);
+
+        line = trim_string(line);
         
-        if line.count == 0 || line[0] == '#' continue; // Ignore empty or commented-out lines
+        if line.count == 0 continue; // Ignore empty lines. Since the line was already cut with the #-symbol for comments, and trimmed to exclude any trailing whitespace, this will catch any line that does not actually hold some content to parse
         
         if line[0] == ':' && line[1] == '/' {
             // New section identifier. Try to parse the section type and move on to the next line
@@ -210,7 +217,9 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         switch #complete current_section {
         case .General; read_property(cmdx, config, line, line_count);
         case .Actions; read_action(cmdx, config, line, line_count);
-            // @Cleanup Maybe report an error if any line outside of a section is encountered?
+        case .Unknown;
+            config_error(cmdx, "Malformed config declaration in line %:", line_count);
+            config_error(cmdx, "    Expected a section identifier.");
         }
     }
     
