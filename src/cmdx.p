@@ -1378,7 +1378,7 @@ cmdx :: () -> s32 {
     create_screen(*cmdx);
     activate_screen(*cmdx, 0);
     welcome_screen(*cmdx, cmdx.active_screen, run_tree);
-    flush_config_errors(*cmdx);
+    flush_config_errors(*cmdx, false);
     
     cmdx.setup = true;
     

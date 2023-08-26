@@ -121,6 +121,12 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     name  := trim_string_right(substring_view(line, 0, space));
     value := trim_string(substring_view(line, space + 1, line.count));
     if value.count > 1 && value[0] == '"' && value[value.count - 1] == '"' value = substring_view(value, 1, value.count - 1);
+
+    if value.count == 0 {
+        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
+        return;
+    }
     
     property := find_property(config, name);
     if !property {
@@ -136,14 +142,26 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         ~property.value._string = copy_string(value, config.allocator);
         valid = true;
         
-    case .Bool; ~property.value._bool, valid = string_to_bool(value);        
-    case .S64;  ~property.value._s64, valid  = string_to_int(value);
-    case .U32;  ~property.value._u32, valid  = string_to_int(value); 
-    case .F32;
-        double: f64;
-        double, valid = string_to_float(value);
+    case .Bool;
+        result: bool = ---;
+        result, valid = string_to_bool(value);
+        if valid ~property.value._bool = result;
 
-        if valid ~property.value._f32 = xx double;
+    case .S64;
+        result: s64 = ---;
+        result, valid = string_to_int(value);
+        if valid ~property.value._s64 = result;
+
+    case .U32;
+        result: u32 = ---;
+        result, valid = string_to_int(value); 
+        if valid ~property.value._u32 = result;
+
+    case .F32;
+        result: f64;
+        result, valid = string_to_float(value);
+
+        if valid ~property.value._f32 = xx result;
     }
     
     if !valid {
@@ -288,8 +306,11 @@ reload_config :: (cmdx: *CmdX) {
     update_font(cmdx);
     update_backlog_size(cmdx);
     update_history_size(cmdx);
+
     set_window_position_and_size(*cmdx.window, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.width, cmdx.window.height, cmdx.window.maximized); // The config changes all the attributes of the window directly, but of course changing them does not have an immediate effect, so we need to actually tell win32 about that change
     adjust_screen_rectangles(cmdx);
+
+    flush_config_errors(cmdx, true); // Now display any config errors that may have been encountered during the last parse
 }
 
 
@@ -301,12 +322,18 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
     size := query_required_print_buffer_size(format, ..parameters);
     string := allocate_string(size, Default_Allocator);
     mprint(string, format, ..parameters);
-    print(string);
     array_add(*cmdx.config.error_messages, string);
 }
 
-flush_config_errors :: (cmdx: *CmdX) {
-    if !cmdx.config.error_messages.count return;
+// If the config was loaded in the startup, then the welcome screen has already done a new-line which this
+// takes advantage of, therefore no new-line before the errors is needed. However, we would like a new-line
+// before the next text input, so do one there.
+// If the config was reloaded from a command, it is the other way around. We want a new-line before (which is
+// not there), but the command-handling automatically does one after the command, so we do not want one there.
+flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
+    if !cmdx.config.error_messages.count return false;
+
+    if reload_command new_line(cmdx, cmdx.active_screen);
     
     set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
     for i := 0; i < cmdx.config.error_messages.count; ++i {
@@ -314,9 +341,10 @@ flush_config_errors :: (cmdx: *CmdX) {
         add_line(cmdx, cmdx.active_screen, message);
         free_string(message, Default_Allocator);
     }
+
+    if !reload_command new_line(cmdx, cmdx.active_screen);
     
-    new_line(cmdx, cmdx.active_screen);
-    set_themed_color(cmdx.active_screen, .Default);
-    
+    set_themed_color(cmdx.active_screen, .Default);    
     array_clear(*cmdx.config.error_messages);
+    return true;
 }
