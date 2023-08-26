@@ -278,6 +278,7 @@ reload_config :: (cmdx: *CmdX) {
     update_active_theme_pointer(cmdx);
     update_font(cmdx);
     update_backlog_size(cmdx);
+    update_history_size(cmdx);
     // @Incomplete history size, window position/size/maximized
 }
 

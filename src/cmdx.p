@@ -1276,6 +1276,16 @@ update_backlog_size :: (cmdx: *CmdX) {
     }
 }
 
+update_history_size :: (cmdx: *CmdX) {
+    // If the history size gets shrunk down, the history log of each screen may need to be cut down to
+    // represent that change. If there are fewer entries in the log than the new size, or if the size
+    // actually increased, then there is nothing to be done.
+    for it := cmdx.screens.first; it; it = it.next {
+        screen := *it.data;
+        if screen.history.count > cmdx.history_size    array_remove_range(*screen.history, cmdx.history_size, screen.history.count - 1);
+    }
+}
+
 
 /* --- MAIN --- */
 
