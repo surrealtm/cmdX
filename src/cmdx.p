@@ -1219,9 +1219,11 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
         }
     }
     
-    // No theme with that name could be found.
+    // No theme with that name could be found. Report it back to the user.
     if cmdx.setup {
+        set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
         add_formatted_line(cmdx, cmdx.active_screen, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+        set_themed_color(cmdx.active_screen, .Default);    
     } else
         config_error(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
     
@@ -1232,7 +1234,7 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
         cmdx.active_theme = *cmdx.themes.data[0];
     }
     
-    cmdx.active_theme_name = cmdx.active_theme.name;    
+    cmdx.active_theme_name = copy_string(cmdx.active_theme.name, cmdx.config.allocator); // The config system expects to be able to deallocate this eventually
 }
 
 update_font :: (cmdx: *CmdX) {
