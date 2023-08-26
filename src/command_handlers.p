@@ -43,6 +43,12 @@ config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     config(cmdx);
 }
 
+edit_property_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    property_name := get_string_argument(argument_values, 0);
+    property_value := get_string_argument(argument_values, 1);
+    edit_property(cmdx, property_name, property_value);
+}
+
 add_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     trigger := get_key_code_argument(argument_values, 0);
     text := get_string_argument(argument_values, 1);
@@ -153,6 +159,10 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
     register_command(cmdx, ":config", "Prints information about the current config", config_handler);
 
+    edit_property := register_command(cmdx, ":edit-property", "Assigns a new value to a generic property", edit_property_handler);
+    register_command_argument(edit_property, "property_name", .String);
+    register_command_argument(edit_property, "property_value", .String);
+    
     add_macro := register_command(cmdx, ":add-macro", "Adds a new macro to the configuration", add_macro_handler);
     register_command_argument(add_macro, "trigger", .Key_Code);
     register_command_argument(add_macro, "text", .String);

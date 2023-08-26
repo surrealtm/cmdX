@@ -1414,5 +1414,4 @@ WinMain :: () -> s32 {
     return cmdx();
 }
 
-// @Incomplete edit-property command
 // @Incomplete store history in a file to restore it after program restart

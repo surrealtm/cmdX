@@ -401,6 +401,20 @@ config :: (cmdx: *CmdX) {
     }
 }
 
+edit_property :: (cmdx: *CmdX, property_name: string, property_value: string) {
+    property := find_property(*cmdx.config, property_name);
+    if !property {
+        add_formatted_line(cmdx, cmdx.active_screen, "No property named '%' exists in the config.", property_name);
+        return;
+    }
+
+    if !assign_property_value_from_string(*cmdx.config, property, property_value) {
+        add_formatted_line(cmdx, cmdx.active_screen, "The specified value '%' for the property '%' is not valid, expected a % value.", property_value, property.name, property_type_to_string(property.type));
+    }
+
+    apply_config_changes(cmdx);
+}
+
 add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
     if find_action_with_trigger(cmdx, trigger) != null {
         add_formatted_line(cmdx, cmdx.active_screen, "An action bound to trigger '%' already exists.", key_code_to_string(trigger));

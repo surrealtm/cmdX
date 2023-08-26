@@ -115,6 +115,39 @@ find_property :: (config: *Config, name: string) -> *Property {
     return null;
 }
 
+assign_property_value_from_string :: (config: *Config, property: *Property, value_string: string) -> bool {
+    valid := false;
+    
+    switch #complete property.type {
+    case .String;
+        ~property.value._string = copy_string(value_string, config.allocator);
+        valid = true;
+        
+    case .Bool;
+        result: bool = ---;
+        result, valid = string_to_bool(value_string);
+        if valid ~property.value._bool = result;
+
+    case .S64;
+        result: s64 = ---;
+        result, valid = string_to_int(value_string);
+        if valid ~property.value._s64 = result;
+
+    case .U32;
+        result: u32 = ---;
+        result, valid = string_to_int(value_string); 
+        if valid ~property.value._u32 = result;
+
+    case .F32;
+        result: f64 = ---;
+        result, valid = string_to_float(value_string);
+
+        if valid ~property.value._f32 = xx result;
+    }
+
+    return valid;
+}
+
 read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     space, found_space := search_string(line, ' ');
     if !found_space {
@@ -139,35 +172,8 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         config_error(cmdx, "   Property name '%' is unknown.", name);
         return;
     }
-    
-    valid := false;
-    
-    switch #complete property.type {
-    case .String;
-        ~property.value._string = copy_string(value, config.allocator);
-        valid = true;
-        
-    case .Bool;
-        result: bool = ---;
-        result, valid = string_to_bool(value);
-        if valid ~property.value._bool = result;
 
-    case .S64;
-        result: s64 = ---;
-        result, valid = string_to_int(value);
-        if valid ~property.value._s64 = result;
-
-    case .U32;
-        result: u32 = ---;
-        result, valid = string_to_int(value); 
-        if valid ~property.value._u32 = result;
-
-    case .F32;
-        result: f64;
-        result, valid = string_to_float(value);
-
-        if valid ~property.value._f32 = xx result;
-    }
+    valid := assign_property_value_from_string(config, property, value);
     
     if !valid {
         config_error(cmdx, "Malformed config property in line %:", line_count);
@@ -332,6 +338,13 @@ reload_config :: (cmdx: *CmdX, reload_command: bool) {
     read_config_file(cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Now that the values of the config have been updated, we need to actually apply these new values to cmdX.
+    apply_config_changes(cmdx);
+    
+    flush_config_errors(cmdx, reload_command); // Now display any config errors that may have been encountered during the last parse
+    render_next_frame(cmdx);
+}
+
+apply_config_changes :: (cmdx: *CmdX) {
     update_active_theme_pointer(cmdx);
     update_font(cmdx);
     update_backlog_size(cmdx);
@@ -339,9 +352,6 @@ reload_config :: (cmdx: *CmdX, reload_command: bool) {
 
     set_window_position_and_size(*cmdx.window, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.width, cmdx.window.height, cmdx.window.maximized); // The config changes all the attributes of the window directly, but of course changing them does not have an immediate effect, so we need to actually tell win32 about that change
     adjust_screen_rectangles(cmdx);
-
-    flush_config_errors(cmdx, reload_command); // Now display any config errors that may have been encountered during the last parse
-    render_next_frame(cmdx);
 }
 
 
