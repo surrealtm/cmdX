@@ -63,7 +63,7 @@ destroy_renderer :: (renderer: *Renderer) {
 prepare_renderer :: (renderer: *Renderer, theme: *Theme, font: *Font, window: *Window) {
     renderer.width  = window.width;
     renderer.height = window.height;
-    renderer.projection_matrix   = make_orthographic_projection_matrix(xx renderer.width / 2, xx renderer.height / -2, -1, 1); // The coordinate space for this application is a bit different than for games, here we want positive y to mean downwards...
+    renderer.projection_matrix = make_orthographic_projection_matrix(xx renderer.width / 2, xx renderer.height / -2, -1, 1); // The coordinate space for this application is a bit different than for games, here we want positive y to mean downwards...
     renderer.font_texture_handle = font.texture.handle;
 
     glViewport(0, 0, renderer.width, renderer.height);

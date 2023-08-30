@@ -117,6 +117,7 @@ CmdX :: struct {
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
     render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
     ui: UI = ---;
+    disabled_title_bar: bool = false; // The user can toggle the window's title bar, since not having it may look cleaner, but disables window movement.
     
     // Font
     font_size: s64 = 15;
@@ -881,10 +882,28 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // Poll window updates
     update_window(*cmdx.window);
     check_for_config_reload(cmdx, *cmdx.config);
+
+    if cmdx.window.moved {
+        // Because sometimes windows is a little bitch, when resizing a window
+        // which is partially outside of the desktop frame, things go bad and we need to re-render.
+        render_next_frame(cmdx);
+    }
     
     if cmdx.window.resized {
         adjust_screen_rectangles(cmdx);
         render_next_frame(cmdx); // If the window got resized, render the next frame
+    }
+
+    if cmdx.window.key_pressed[Key_Code.F11] {
+        cmdx.disabled_title_bar = !cmdx.disabled_title_bar;
+        
+        if cmdx.disabled_title_bar    set_window_style(*cmdx.window, .Hide_Title_Bar);
+        else set_window_style(*cmdx.window, .Platform_Default);
+
+        // By changing the window style, the window size changes, meaning text layout changes, therefore
+        // the next frame should be rendered
+        adjust_screen_rectangles(cmdx);
+        render_next_frame(cmdx);
     }
     
     if cmdx.window.focused && !cmdx.active_screen.text_input.active render_next_frame(cmdx); // If the user just tabbed back into cmdx, make sure to render one frame
@@ -1059,7 +1078,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.render_frame || cmdx.render_ui {    
         // Actually prepare the renderer now if we want to render this screen.
         prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
-        
+
         // Draw all screens at their position
         for it := cmdx.screens.first; it != null; it = it.next {
             draw_cmdx_screen(cmdx, *it.data);
@@ -1087,8 +1106,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.requested_fps == 0 requested_frame_time = 0; // Unlimited fps
     
     if active_frame_time < requested_frame_time - 1 {
-        time_to_sleep: f32 = requested_frame_time - active_frame_time;
-        Sleep(xx floorf(time_to_sleep) - 1);
+        time_to_sleep: s32 = xx floorf(requested_frame_time - active_frame_time) - 1;
+        Sleep(time_to_sleep);        
     }
 }
 
@@ -1332,7 +1351,8 @@ cmdx :: () -> s32 {
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
-    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized); // The title will be replaced when the first screen gets created
+    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized, .Platform_Default); // The title will be replaced when the first screen gets created
+
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
     render_next_frame(*cmdx);
