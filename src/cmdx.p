@@ -1267,7 +1267,13 @@ update_active_theme_pointer :: (cmdx: *CmdX) {
 
 update_font :: (cmdx: *CmdX) {
     destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
-    create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+    success := create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+
+    if !success {
+        config_error(cmdx, "The font '%' could not be found, reverting back to default '%'.", cmdx.font_path, COURIER_NEW);
+        cmdx.font_path = COURIER_NEW;
+        create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+    }
 }
 
 update_active_process_name :: (cmdx: *CmdX, screen: *CmdX_Screen, process_name: string) {
@@ -1375,7 +1381,7 @@ cmdx :: () -> s32 {
     set_window_icon(*cmdx.window, "data/cmdx.ico");
     
     // Load the font
-    create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+    update_font(*cmdx);
     
     // Create the builtin themes
     create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });

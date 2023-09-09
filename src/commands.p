@@ -351,7 +351,7 @@ font_size :: (cmdx: *CmdX, size: u32) {
 
 font_name :: (cmdx: *CmdX, path: string) {
     free_string(cmdx.font_path, cmdx.config.allocator);
-    cmdx.font_path = copy_string(path, cmdx.config.allocator);
+    cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
     update_font(cmdx);
 }
 
@@ -362,6 +362,10 @@ debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
 }
 
 debug :: (cmdx: *CmdX) {
+    working_directory := get_working_directory();
+    add_formatted_line(cmdx, cmdx.active_screen, "CmdX working directory: %", working_directory);
+    free_string(working_directory, Default_Allocator);
+
     static_size, static_size_unit := convert_to_biggest_memory_unit(size_of(CmdX));
     add_formatted_line(cmdx, cmdx.active_screen, "Static memory usage: %*%", static_size, memory_unit_string(static_size_unit));
 
