@@ -55,12 +55,6 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
 }
 
 print_command_syntax :: (cmdx: *CmdX, command: *Command) {
-    print_buffer: Print_Buffer = ---;
-    print_buffer.size = 0;
-    print_buffer.output_handle = 0;
-    
-    bprint(*print_buffer, " > %", command.name);
-    
     builder: String_Builder;
     create_string_builder(*builder, *cmdx.frame_memory_arena);
     append_format(*builder, " > %", command.name);
@@ -80,6 +74,24 @@ print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     }
     
     append_format(*builder, "      // %", command.description);
+    add_line(cmdx, cmdx.active_screen, finish_string_builder(*builder));
+}
+
+print_command_aliases :: (cmdx: *CmdX, command: *Command) {
+    if !command.aliases.count return;
+
+    builder: String_Builder;
+    create_string_builder(*builder, *cmdx.frame_memory_arena);
+
+    append_string(*builder, " AKA > ");
+    
+    for i := 0; i < command.aliases.count; ++i {
+        alias := array_get_value(*command.aliases, i);
+        append_string(*builder, alias);
+
+        if i + 1 < command.aliases.count   append_string(*builder, ", ");
+    }
+
     add_line(cmdx, cmdx.active_screen, finish_string_builder(*builder));
 }
 
@@ -246,6 +258,7 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 handle_input_string :: (cmdx: *CmdX, input: string) {
     // Prepare the viewport for the next command, no matter what actually happens
     prepare_viewport(cmdx.active_screen);
+    my_screen := cmdx.active_screen; // The active screen pointer may be updated during the command handling, but we always want to refer to this one here.
     
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);
@@ -267,7 +280,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
             command_found = true;
-            close_viewport(cmdx, cmdx.active_screen);
+            close_viewport(cmdx, my_screen);
             break;
         }
     }
@@ -291,7 +304,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         
         command_string := finish_string_builder(*string_builder);
         
-        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx, cmdx.active_screen); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
+        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx, my_screen); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
     }    
 }
 
@@ -314,6 +327,7 @@ help :: (cmdx: *CmdX, command_name: string) {
         command := find_command_by_name(cmdx, command_name);
         if command {
             print_command_syntax(cmdx, command);
+            print_command_aliases(cmdx, command);
         } else {
             add_formatted_line(cmdx, cmdx.active_screen, "No command could be found under the name '%'.", command_name);
         }
@@ -446,7 +460,7 @@ split_screen :: (cmdx: *CmdX) {
 }
 
 close_active_screen :: (cmdx: *CmdX) {
-    if cmdx.screens.count > 1 close_screen(cmdx, cmdx.active_screen);
+    if cmdx.screens.count > 1 cmdx.active_screen.marked_for_closing = true;
 }
 
 ls :: (cmdx: *CmdX, directory: string) {

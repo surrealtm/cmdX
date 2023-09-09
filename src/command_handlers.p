@@ -189,7 +189,7 @@ register_all_commands :: (cmdx: *CmdX) {
     cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path", create_file_handler);
     register_command_argument(cf, "file_path", .String);
 
-    cbf := register_command(cmdx, "create_big_file", "Creates a new big file with random content for testing purposes.", create_big_file_handler);
+    cbf := register_command(cmdx, "create_big_file", "Creates a new big file with random content for testing purposes", create_big_file_handler);
     register_command_argument(cbf, "file_path", .String);
     register_command_argument(cbf, "file_size", .Integer);
     

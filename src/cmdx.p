@@ -61,6 +61,7 @@ Color_Range :: struct {
 CmdX_Screen :: struct {
     // Screen rectangle
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
+    marked_for_closing: bool = false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
     
     // Text Input
     text_input: Text_Input;
@@ -939,7 +940,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.Comma]  activate_next_screen(cmdx);
     
     // Close the current screen if ctrl+0 was pressed.
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._0] && cmdx.screens.count > 1  close_screen(cmdx, cmdx.active_screen);
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._0] && cmdx.screens.count > 1  cmdx.active_screen.marked_for_closing = true;
     
     if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._1] create_and_activate_screen(cmdx);
     
@@ -1074,6 +1075,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if previous_scroll_offset != screen.scroll_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
     
+    // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
+    // time
+    for it := cmdx.screens.first; it != null; it = it.next {
+        if it.data.marked_for_closing    close_screen(cmdx, *it.data);
+    }        
+
     if cmdx.render_frame || cmdx.render_ui {    
         // Actually prepare the renderer now if we want to render this screen.
         prepare_renderer(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *cmdx.window);
