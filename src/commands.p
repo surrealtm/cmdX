@@ -383,6 +383,7 @@ config :: (cmdx: *CmdX) {
         case .String; add_formatted_line(cmdx, cmdx.active_screen, "\"%\"", ~property.value._string);
         case .Bool;   add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._bool);
         case .S64;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._s64);
+        case .S32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._s32);
         case .U32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._u32);
         case .F32;    add_formatted_line(cmdx, cmdx.active_screen, "%", ~property.value._f32);
         }

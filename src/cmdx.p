@@ -410,10 +410,6 @@ remove_all_overlapping_lines_and_color_ranges :: (screen: *CmdX_Screen, removal_
 
 /* --- Backlog API --- */
 
-render_next_frame :: (cmdx: *CmdX) {
-    cmdx.render_frame = true;
-}
-
 get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
@@ -896,17 +892,20 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     if cmdx.window.key_pressed[Key_Code.F11] {
         cmdx.disabled_title_bar = !cmdx.disabled_title_bar;
-        
-        if cmdx.disabled_title_bar    set_window_style(*cmdx.window, .Hide_Title_Bar);
-        else set_window_style(*cmdx.window, .Platform_Default);
+
+        window_style := get_window_style_and_range_check_window_position_and_size(cmdx);
+        set_window_style(*cmdx.window, window_style);
 
         // By changing the window style, the window size changes, meaning text layout changes, therefore
         // the next frame should be rendered
         adjust_screen_rectangles(cmdx);
         render_next_frame(cmdx);
     }
-    
-    if cmdx.window.focused && !cmdx.active_screen.text_input.active render_next_frame(cmdx); // If the user just tabbed back into cmdx, make sure to render one frame
+
+    // If the user just tabbed in or out of cmdx, render the next frame so that the cursor filling
+    // state is not stale. This indicates visually to the user whether cmdx is currently focused
+    // and ready for keyboard input.
+    if cmdx.window.focused != cmdx.active_screen.text_input.active render_next_frame(cmdx);    
     
     if cmdx.render_ui {
         // Prepare the ui
@@ -1199,6 +1198,19 @@ adjust_screen_rectangles :: (cmdx: *CmdX) {
 
 /* --- SETUP CODE --- */
 
+render_next_frame :: (cmdx: *CmdX) {
+    cmdx.render_frame = true;
+}
+
+get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Window_Style_Flags {
+    // Calculate the window style flags
+    window_style: Window_Style_Flags;
+    if cmdx.window.maximized window_style |= .Maximized;
+    if cmdx.disabled_title_bar    window_style |= .Hide_Title_Bar;
+    else window_style |= .Default;    
+    return window_style;
+}
+
 welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {    
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
     
@@ -1342,8 +1354,9 @@ cmdx :: () -> s32 {
     create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name);
     create_string_property(*cmdx.config, "font-name", *cmdx.font_path);
     create_s64_property(*cmdx.config, "font-size",     *cmdx.font_size);
-    create_u32_property(*cmdx.config, "window-x",      *cmdx.window.xposition);
-    create_u32_property(*cmdx.config, "window-y",      *cmdx.window.yposition);
+    create_bool_property(*cmdx.config, "window-borderless", *cmdx.disabled_title_bar);
+    create_s32_property(*cmdx.config, "window-x",      *cmdx.window.xposition);
+    create_s32_property(*cmdx.config, "window-y",      *cmdx.window.yposition);
     create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width);
     create_u32_property(*cmdx.config, "window-height", *cmdx.window.height);
     create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized);
@@ -1351,7 +1364,8 @@ cmdx :: () -> s32 {
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
     
     // Create the window and the renderer
-    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized, .Platform_Default); // The title will be replaced when the first screen gets created
+    window_style := get_window_style_and_range_check_window_position_and_size(*cmdx);
+    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, window_style); // The title will be replaced when the first screen gets created
 
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);

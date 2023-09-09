@@ -11,6 +11,7 @@ Property_Type :: enum {
     String;
     Bool;
     S64;
+    S32;
     U32;
     F32;
 }
@@ -19,6 +20,7 @@ Property_Value :: union {
     _string: *string;
     _bool:   *bool;
     _s64:    *s64;
+    _s32:    *s32;
     _u32:    *u32;
     _f32:    *f32;
 }
@@ -27,6 +29,7 @@ Property_Default :: union {
     _string: string;
     _bool:   bool;
     _s64:    s64;
+    _s32:    s32;
     _u32:    u32;
     _f32:    f32;
 }
@@ -56,7 +59,7 @@ property_type_to_string :: (type: Property_Type) -> string {
     switch #complete type {
     case .String; result = "String";
     case .Bool; result = "Bool";
-    case .S64, .U32; result = "Integer";        
+    case .S64, .S32, .U32; result = "Integer";        
     case .F32; result = "Float";
     }
     
@@ -92,6 +95,12 @@ create_s64_property :: (config: *Config, name: string, value: *s64) {
     property := create_property_internal(config, name, .S64);
     property.value._s64   = value;
     property.default._s64 = ~value;
+}
+
+create_s32_property :: (config: *Config, name: string, value: *s32) {
+    property := create_property_internal(config, name, .S32);
+    property.value._s32   = value;
+    property.default._s32 = ~value;
 }
 
 create_u32_property :: (config: *Config, name: string, value: *u32) {
@@ -133,6 +142,11 @@ assign_property_value_from_string :: (config: *Config, property: *Property, valu
         result, valid = string_to_int(value_string);
         if valid ~property.value._s64 = result;
 
+    case .S32;
+        result: s32 = ---;
+        result, valid = string_to_int(value_string);
+        if valid ~property.value._s32 = result;
+        
     case .U32;
         result: u32 = ---;
         result, valid = string_to_int(value_string); 
@@ -200,6 +214,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         case .String; ~property.value._string = copy_string(property.default._string, config.allocator);
         case .Bool; ~property.value._bool = property.default._bool;
         case .S64; ~property.value._s64 = property.default._s64;
+        case .S32; ~property.value._s32 = property.default._s32;
         case .U32; ~property.value._u32 = property.default._u32;
         case .F32; ~property.value._f32 = property.default._f32;
         }
@@ -281,6 +296,7 @@ write_config_file :: (config: *Config, file_path: string) {
         case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
         case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
         case .S64;     bprint(*file_printer, "%", ~property.value._s64);
+        case .S32;     bprint(*file_printer, "%", ~property.value._s32);
         case .U32;     bprint(*file_printer, "%", ~property.value._u32);
         case .F32;     bprint(*file_printer, "%", ~property.value._f32);
         }
