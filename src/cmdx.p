@@ -1158,25 +1158,12 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
 welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {    
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
 
-    /*
     set_themed_color(screen, .Accent);
     add_line(cmdx, screen, "    Welcome to cmdX.");
     set_themed_color(screen, .Default);    
     add_line(cmdx, screen, "Use the :help command as a starting point.");    
     add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
     new_line(cmdx, screen);    
-*/ // @nocheckin
-
-    for i := 0; i < cmdx.backlog_size; ++i {
-        if i % 40 == 0 {
-            new_line(cmdx, screen);
-            set_true_color(screen, .{ (i / 40) * 20, ((i + 100) / 40) * 20, 255, 255 });
-        }
-
-        add_character(cmdx, screen, 'a');
-    }
-
-    new_line(cmdx, screen);
 }
 
 get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
