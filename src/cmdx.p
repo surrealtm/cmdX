@@ -295,7 +295,7 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
             // new one.
             if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
             total_removed_range.one_plus_last = existing_line.one_plus_last;
-            total_removed_range.wrapped      |= existing_line.wrapped;
+            total_removed_range.wrapped       = total_removed_range.one_plus_last < total_removed_range.first;
             array_remove(*screen.lines, 0);
         } else {
             // If the new line does not collide with the current source range, then there is enough space
@@ -329,83 +329,6 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
     }
         
     return array_get(*screen.lines, screen.lines.count - 1);
-}
-
-// When the backlog gets shrunken down, all lines that used that part of the backlog that will be removed
-// must be deleted. This differs from the behaviour above, since the procedure above only makes sure there
-// is enough space for the new source range specified.
-remove_all_overlapping_lines_and_color_ranges :: (screen: *CmdX_Screen, removal_range: Source_Range) {
-    // When removing colors, dealing with wrapped removal ranges gives a bit of a headache, but that should
-    // never even happen anyway, so just make sure here.
-    assert(!removal_range.wrapped, "The removal range was expected to not wrap for more simplicity.");
-    
-    // Remove all lines that overlap with the removed part of the backlog
-    line_index := 0;
-
-    while line_index < screen.lines.count {
-        existing_line := array_get(*screen.lines, line_index);
-
-        if source_ranges_overlap(~existing_line, removal_range) {
-            array_remove(*screen.lines, line_index);
-        } else
-            ++line_index;
-    }
-
-    // Remove all colors that are enclosed by the removed part of the backlog. If a color range only overlaps
-    // with the removal range, then modify the end points of the range to be outside of the removal range.
-    color_index := 0;
-
-    while color_index < screen.colors.count {
-        existing_color := array_get(*screen.colors, color_index);
-
-        if screen.colors.count > 1 && (source_range_empty(existing_color.source) || source_range_enclosed(screen, existing_color.source, removal_range)) {
-            // The color range is completely enclosed and therefore useless from now on. Remove it from the array
-            array_remove(*screen.colors, color_index);
-        } else if source_ranges_overlap(existing_color.source, removal_range) {
-            // If the color range overlaps with the range to remove, but it is not enclosed, then that color
-            // range is still partly used and cannot be removed. Instead, fit the color range around the removed
-            // range.
-            if existing_color.source.wrapped {
-                if existing_color.source.first > removal_range.first && removal_range.one_plus_last == screen.backlog_size {
-                    //  ---       ---   existing_color
-                    //  | | | | | | |   backlog
-                    //         ******   removal_range
-                    existing_color.source.first   = 0;
-                    existing_color.source.wrapped = false;
-                } else if existing_color.source.first > removal_range.first && removal_range.one_plus_last < screen.backlog_size {
-                    //  ---       ---   existing_color
-                    //  | | | | | | |   backlog
-                    //        *****     removal_range
-                    existing_color.source.first = removal_range.one_plus_last;
-                } else if existing_color.source.one_plus_last > removal_range.first && removal_range.first == 0 {
-                    //  ---       ---   existing_color
-                    //  | | | | | | |   backlog
-                    //  ******          removal_range
-                    existing_color.source.one_plus_last = screen.backlog_size;
-                    existing_color.source.wrapped = false;
-                } else if existing_color.source.one_plus_last > removal_range.first && removal_range.first > 0 {
-                    //  ---       ---   existing_color
-                    //  | | | | | | |   backlog
-                    //    ******        removal_range
-                    existing_color.source.one_plus_last = removal_range.first;
-                }
-            } else {
-                //     -----        existing_color
-                //  | | | | | | |   backlog
-                //         ******   removal_range
-                if existing_color.source.first < removal_range.first && existing_color.source.one_plus_last > removal_range.first
-                    existing_color.source.one_plus_last = removal_range.first;
-
-
-                //     -----        existing_color
-                //  | | | | | | |   backlog
-                //  ******          removal_range
-                if existing_color.source.one_plus_last >= removal_range.one_plus_last && existing_color.source.first < removal_range.one_plus_last
-                    existing_color.source.first = removal_range.one_plus_last;
-            }
-        } else
-            ++color_index;
-    }
 }
 
 
@@ -549,7 +472,7 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
         current_line.one_plus_last = current_line.first;
         
         color_head := array_get(*screen.colors, screen.colors.count - 1);
-        color_head.source.one_plus_last = current_line.first;        
+        color_head.source.one_plus_last = current_line.first;
         return;
     }
     
@@ -569,6 +492,7 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     
     color_head := array_get(*screen.colors, screen.colors.count - 1);
     color_head.source.one_plus_last = current_line.one_plus_last;
+    color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
     
     render_next_frame(cmdx);
 }
@@ -629,7 +553,9 @@ set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Col
         } else if !compare_color_range(~color_head, true_color, color_index) {
             // If this newly set color is different than the previous color (which is getting used), append
             // a new color range to the list
-            range: Color_Range = .{ .{ color_head.source.one_plus_last, color_head.source.one_plus_last, false }, color_index, true_color };
+            first := color_head.source.one_plus_last;
+            if first == screen.backlog_size first = 0; // one_plus_last can go one over the backlog bounds, but first cannot, so detect that edge case here
+            range: Color_Range = .{ .{ first, first, false }, color_index, true_color };
             array_add(*screen.colors, range);
         }
     } else {
@@ -681,14 +607,25 @@ draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, c
             ~color_range_index += 1;
             ~color_range = array_get_value(*screen.colors, ~color_range_index);
             
-            // Set the actual foreground color. If the color range has a 
+            // Set the actual foreground color.
             activate_color_range(cmdx, color_range);
         }
         
         render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
         if cursor + 1 < end     cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[cursor + 1]);
     }
-    
+
+    if end == color_range.source.one_plus_last {
+        // There is an edge case where the color range's one_plus_last == backlog_size, and so the cursor
+        // never reaches one_plus_last in the above loop, therefore the color range never gets skipped.
+        // Deal with this edge case here.
+        ~color_range_index += 1;
+        ~color_range = array_get_value(*screen.colors, ~color_range_index);
+        
+        // Set the actual foreground color.
+        activate_color_range(cmdx, color_range);
+    }
+        
     return cursor_x, cursor_y;
 }
 
@@ -1220,13 +1157,26 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
 
 welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {    
     config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
-    
+
+    /*
     set_themed_color(screen, .Accent);
     add_line(cmdx, screen, "    Welcome to cmdX.");
     set_themed_color(screen, .Default);    
     add_line(cmdx, screen, "Use the :help command as a starting point.");    
     add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
     new_line(cmdx, screen);    
+*/ // @nocheckin
+
+    for i := 0; i < cmdx.backlog_size; ++i {
+        if i % 40 == 0 {
+            new_line(cmdx, screen);
+            set_true_color(screen, .{ (i / 40) * 20, ((i + 100) / 40) * 20, 255, 255 });
+        }
+
+        add_character(cmdx, screen, 'a');
+    }
+
+    new_line(cmdx, screen);
 }
 
 get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
