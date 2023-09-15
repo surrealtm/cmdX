@@ -456,7 +456,8 @@ remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
 }
 
 split_screen :: (cmdx: *CmdX) {
-    create_and_activate_screen(cmdx);
+    screen := create_screen(cmdx);
+    activate_screen(cmdx, screen);
 }
 
 close_active_screen :: (cmdx: *CmdX) {
