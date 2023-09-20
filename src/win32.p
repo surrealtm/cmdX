@@ -84,6 +84,8 @@ win32_get_input_parser_parameter :: (parser: *Win32_Input_Parser, index: s64, de
 }
 
 win32_maybe_process_carriage_return :: (parser: *Win32_Input_Parser) {
+    if parser.index + 1 < parser.input.count && parser.input[parser.index] == 0x1b && (parser.input[parser.index + 1] == 0x5b || parser.input[parser.index + 1] == 0x5d) return; // If this is a special escape sequence, then ignore any carriage return thing. Sometimes windows put the \r before, and the corresponding \n after the escape sequence. Smh.
+
     if parser.input[parser.index] != '\n' && parser.screen.win32.previous_character_was_carriage_return {
         // If there was an \r character before this one, then effectively restart the line.
         set_cursor_position_to_beginning_of_line(parser.screen);
@@ -99,10 +101,10 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
     parser.input = input;
     parser.index = 0;
     
-    while parser.index < parser.input.count {
+    while parser.index < parser.input.count {       
         win32_maybe_process_carriage_return(*parser);
         
-        if parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5b { // 0x1b is 'ESCAPE',0x5b is '['
+        if parser.index + 1 < parser.input.count && parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5b { // 0x1b is 'ESCAPE',0x5b is '['
             // Parse an escape sequence. An escape sequence is a number [0,n] of parameters,
             // seperated by semicolons, followed by the actual command string.
             parser.index += 2;
@@ -169,7 +171,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
             } else {
                 //print("Unhandled command: %\n", command);
             }
-        } else if parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5d {
+        } else if parser.index + 1 < parser.input.count && parser.input[parser.index] == 0x1b && parser.input[parser.index + 1] == 0x5d {
             // Window title, skip until the string terminator, which is marked as either
             // as 'ESCAPE' ']'  (0x1b, 0x5c), or as 'BEL' (0x7)
             parser.index += 2;
