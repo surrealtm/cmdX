@@ -196,8 +196,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
             // If the child outputted tabs, translate them to spaces for better consistency.
             for i := 0; i < 4; ++i add_character(cmdx, screen, ' ');
             ++parser.index;
-        } else {            
-            // If this was just a normal character, skip it.
+        } else {
             add_character(cmdx, screen, parser.input[parser.index]);
             ++parser.index;
         }
