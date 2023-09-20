@@ -613,7 +613,10 @@ draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, c
         }
 
         render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, xx draw_single_glyph, xx *cmdx.renderer);
-        if cursor + 1 < end     cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[cursor + 1]);
+        if cursor + 1 < end
+            cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[cursor + 1]);
+        else
+            cursor_x += query_glyph_horizontal_advance(*cmdx.font, character);
     }
 
     if end == color_range.source.one_plus_last {
