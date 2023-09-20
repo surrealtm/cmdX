@@ -41,6 +41,18 @@ Win32_Input_Parser :: struct {
     parameter_count: u32;
 }
 
+
+win32_assert :: (active_screen: *CmdX_Screen, condition: bool, text: string) {
+    if condition return;
+
+    debug_print_to_file("cmdx_log.txt", active_screen);
+    c_text := to_cstring(text, Default_Allocator);
+    defer free_cstring(c_text, Default_Allocator);
+    MessageBoxA(null, c_text, cast(cstring) "Assertion Failed", 0x2);
+    assert(condition, text);
+}
+
+
 win32_set_color_for_code :: (screen: *CmdX_Screen, code: u32) {
     color: Color = ---;
     actually_change_color: bool = true;
@@ -443,7 +455,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     process: PROCESS_INFORMATION;
     if !CreateProcessA(null, c_command_string, null, null, !USE_PSEUDO_CONSOLE, creation_flags, null, c_current_directory, *extended_startup_info.StartupInfo, *process) {
         error_string := win32_last_error_to_string();
-        add_formatted_line(cmdx, screen, "Unknown command. Try :help to see a list of all available commands (Error: %).", error_string);
+        add_formatted_line(cmdx, screen, "Unknown command. Try :help to see a list of all available commands (Error: '%').", error_string);
         win32_free_last_error_string(*error_string);
         
 #if USE_PSEUDO_CONSOLE        DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);

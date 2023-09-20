@@ -29,10 +29,11 @@
 #load "create_big_file.p";
 
 // --- Default font paths to remember
-CASCADIO_MONO   :: "C:/windows/fonts/cascadiamono.ttf";
-TIMES_NEW_ROMAN :: "C:/windows/fonts/times.ttf";
-COURIER_NEW     :: "C:/windows/fonts/cour.ttf";
-ARIAL           :: "C:/windows/fonts/arial.ttf";
+CASCADIO_MONO    :: "C:/windows/fonts/cascadiamono.ttf";
+TIMES_NEW_ROMAN  :: "C:/windows/fonts/times.ttf";
+COURIER_NEW      :: "C:/windows/fonts/cour.ttf";
+ARIAL            :: "C:/windows/fonts/arial.ttf";
+FIRACODE_REGULAR :: "C:/source/cmdX/run_tree/data/FiraCode-Regular.ttf";
 
 Color_Index :: enum {
     Default;
@@ -150,48 +151,64 @@ CmdX :: struct {
 
 /* --- DEBUGGING --- */
 
-debug_print_lines :: (screen: *CmdX_Screen) {
-    print("=== LINES ===\n");
+debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+    bprint(printer, "=== LINES ===\n");
 
     for i := 0; i < screen.lines.count; ++i {
         line := array_get(*screen.lines, i);
-        print("I %: % -> % ", i, line.first, line.one_plus_last);
-        if line.wrapped print("     '%*%' (wrapped)", string_view(*screen.backlog[line.first], screen.backlog_size - line.first), string_view(*screen.backlog[0], line.one_plus_last));
-        else print("     '%'", string_view(*screen.backlog[line.first], line.one_plus_last - line.first));
-        print("\n");
+        bprint(printer, "I %: % -> % ", i, line.first, line.one_plus_last);
+        if line.wrapped bprint(printer, "     '%*%' (wrapped)", string_view(*screen.backlog[line.first], screen.backlog_size - line.first), string_view(*screen.backlog[0], line.one_plus_last));
+        else bprint(printer, "     '%'", string_view(*screen.backlog[line.first], line.one_plus_last - line.first));
+        bprint(printer, "\n");
     }
 
-    print("=== LINES ===\n");
+    bprint(printer, "=== LINES ===\n");
 }
 
-debug_print_colors :: (screen: *CmdX_Screen) {
-    print("=== COLORS ===\n");
+debug_print_colors :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+    bprint(printer, "=== COLORS ===\n");
 
     for i := 0; i < screen.colors.count; ++i {
         range := array_get(*screen.colors, i);
-        print("C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
-        if range.source.wrapped print(" (wrapped)");
-        print("\n");
+        bprint(printer, "C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
+        if range.source.wrapped bprint(printer, " (wrapped)");
+        bprint(printer, "\n");
     }
 
-    print("=== COLORS ===\n");
+    bprint(printer, "=== COLORS ===\n");
 }
 
-debug_print_history :: (screen: *CmdX_Screen) {
-    print("=== HISTORY ===\n");
+debug_print_history :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+    bprint(printer, "=== HISTORY ===\n");
 
     for i := 0; i < screen.history.count; ++i {
         string := array_get_value(*screen.history, i);
-        print("H %: '%'\n", i, string);
+        bprint(printer, "H %: '%'\n", i, string);
     }
 
-    print("=== HISTORY ===\n");
+    bprint(printer, "=== HISTORY ===\n");
+}
+
+debug_print_to_file :: (file_path: string, screen: *CmdX_Screen) {
+    printer: Print_Buffer;
+    create_file_printer(*printer, file_path);
+
+    debug_print_lines(*printer, screen);
+    debug_print_colors(*printer, screen);
+    debug_print_history(*printer, screen);
+
+    close_file_printer(*printer);
 }
 
 debug_print :: (screen: *CmdX_Screen) {
-    debug_print_lines(screen);
-    debug_print_colors(screen);
-    //debug_print_history(screen);
+    printer: Print_Buffer;
+    printer.output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    debug_print_lines(*printer, screen);
+    debug_print_colors(*printer, screen);
+    debug_print_history(*printer, screen);
+
+    print_buffer_flush(*printer);
 }
 
 
@@ -336,6 +353,8 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
 /* --- Backlog API --- */
 
 get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
+    win32_assert(screen, screen.lines.count, "Screen Backlog is empty");
+
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
@@ -345,7 +364,7 @@ set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     color_head := array_get(*screen.colors, screen.colors.count - 1);
 
-    assert(line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
+    win32_assert(screen, line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
     if line_head.first + cursor < screen.backlog_size {
         line_head.one_plus_last = line_head.first + cursor;
@@ -798,7 +817,6 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     }
 
     // Render the text input at the end of the backlog
-    assert(cursor_y < cmdx.window.height, "Invalid Cursor Y");
     prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
@@ -835,6 +853,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         render_next_frame(cmdx);
     }
 
+    if cmdx.window.key_pressed[Key_Code.F7] win32_assert(cmdx.active_screen, false, "F7");
+    
     if cmdx.window.key_pressed[Key_Code.F11] {
         // Toggle borderless mode
         cmdx.disabled_title_bar = !cmdx.disabled_title_bar;
@@ -1147,7 +1167,7 @@ activate_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 activate_screen_with_index :: (cmdx: *CmdX, index: s64) {
-    assert(index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");
+    win32_assert(cmdx.active_screen, index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");
     activate_screen(cmdx, linked_list_get(*cmdx.screens, index));
 }
 
@@ -1412,7 +1432,7 @@ cmdx :: () -> s32 {
     flush_config_errors(*cmdx, false);
 
     cmdx.setup = true;
-
+    
     // Main loop until the window gets closed
     while !cmdx.window.should_close    one_cmdx_frame(*cmdx);
 
