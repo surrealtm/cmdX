@@ -353,7 +353,7 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
 /* --- Backlog API --- */
 
 get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
-    win32_assert(screen, screen.lines.count, "Screen Backlog is empty");
+    win32_assert(screen, screen.lines.count > 0, "Screen Backlog is empty");
 
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
