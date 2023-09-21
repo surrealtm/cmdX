@@ -643,7 +643,7 @@ draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, l
         }
     }
 
-    if end == color_range.source.one_plus_last {
+    if end == color_range.source.one_plus_last && color_range_index + 1 < screen.colors.count {
         // There is an edge case where the color range's one_plus_last == backlog_size, and so the cursor
         // never reaches one_plus_last in the above loop, therefore the color range never gets skipped.
         // Deal with this edge case here.
