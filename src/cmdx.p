@@ -59,6 +59,11 @@ Color_Range :: struct {
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
+Line :: struct {
+    source: Source_Range;
+    complete: bool; // Set to true once the input parser read a '\n' character for this line. While that has not happened, the input line should be appended after this one.
+}
+
 CmdX_Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
@@ -86,13 +91,15 @@ CmdX_Screen :: struct {
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
 
     // Backlog scrolling
-    scroll_target: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
-    scroll_position: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
-    scroll_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
+    scroll_target_offset: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
+    scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
+    scroll_line_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
 
     // Drawing data cached for this screen
-    drawn_line_count: s64;
-
+    first_line_to_draw: s64; // Index of the line that goes at the very top of the screen
+    last_line_to_draw: s64; // Index of the last line to be rendered towards the bottom of the screen
+    line_wrapped_before_first: bool; // If the line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
+    
     // Subprocess data
     current_directory: string;
     child_process_name: string;
@@ -426,7 +433,7 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     }
 
     ++screen.viewport_height;
-    screen.scroll_target = xx screen.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+    screen.scroll_target_offset = xx screen.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 
     render_next_frame(cmdx);
 }
@@ -766,24 +773,21 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     if screen.auto_complete_options.count == 1    screen.auto_complete_dirty = true;
 }
 
-draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
-    // Set up the first line to be rendered, as well as the highest line index to be rendered
-    current_line_index: s64 = screen.scroll_offset - screen.drawn_line_count;
-    one_plus_last_line: s64 = current_line_index + screen.drawn_line_count;
-    
-    // Query the first line in the backlog, and the last line to be rendered
-    line_tail  := array_get(*screen.lines, 0);
-    first_line := array_get(*screen.lines, current_line_index);
 
-    // If the wrapped line is not currently in view, that information is still important for the color range
-    // skipping, since the cursor needs to know whether it has technically wrapped before.
-    wrapped_before := first_line.first < line_tail.first;
 
-    // Set up coordinates for rendering
+// This needs some rework i feel like to be cleaner.
+// We probably want some kind of
+// first_line_to_draw, last_line_to_draw index in the screen, so that the mental model is easier.
+// Then we can just adjust the last_line_to_draw to depend on whether scrolling currently occurs or not.
+
+
+draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {   
+    // Set up the cursor coordinates for rendering.
     cursor_x: s32 = screen.rectangle[0] + 5;
-    cursor_y: s32 = screen.rectangle[3] - (screen.drawn_line_count - 1) * cmdx.font.line_height - 5;
-
-    // Set up the color ranges
+    cursor_y: s32 = screen.rectangle[1] + cmdx.font.line_height + 5;
+    
+    // Set up the color ranges.
+    wrapped_before := screen.line_wrapped_before_first;
     color_range_index: s64 = 0;
     color_range: Color_Range = array_get_value(*screen.colors, color_range_index);
     activate_color_range(cmdx, *color_range);
@@ -792,7 +796,8 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     set_scissors(screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], cmdx.window.height);
 
     // Draw all visible lines
-    while current_line_index < one_plus_last_line {
+    current_line_index := screen.first_line_to_draw;
+    while current_line_index <= screen.last_line_to_draw {
         line := array_get(*screen.lines, current_line_index);
 
         if line.wrapped {
@@ -806,7 +811,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         } else
             cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
 
-        if current_line_index + 1 < one_plus_last_line {
+        if current_line_index + 1 <= screen.last_line_to_draw {
             // If there is another line after this, reset the cursor position. If there isnt, then
             // leave the cursor as is so that the actual text input can be rendered at the correct position
             cursor_y += cmdx.font.line_height;
@@ -1038,31 +1043,36 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
 
         // Handle scrolling in this screen
-        new_scroll_target := screen.scroll_target;
+        new_scroll_target := screen.scroll_target_offset;
 
         if cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift] {
             // Only actually do scrolling if this is either the active screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
-            new_scroll_target = xx screen.scroll_target - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+            new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
             if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.lines.count; // Scroll to the bottom of the backlog.
             if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog. While 0 is not actually a valid scroll target, it makes sure that it goes all the way to the top in the calculate_number_of_visible_lines procedure. The value will be clamped below.
         }
 
+        previous_scroll_offset := screen.scroll_line_offset;
 
-        previous_scroll_offset := screen.scroll_offset;
-        one_plus_last_line_index := screen.lines.count;
-
-        current_drawn_line_count := calculate_number_of_visible_lines(cmdx, cast(s64) round(new_scroll_target), one_plus_last_line_index); // Estimate the number of drawn lines at the current scroll target
-
+        // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
+        // go below that number. This means that we cannot scroll past the very first line at the very top
+        // of the screen.
+        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5);
+        drawn_line_count   := min(active_screen_size / cmdx.font.line_height, screen.lines.count);
+        highest_allowed_scroll_offset := screen.lines.count - drawn_line_count;
+        
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
-        screen.scroll_target    = clamp(new_scroll_target, xx current_drawn_line_count, xx one_plus_last_line_index);
-        screen.scroll_position += (screen.scroll_target - screen.scroll_position) * 0.25;
-        screen.scroll_offset    = clamp(cast(s64) round(screen.scroll_position), current_drawn_line_count, one_plus_last_line_index);
+        screen.scroll_target_offset  = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
+        screen.scroll_interpolation += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
+        screen.scroll_line_offset    = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
 
-        screen.drawn_line_count = calculate_number_of_visible_lines(cmdx, screen.scroll_offset, one_plus_last_line_index);
+        // Calculate the actual number of drawn lines at the new scrolling offset.
+        screen.first_line_to_draw = screen.scroll_line_offset;
+        screen.last_line_to_draw  = screen.first_line_to_draw + drawn_line_count - 1;
 
-        if previous_scroll_offset != screen.scroll_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
+        if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
