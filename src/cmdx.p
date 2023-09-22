@@ -401,7 +401,14 @@ prepare_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
-    // Insert an empty line bewteen the last line of the viewport and the new input line
+    // When closing the viewport, we want one empty line between the last text of the called process (or builtin
+    // command), and the next input line. If the subprocess ended on an empty line, we only need to add one
+    // empty line and we are good. If the subprocess ended on an unfinished line (which can happen if the
+    // process is terminated, or if the process just has weird formatting...) we need to complete that line,
+    // and then add the empty one.
+    line_head := array_get(*cmdx.active_screen.lines, cmdx.active_screen.lines.count - 1);
+    if line_head.first != line_head.one_plus_last new_line(cmdx, cmdx.active_screen);
+
     new_line(cmdx, screen);
 }
 
@@ -985,7 +992,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.active_screen.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
         // Terminate the current running process
         win32_terminate_child_process(cmdx, cmdx.active_screen);
-        new_line(cmdx, cmdx.active_screen); // If this child process gets terminated, add a new-line for more visual clarity
     }
 
     // Handle input for this screen
