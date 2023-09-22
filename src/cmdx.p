@@ -1073,7 +1073,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.scroll_interpolation += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
         screen.scroll_line_offset    = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
 
-        // Calculate the actual number of drawn lines at the new scrolling offset.
+        // Calculate the actual number of drawn lines at the new scrolling offset.        
         partial_lines_fitting_on_active_screen_size := complete_lines_fitting_on_active_screen_size;
         if screen.scroll_line_offset > 0 partial_lines_fitting_on_active_screen_size = xx ceilf(xx active_screen_size / xx cmdx.font.line_height); // When we are not completely scrolled to the top, allow lines before the scroll offset to be partially cut off of the screen
         partial_drawn_line_count := min(partial_lines_fitting_on_active_screen_size, screen.lines.count);
@@ -1081,6 +1081,11 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.first_line_to_draw = screen.scroll_line_offset - (partial_drawn_line_count - complete_drawn_line_count);
         screen.last_line_to_draw  = screen.first_line_to_draw + partial_drawn_line_count - 1;
 
+        // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
+        // the input line. If we are completely scrolled to the bottom, that line is shared between the
+        // backlog and the input line.
+        if screen.last_line_to_draw != screen.lines.count - 1 --screen.last_line_to_draw;
+        
         screen.first_line_x_position = screen.rectangle[0] + 5;
         screen.first_line_y_position = screen.rectangle[3] - (partial_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
         
