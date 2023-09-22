@@ -279,6 +279,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         command := array_get(*cmdx.commands, i);
         if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
+            close_viewport(cmdx, my_screen);
             command_found = true;
             break;
         }

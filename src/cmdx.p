@@ -404,6 +404,11 @@ prepare_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     screen.viewport_height = 0;
 }
 
+close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    // Insert an empty line bewteen the last line of the viewport and the new input line
+    new_line(cmdx, screen);
+}
+
 
 clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     array_clear(*screen.lines);
@@ -808,9 +813,12 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         } else
             cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.source.first, line.source.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
 
-        // Position the cursor on the next line.
-        cursor_y += cmdx.font.line_height;
-        cursor_x = screen.first_line_x_position;
+        // If this is not the last line in the backlog, position the cursor on the next line.
+        // If it is the last line, then the text input should be appened to this line.
+        if current_line_index + 1 != screen.lines.count {
+            cursor_y += cmdx.font.line_height;
+            cursor_x = screen.first_line_x_position;
+        }
 
         ++current_line_index;
     }
@@ -1008,7 +1016,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             } else add_history(cmdx, cmdx.active_screen, input_string);
 
             // Print the complete input line into the backlog
-            new_line(cmdx, cmdx.active_screen);
             set_themed_color(cmdx.active_screen, .Accent);
             add_text(cmdx, cmdx.active_screen, get_prefix_string(cmdx.active_screen, *cmdx.frame_memory_arena));
             set_themed_color(cmdx.active_screen, .Default);
@@ -1053,10 +1060,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
         // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
         // go below that number. This means that we cannot scroll past the very first line at the very top
-        // of the screen.
-        line_head := array_get(*screen.lines, screen.lines.count - 1);
-        
-        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5) - cmdx.font.line_height; // Reserve some space for the actual input line.
+        // of the screen.        
+        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5);
         complete_lines_fitting_on_active_screen_size := active_screen_size / cmdx.font.line_height;
         
         complete_drawn_line_count     := min(complete_lines_fitting_on_active_screen_size, screen.lines.count);
@@ -1071,13 +1076,13 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // Calculate the actual number of drawn lines at the new scrolling offset.
         partial_lines_fitting_on_active_screen_size := complete_lines_fitting_on_active_screen_size;
         if screen.scroll_line_offset > 0 partial_lines_fitting_on_active_screen_size = xx ceilf(xx active_screen_size / xx cmdx.font.line_height); // When we are not completely scrolled to the top, allow lines before the scroll offset to be partially cut off of the screen
-        partial_drawn_line_count      := min(partial_lines_fitting_on_active_screen_size, screen.lines.count);
+        partial_drawn_line_count := min(partial_lines_fitting_on_active_screen_size, screen.lines.count);
         
         screen.first_line_to_draw = screen.scroll_line_offset - (partial_drawn_line_count - complete_drawn_line_count);
         screen.last_line_to_draw  = screen.first_line_to_draw + partial_drawn_line_count - 1;
 
         screen.first_line_x_position = screen.rectangle[0] + 5;
-        screen.first_line_y_position = screen.rectangle[3] - partial_drawn_line_count * cmdx.font.line_height - 5;
+        screen.first_line_y_position = screen.rectangle[3] - (partial_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
         
         if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
@@ -1246,6 +1251,7 @@ welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
     set_themed_color(screen, .Default);
     add_line(cmdx, screen, "Use the :help command as a starting point.");
     add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
+    new_line(cmdx, screen); // Insert a new line for more visual clarity
 }
 
 get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
@@ -1483,6 +1489,3 @@ WinMain :: () -> s32 {
 
 // @Incomplete store history in a file to restore it after program restart
 // @Incomplete put all these screen hotkeys into the config file somehow (create, close, next screen...)
-
-
-// @Incomplete py run_tests.py lead to an empty line before the input which looks shit.
