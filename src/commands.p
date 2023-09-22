@@ -280,7 +280,6 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         if compare_command_name(command, command_name) {
             if !dispatch_command(cmdx, command, command_arguments) print_command_syntax(cmdx, command);
             command_found = true;
-            close_viewport(cmdx, my_screen);
             break;
         }
     }
@@ -303,8 +302,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         }
         
         command_string := finish_string_builder(*string_builder);
-        
-        if !win32_spawn_process_for_command(cmdx, command_string) close_viewport(cmdx, my_screen); // If the spawning failed (e.g. command not found), then the viewport needs to be closed
+        win32_spawn_process_for_command(cmdx, command_string);
     }    
 }
 

@@ -95,6 +95,8 @@ CmdX_Screen :: struct {
     scroll_line_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
 
     // Drawing data cached for this screen
+    first_line_x_position: s64; // The x-position in screen-pixel-space at which the lines should start
+    first_line_y_position: s64; // The y-position in screen-pixel-space at which the first line should be rendered.
     first_line_to_draw: s64; // Index of the line that goes at the very top of the screen
     last_line_to_draw: s64; // Index of the last line to be rendered towards the bottom of the screen
     line_wrapped_before_first: bool; // If the line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
@@ -400,10 +402,6 @@ set_cursor_position_to_beginning_of_line :: (screen: *CmdX_Screen) {
 
 prepare_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     screen.viewport_height = 0;
-}
-
-close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
-    //new_line(cmdx, screen); // Insert an empty line between the last line from the subprocess and the input line for more visual clarity
 }
 
 
@@ -782,8 +780,8 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
 draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {   
     // Set up the cursor coordinates for rendering.
-    cursor_x: s32 = screen.rectangle[0] + 5;
-    cursor_y: s32 = screen.rectangle[1] + cmdx.font.line_height + 5;
+    cursor_x: s32 = screen.first_line_x_position; //screen.rectangle[0] + 5; nocheckin
+    cursor_y: s32 = screen.first_line_y_position; // screen.rectangle[1] + cmdx.font.line_height + 5;
     
     // Set up the color ranges.
     wrapped_before := screen.line_wrapped_before_first;
@@ -812,7 +810,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
         // Position the cursor on the next line.
         cursor_y += cmdx.font.line_height;
-        cursor_x = screen.rectangle[0] + 5;
+        cursor_x = screen.first_line_x_position;
 
         ++current_line_index;
     }
@@ -984,6 +982,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.active_screen.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
         // Terminate the current running process
         win32_terminate_child_process(cmdx, cmdx.active_screen);
+        new_line(cmdx, cmdx.active_screen); // If this child process gets terminated, add a new-line for more visual clarity
     }
 
     // Handle input for this screen
@@ -1058,9 +1057,10 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         line_head := array_get(*screen.lines, screen.lines.count - 1);
         
         active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5) - cmdx.font.line_height; // Reserve some space for the actual input line.
-
-        drawn_line_count := min(active_screen_size / cmdx.font.line_height, screen.lines.count);
-        highest_allowed_scroll_offset := screen.lines.count - drawn_line_count;
+        complete_lines_fitting_on_active_screen_size := active_screen_size / cmdx.font.line_height;
+        
+        complete_drawn_line_count     := min(complete_lines_fitting_on_active_screen_size, screen.lines.count);
+        highest_allowed_scroll_offset := screen.lines.count - complete_drawn_line_count;
         
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
@@ -1069,9 +1069,16 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.scroll_line_offset    = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
 
         // Calculate the actual number of drawn lines at the new scrolling offset.
-        screen.first_line_to_draw = screen.scroll_line_offset;
-        screen.last_line_to_draw  = screen.first_line_to_draw + drawn_line_count - 1;
+        partial_lines_fitting_on_active_screen_size := complete_lines_fitting_on_active_screen_size;
+        if screen.scroll_line_offset > 0 partial_lines_fitting_on_active_screen_size = xx ceilf(xx active_screen_size / xx cmdx.font.line_height); // When we are not completely scrolled to the top, allow lines before the scroll offset to be partially cut off of the screen
+        partial_drawn_line_count      := min(partial_lines_fitting_on_active_screen_size, screen.lines.count);
+        
+        screen.first_line_to_draw = screen.scroll_line_offset - (partial_drawn_line_count - complete_drawn_line_count);
+        screen.last_line_to_draw  = screen.first_line_to_draw + partial_drawn_line_count - 1;
 
+        screen.first_line_x_position = screen.rectangle[0] + 5;
+        screen.first_line_y_position = screen.rectangle[3] - partial_drawn_line_count * cmdx.font.line_height - 5;
+        
         if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
 
@@ -1476,3 +1483,6 @@ WinMain :: () -> s32 {
 
 // @Incomplete store history in a file to restore it after program restart
 // @Incomplete put all these screen hotkeys into the config file somehow (create, close, next screen...)
+
+
+// @Incomplete py run_tests.py lead to an empty line before the input which looks shit.

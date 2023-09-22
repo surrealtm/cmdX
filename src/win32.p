@@ -517,7 +517,6 @@ win32_detach_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     SetInformationJobObject(screen.win32.job_handle, 9, xx *job_info, size_of(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)); // 9 = JobObjectExtendedLimitInformation
     
     win32_cleanup(cmdx, screen);
-    close_viewport(cmdx, screen);
 }
 
 win32_terminate_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
@@ -525,7 +524,6 @@ win32_terminate_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // connection, actually shut the process down.
     TerminateProcess(screen.win32.child_process_handle, 0);
     win32_cleanup(cmdx, screen);
-    close_viewport(cmdx, screen);
 }
 
 win32_update_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) -> bool {
