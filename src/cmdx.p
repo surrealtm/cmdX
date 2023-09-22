@@ -59,10 +59,6 @@ Color_Range :: struct {
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
-Line :: struct {
-    source: Source_Range;
-}
-
 CmdX_Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
@@ -86,7 +82,7 @@ CmdX_Screen :: struct {
     backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
 
     colors: [..]Color_Range;
-    lines: [..]Line;
+    lines: [..]Source_Range;
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
 
     // Backlog scrolling
@@ -164,12 +160,12 @@ debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
 
     for i := 0; i < screen.lines.count; ++i {
         line := array_get(*screen.lines, i);
-        bprint(printer, "I %: % -> % ", i, line.source.first, line.source.one_plus_last);
+        bprint(printer, "I %: % -> % ", i, line.first, line.one_plus_last);
 
-        if line.source.wrapped
-            bprint(printer, "     '%*%' (wrapped)", string_view(*screen.backlog[line.source.first], screen.backlog_size - line.source.first), string_view(*screen.backlog[0], line.source.one_plus_last));
+        if line.wrapped
+            bprint(printer, "     '%*%' (wrapped)", string_view(*screen.backlog[line.first], screen.backlog_size - line.first), string_view(*screen.backlog[0], line.one_plus_last));
         else
-            bprint(printer, "     '%'", string_view(*screen.backlog[line.source.first], line.source.one_plus_last - line.source.first));
+            bprint(printer, "     '%'", string_view(*screen.backlog[line.first], line.one_plus_last - line.first));
 
         bprint(printer, "\n");
     }
@@ -309,7 +305,7 @@ cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -
 // the oldest line in the backlog, to make space for the new text. Remove as many lines as needed
 // so that the new text has enough space in it. After removing the necessary lines, also remove
 // any color ranges that lived in the now freed-up space.
-remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_Range) -> *Line {
+remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
 
@@ -320,11 +316,11 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
     while screen.lines.count > 1 {
         existing_line := array_get(*screen.lines, 0);
 
-        if source_ranges_overlap(existing_line.source, new_line) {
+        if source_ranges_overlap(~existing_line, new_line) {
             // If the source ranges overlap, then the existing line must be removed to make space for the
             // new one.
-            if total_removed_range.first == -1    total_removed_range.first = existing_line.source.first;
-            total_removed_range.one_plus_last = existing_line.source.one_plus_last;
+            if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
+            total_removed_range.one_plus_last = existing_line.one_plus_last;
             total_removed_range.wrapped       = total_removed_range.one_plus_last < total_removed_range.first;
             array_remove(*screen.lines, 0);
         } else {
@@ -368,7 +364,7 @@ get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
     win32_assert(screen, screen.lines.count > 0, "Screen Backlog is empty");
 
     line_head := array_get(*screen.lines, screen.lines.count - 1);
-    return line_head.source.one_plus_last - line_head.source.first; // The current cursor position is considered to be at the end of the current line
+    return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
 
 set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
@@ -376,22 +372,22 @@ set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     color_head := array_get(*screen.colors, screen.colors.count - 1);
 
-    win32_assert(screen, line_head.source.first + cursor < line_head.source.one_plus_last || line_head.source.wrapped, "Invalid cursor position");
+    win32_assert(screen, line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
-    if line_head.source.first + cursor < screen.backlog_size {
-        line_head.source.one_plus_last = line_head.source.first + cursor;
-        line_head.source.wrapped = false;
+    if line_head.first + cursor < screen.backlog_size {
+        line_head.one_plus_last = line_head.first + cursor;
+        line_head.wrapped = false;
 
-        while !source_ranges_overlap(line_head.source, color_head.source) {
+        while !source_ranges_overlap(~line_head, color_head.source) {
             array_remove(*screen.colors, screen.colors.count - 1);
             color_head = array_get(*screen.colors, screen.colors.count - 1);
         }
 
-        color_head.source.one_plus_last = line_head.source.one_plus_last;
+        color_head.source.one_plus_last = line_head.one_plus_last;
         color_head.source.wrapped = color_head.source.first > color_head.source.one_plus_last;
     } else {
-        line_head.source.one_plus_last = line_head.source.first + cursor - screen.backlog_size;
-        color_head.source.one_plus_last = line_head.source.one_plus_last;
+        line_head.one_plus_last = line_head.first + cursor - screen.backlog_size;
+        color_head.source.one_plus_last = line_head.one_plus_last;
     }
 }
 
@@ -417,7 +413,7 @@ clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     set_themed_color(screen, .Default);
 }
 
-new_line :: (cmdx: *CmdX, screen: *CmdX_Screen) -> *Line {
+new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     // Add a new line to the backlog
     new_line_head := array_push(*screen.lines);
 
@@ -427,22 +423,21 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen) -> *Line {
         // backlog end, which would lead to unfortunate behaviour later on.
         old_line_head := array_get(*screen.lines, screen.lines.count - 2);
         
-        if old_line_head.source.one_plus_last < screen.backlog_size {
+        if old_line_head.one_plus_last < screen.backlog_size {
             // The first character is inclusive. If the previous line ends on the backlog size, that would be
             // an invalid index for the first character of the next line...
-            new_line_head.source.first = old_line_head.source.one_plus_last;
+            new_line_head.first = old_line_head.one_plus_last;
         } else {
-            new_line_head.source.first = 0;
+            new_line_head.first = 0;
         }
 
-        new_line_head.source.one_plus_last = new_line_head.source.first;
+        new_line_head.one_plus_last = new_line_head.first;
     }
 
     ++screen.viewport_height;
     screen.scroll_target_offset = xx screen.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
 
     render_next_frame(cmdx);
-    return new_line_head;
 }
 
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
@@ -453,9 +448,9 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     
     // Edge-Case: If the current line already has wrapped, and it completely fills the backlog, then there
     // simply is no more space for this new text, therefore just ignore it.
-    if current_line.source.wrapped && current_line.source.one_plus_last == current_line.source.first return;
+    if current_line.wrapped && current_line.one_plus_last == current_line.first return;
 
-    projected_one_plus_last := current_line.source.one_plus_last + text.count;
+    projected_one_plus_last := current_line.one_plus_last + text.count;
 
     if projected_one_plus_last > screen.backlog_size {
         // If the current line would overflow the backlog size, then it needs to be wrapped around
@@ -467,21 +462,21 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
 
         // If the current line would grow too big for the backlog, then it needs to be wrapped
         // around the start.
-        before_wrap_length := screen.backlog_size - current_line.source.one_plus_last;
+        before_wrap_length := screen.backlog_size - current_line.one_plus_last;
         after_wrap_length  := available_text_space - before_wrap_length;
 
         // Remove all lines that are between the end of the current line until the end of the backlog,
         // and the end of the line after that wrap-around
-        to_remove_range := Source_Range.{ current_line.source.one_plus_last, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
+        to_remove_range := Source_Range.{ current_line.one_plus_last, after_wrap_length, true }; // Do not remove the current line if it is empty (and therefore one_plus_last -> one_plus_last)
         current_line = remove_overlapping_lines_until_free(screen, to_remove_range);
 
         // Copy the subtext contents into the backlog
-        copy_memory(*screen.backlog[current_line.source.one_plus_last], *text.data[0], before_wrap_length);
+        copy_memory(*screen.backlog[current_line.one_plus_last], *text.data[0], before_wrap_length);
         copy_memory(*screen.backlog[0], *text.data[before_wrap_length], after_wrap_length);
 
         // The current line will now wrap around
-        current_line.source.wrapped = true;
-        current_line.source.one_plus_last = after_wrap_length;
+        current_line.wrapped = true;
+        current_line.one_plus_last = after_wrap_length;
 
         color_head := array_get(*screen.colors, screen.colors.count - 1);
         color_head.source.wrapped       = true;
@@ -489,45 +484,45 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
         return;
     }
 
-    if current_line.source.wrapped && projected_one_plus_last > current_line.source.first {
+    if current_line.wrapped && projected_one_plus_last > current_line.first {
         // If the current line still does entirely fit into the backlog, but we detect it in another way
         // (it would overlap itself), then we still need to cut off the line and use the complete backlog
         // for this line
-        available_text_space := current_line.source.first - current_line.source.one_plus_last;
+        available_text_space := current_line.first - current_line.one_plus_last;
         subtext := substring_view(text, 0, available_text_space);
 
         // Essentially remove all lines that are not the current one, since we have already figured out
         // that they cannot fit into the backlog together with this new line
-        to_remove_range := Source_Range.{ current_line.source.one_plus_last, current_line.source.first + 1, false };
+        to_remove_range := Source_Range.{ current_line.one_plus_last, current_line.first + 1, false };
         current_line = remove_overlapping_lines_until_free(screen, to_remove_range);
 
         // Copy the subtext contents into the backlog
-        copy_memory(*screen.backlog[current_line.source.one_plus_last], subtext.data, subtext.count);
+        copy_memory(*screen.backlog[current_line.one_plus_last], subtext.data, subtext.count);
 
         // Update the current line end, It now takes over the complete backlog
-        current_line.source.one_plus_last = current_line.source.first;
+        current_line.one_plus_last = current_line.first;
 
         color_head := array_get(*screen.colors, screen.colors.count - 1);
-        color_head.source.one_plus_last = current_line.source.first;
+        color_head.source.one_plus_last = current_line.first;
         return;
     }
 
     first_line := array_get(*screen.lines, 0);
-    if projected_one_plus_last > first_line.source.first {
+    if projected_one_plus_last > first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
         // in the array), then that line will need to be removed.
-        to_remove_range := Source_Range.{ current_line.source.one_plus_last, projected_one_plus_last, false };
+        to_remove_range := Source_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
         current_line = remove_overlapping_lines_until_free(screen, to_remove_range);
     }
 
     // Copy the text content into the backlog
-    copy_memory(*screen.backlog[current_line.source.one_plus_last], text.data, text.count);
+    copy_memory(*screen.backlog[current_line.one_plus_last], text.data, text.count);
 
     // The current line now has grown. Increase the source ranges
-    current_line.source.one_plus_last = current_line.source.one_plus_last + text.count;
+    current_line.one_plus_last = current_line.one_plus_last + text.count;
 
     color_head := array_get(*screen.colors, screen.colors.count - 1);
-    color_head.source.one_plus_last = current_line.source.one_plus_last;
+    color_head.source.one_plus_last = current_line.one_plus_last;
     color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
 
     render_next_frame(cmdx);
@@ -802,16 +797,16 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     while current_line_index <= screen.last_line_to_draw {
         line := array_get(*screen.lines, current_line_index);
 
-        if line.source.wrapped {
+        if line.wrapped {
             // If this line wraps, then the line actually contains two parts. The first goes from the start
             // until the end of the backlog, the second part starts at the beginning of the backlog and goes
             // until the end of the line. It is easier for draw_backlog_split to do it like this.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.source.first, screen.backlog_size, true, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, screen.backlog_size, true, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
             cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, screen.backlog[screen.backlog_size - 1], screen.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, 0, line.source.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, 0, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
         } else
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.source.first, line.source.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
 
         // If this is not the last line in the backlog, position the cursor on the next line.
         // If it is the last line, then the text input should be appened to this line.
@@ -1088,6 +1083,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         screen.first_line_x_position = screen.rectangle[0] + 5;
         screen.first_line_y_position = screen.rectangle[3] - (partial_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
+
+        // If any of the lines above the first line to be rendered already wrapped around the backlog, that
+        // information needs to be stored for drawing each backlog line to properly handle color wrapping.
+        first_line_in_backlog := array_get(*screen.lines, 0);
+        first_line_to_draw := array_get(*screen.lines, screen.first_line_to_draw);        
+        screen.line_wrapped_before_first = first_line_to_draw.first < first_line_in_backlog.first;
         
         if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }

@@ -462,6 +462,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
         set_working_directory(previous_working_directory);
         free_string(previous_working_directory, Default_Allocator);
         win32_cleanup(cmdx, screen);
+		close_viewport(cmdx, screen);
         return false;
     }
 
