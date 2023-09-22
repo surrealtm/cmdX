@@ -257,8 +257,8 @@ compare_command_name :: (cmd: *Command, name: string) -> bool {
 
 handle_input_string :: (cmdx: *CmdX, input: string) {
     // Prepare the viewport for the next command, no matter what actually happens
-    prepare_viewport(cmdx.active_screen);
     my_screen := cmdx.active_screen; // The active screen pointer may be updated during the command handling, but we always want to refer to this one here.
+    prepare_viewport(cmdx, my_screen);
     
     // Parse the actual command name
     command_name := get_next_word_in_input(*input);

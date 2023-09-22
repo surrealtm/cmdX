@@ -160,7 +160,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
                 x := win32_get_input_parser_parameter(*parser, 1, 1) - 1;
                 
                 vertical_offset := y - screen.viewport_height;
-                assert(vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
+                win32_assert(screen, vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
                 for i := 0; i < vertical_offset; ++i   new_line(cmdx, screen);
                 
                 horizontal_offset := x - get_cursor_position_in_line(screen);
