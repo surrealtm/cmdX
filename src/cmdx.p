@@ -829,6 +829,20 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
+    // Render the scroll bar to the right
+    first_line_percentage   := cast(f32) (screen.first_line_to_draw) / cast(f32) screen.lines.count;
+    visible_line_percentage := cast(f32) (screen.last_line_to_draw - screen.first_line_to_draw + 1) / cast(f32) screen.lines.count;
+    scrollbar_width := 7;
+    scrollbar_background_height := screen.rectangle[3] - screen.rectangle[1] - 10;
+    scrollbar_foreground_height := cast(s64) (cast(f32) scrollbar_background_height * visible_line_percentage);
+    scrollbar_foreground_offset := cast(s64) (cast(f32) scrollbar_background_height * first_line_percentage);
+    
+    scrollbar_background_color := cmdx.active_theme.colors[Color_Index.Default];
+    scrollbar_foreground_color := cmdx.active_theme.colors[Color_Index.Accent];
+
+    draw_quad(*cmdx.renderer, screen.rectangle[2] - scrollbar_width - 5, screen.rectangle[1] + 5, scrollbar_width, scrollbar_background_height, scrollbar_background_color);
+    draw_quad(*cmdx.renderer, screen.rectangle[2] - scrollbar_width - 5, screen.rectangle[1] + 5 + scrollbar_foreground_offset, scrollbar_width, scrollbar_foreground_height, scrollbar_foreground_color);
+    
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
     // see that this is not the active one.
     if cmdx.active_screen != screen {
