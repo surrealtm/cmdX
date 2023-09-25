@@ -97,6 +97,12 @@ CmdX_Screen :: struct {
     last_line_to_draw: s64; // Index of the last line to be rendered towards the bottom of the screen
     line_wrapped_before_first: bool; // If the line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
     
+    // Scrollbar data, which needs to be in sync for the logic and drawing
+    scrollbar_background_rectangle: [4]s32; // The top left and bottom right screen coordinates for this scrollbar
+    scrollbar_background_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar background. This changes the visual feedback to the user to indicate the hovering
+    scrollbar_knob_rectangle: [4]s32; // The top left and bottom right screen coordinates for the knob on the scrollbar
+    scrollbar_knob_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar knob. This changes the visual feedback to the user to indicate the hovering
+    
     // Subprocess data
     current_directory: string;
     child_process_name: string;
@@ -615,18 +621,9 @@ set_themed_color :: (screen: *CmdX_Screen, index: Color_Index) {
 
 /* --- DRAWING --- */
 
-calculate_number_of_visible_lines :: (cmdx: *CmdX, scroll_offset: s64, available_lines: s64) -> s64 {
-    // Always subtract one line which will be used for the input and not the backlog
-    lines_fitting_on_screen := cast(s64) ceilf(cast(f32) cmdx.window.height / cast(f32) cmdx.font.line_height);
-
-    if scroll_offset < lines_fitting_on_screen {
-        // If the user has scrolled all the way to the top, then the very first line drawn (at the top of the
-        // window) should be fully visible, and not only partially. Therefore calculate the number of lines that
-        // fully fit into the screen space, by rounding the division down and not up.
-        lines_fitting_on_screen = cmdx.window.height / cmdx.font.line_height;
-    }
-
-    return min(available_lines, lines_fitting_on_screen);
+mouse_over_rectangle :: (cmdx: *CmdX, rectangle: []s32) -> bool {
+    return cmdx.window.mouse_x >= rectangle[0] && cmdx.window.mouse_x < rectangle[2] &&
+        cmdx.window.mouse_y >= rectangle[1] && cmdx.window.mouse_y < rectangle[3];
 }
 
 activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
@@ -787,8 +784,8 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
 draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {   
     // Set up the cursor coordinates for rendering.
-    cursor_x: s32 = screen.first_line_x_position; //screen.rectangle[0] + 5; nocheckin
-    cursor_y: s32 = screen.first_line_y_position; // screen.rectangle[1] + cmdx.font.line_height + 5;
+    cursor_x: s32 = screen.first_line_x_position;
+    cursor_y: s32 = screen.first_line_y_position;
     
     // Set up the color ranges.
     wrapped_before := screen.line_wrapped_before_first;
@@ -830,18 +827,8 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
     // Render the scroll bar to the right
-    first_line_percentage   := cast(f32) (screen.first_line_to_draw) / cast(f32) screen.lines.count;
-    visible_line_percentage := cast(f32) (screen.last_line_to_draw - screen.first_line_to_draw + 1) / cast(f32) screen.lines.count;
-    scrollbar_width := 7;
-    scrollbar_background_height := screen.rectangle[3] - screen.rectangle[1] - 10;
-    scrollbar_foreground_height := cast(s64) (cast(f32) scrollbar_background_height * visible_line_percentage);
-    scrollbar_foreground_offset := cast(s64) (cast(f32) scrollbar_background_height * first_line_percentage);
-    
-    scrollbar_background_color := cmdx.active_theme.colors[Color_Index.Default];
-    scrollbar_foreground_color := cmdx.active_theme.colors[Color_Index.Accent];
-
-    draw_quad(*cmdx.renderer, screen.rectangle[2] - scrollbar_width - 5, screen.rectangle[1] + 5, scrollbar_width, scrollbar_background_height, scrollbar_background_color);
-    draw_quad(*cmdx.renderer, screen.rectangle[2] - scrollbar_width - 5, screen.rectangle[1] + 5 + scrollbar_foreground_offset, scrollbar_width, scrollbar_foreground_height, scrollbar_foreground_color);
+    draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Default]);
+    draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0], screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2], screen.scrollbar_knob_rectangle[3], cmdx.active_theme.colors[Color_Index.Accent]);
     
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
     // see that this is not the active one.
@@ -943,8 +930,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     cmdx.hovered_screen = cmdx.active_screen; // Should no actual screen be hovered because the mouse is outside the window, then just set it to the active screen to avoid any weird glitches
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
-        if (cmdx.window.mouse_x >= screen.rectangle[0] && cmdx.window.mouse_x < screen.rectangle[2] &&
-            cmdx.window.mouse_y >= screen.rectangle[1] && cmdx.window.mouse_y < screen.rectangle[3]) {
+        if mouse_over_rectangle(cmdx, screen.rectangle) {
             cmdx.hovered_screen = screen;
             break;
         }
@@ -1059,7 +1045,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
         update_text_input_rendering_data(*screen.text_input);
         if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
-
+        
         // Handle scrolling in this screen
         new_scroll_target := screen.scroll_target_offset;
 
@@ -1068,7 +1054,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             // indicating that all screens should be scrolled simultaneously
             new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
             if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.lines.count; // Scroll to the bottom of the backlog.
-            if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog. While 0 is not actually a valid scroll target, it makes sure that it goes all the way to the top in the calculate_number_of_visible_lines procedure. The value will be clamped below.
+            if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog.
         }
 
         previous_scroll_offset := screen.scroll_line_offset;
@@ -1111,6 +1097,20 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.line_wrapped_before_first = first_line_to_draw.first < first_line_in_backlog.first;
         
         if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
+
+        // Update the scroll bar of this screen
+        full_scrollbar_width: s32 = 6;
+
+        first_line_percentage   := cast(f32) (screen.first_line_to_draw) / cast(f32) screen.lines.count;
+        visible_line_percentage := cast(f32) (screen.last_line_to_draw - screen.first_line_to_draw + 1) / cast(f32) screen.lines.count;
+        
+        screen.scrollbar_background_rectangle = { screen.rectangle[2] - full_scrollbar_width - 5, screen.rectangle[1] + 5, screen.rectangle[2] - 5, screen.rectangle[3] - 5 };
+
+        scrollbar_background_height := screen.scrollbar_background_rectangle[3] - screen.scrollbar_background_rectangle[1];
+        scrollbar_knob_offset: s32 = cast(s32) (cast(f32) scrollbar_background_height * first_line_percentage);
+        scrollbar_knob_height: s32 = cast(s32) (cast(f32) scrollbar_background_height * visible_line_percentage);
+
+        screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone

@@ -165,9 +165,9 @@ draw_text :: (renderer: *Renderer, font: *Font, text: string, x: s32, y: s32, fo
     render_text_with_font(font, text, x, y, .Left, xx draw_single_glyph, xx renderer);
 }
 
-draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color) {
-    position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
-    scale := v2f.{ xx w, xx h };
+draw_quad :: (renderer: *Renderer, x0: s32, y0: s32, x1: s32, y1: s32, color: Color) {
+    position := v2f.{ xx x0 - xx renderer.width / 2, xx y0 - xx renderer.height / 2 };
+    scale := v2f.{ xx (x1 - x0), xx (y1 - y0) };
     
     if color.a != 255    set_blending(.Default);
     
@@ -182,11 +182,11 @@ draw_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, color: Color)
     if color.a != 255 set_blending(.None);
 }
 
-draw_outlined_quad :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, border: u32, color: Color) {
-    draw_quad(renderer, x, y, w, border, color);
-    draw_quad(renderer, x, y, border, h, color);
-    draw_quad(renderer, x, y + h - border, w, border, color);
-    draw_quad(renderer, x + w - border, y, border, h, color);
+draw_outlined_quad :: (renderer: *Renderer, x0: s32, y0: s32, x1: s32, y1: s32, border: u32, color: Color) {
+    draw_quad(renderer, x0, y0, x1, y0 + border, color); // Top edge
+    draw_quad(renderer, x0, y0, x0 + border, y1, color); // Left edge
+    draw_quad(renderer, x0, y1 - border, x1, y1, color); // Bottom edge
+    draw_quad(renderer, x1 - border, y0, x1, y1, color); // Right edge
 }
 
 draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
@@ -206,7 +206,9 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
         // Draw the actual selection background.
         selection_offset: s32 = query_text_width(font, text_until_selection); // @Cleanup apply kerning from the first char included in the selection to the last char before the selection
         selection_width:  s32 = query_text_width(font, selection_text);
-        draw_quad(renderer, x + prefix_string_width + selection_offset, y - font.ascender, selection_width, font.line_height, selection_color);
+        selection_start_x := x + prefix_string_width + selection_offset;
+        selection_start_y := y - font.ascender;
+        draw_quad(renderer, selection_start_x, selection_start_y, selection_start_x + selection_width, selection_start_y + font.line_height, selection_color);
 
         // Since the background color for the selected part of the input is different, we need to split the
         // text rendering in three parts and set the cursor accordingly.
@@ -231,13 +233,16 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
     // Render the cursor if the text input is active
     cursor_color_raw := theme.colors[Color_Index.Cursor];
     cursor_color_blended := Color.{ cursor_color_raw.r, cursor_color_raw.g, cursor_color_raw.b, xx (input.cursor_alpha * 255) };
-    
+
+    cursor_x := x + prefix_string_width + xx input.cursor_interpolated_position;
+    cursor_y := y - font.ascender;
+   
     if !input.active {
         // If the text input is not active, render an outlined quad as the cursor
-        draw_outlined_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, 1, cursor_color_blended);
+        draw_outlined_quad(renderer, cursor_x, cursor_y, cursor_x + cursor_width, cursor_y + cursor_height, 1, cursor_color_blended);
     } else
         // If the text input is active, render a filled quad
-        draw_quad(renderer, x + prefix_string_width + xx input.cursor_interpolated_position, y - font.ascender, cursor_width, cursor_height, cursor_color_blended);
+        draw_quad(renderer, cursor_x, cursor_y, cursor_x + cursor_width, cursor_y + cursor_height, cursor_color_blended);
 }
 
 
@@ -254,7 +259,7 @@ ui_draw_text :: (cmdx: *CmdX, text: string, position: UI_Vector2, foreground_col
 }
 
 ui_draw_quad :: (cmdx: *CmdX, color: UI_Color, rounding: f32, top_left: UI_Vector2, size: UI_Vector2) {
-    draw_quad(*cmdx.renderer, xx top_left.x, xx top_left.y, xx size.x, xx size.y, convert_ui_color(color));
+    draw_quad(*cmdx.renderer, xx top_left.x, xx top_left.y, xx (top_left.x + size.x), xx (top_left.y + size.y), convert_ui_color(color));
 }
 
 ui_set_scissors :: (cmdx: *CmdX, top_left: UI_Vector2, size: UI_Vector2) {
