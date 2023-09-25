@@ -826,10 +826,20 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
-    // Render the scroll bar to the right
-    draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Default]);
-    draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0], screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2], screen.scrollbar_knob_rectangle[3], cmdx.active_theme.colors[Color_Index.Accent]);
-    
+    // Render the scroll bar only if the backlog is bigger than the available screen size.
+    // If the scrollbar is not hovered, make it a bit thinner.
+    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.lines.count {
+        scrollbar_background_indent: s32 = 0;
+        if !screen.scrollbar_background_hovered scrollbar_background_indent = 2;
+        
+        draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0] + scrollbar_background_indent, screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2] - scrollbar_background_indent, screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Default]);
+
+        scrollbar_knob_color := cmdx.active_theme.colors[Color_Index.Default];
+        if screen.scrollbar_background_hovered scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Accent];
+        
+        draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0], screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2], screen.scrollbar_knob_rectangle[3], scrollbar_knob_color);
+    }
+        
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
     // see that this is not the active one.
     if cmdx.active_screen != screen {
@@ -1111,6 +1121,14 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         scrollbar_knob_height: s32 = cast(s32) (cast(f32) scrollbar_background_height * visible_line_percentage);
 
         screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
+
+        scrollbar_background_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_background_rectangle);
+        scrollbar_knob_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_knob_rectangle);
+
+        if screen.scrollbar_background_hovered != scrollbar_background_hovered || screen.scrollbar_knob_hovered != scrollbar_knob_hovered render_next_frame(cmdx);
+
+        screen.scrollbar_background_hovered = scrollbar_background_hovered;
+        screen.scrollbar_knob_hovered = scrollbar_knob_hovered;
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
