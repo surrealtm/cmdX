@@ -513,10 +513,27 @@ cd :: (cmdx: *CmdX, folder_path: string) {
         win32_free_last_error_string(*error_string);
     }
 }
-    
+
+mkdir :: (cmdx: *CmdX, file_path: string) {
+    absolute_path := get_path_relative_to_cd(cmdx, file_path);
+
+    if !create_folder(absolute_path) {
+        error_string := win32_last_error_to_string();
+        add_formatted_line(cmdx, cmdx.active_screen, "Cannot create folder '%': %", absolute_path, error_string);
+        win32_free_last_error_string(*error_string);
+    }
+}
+
 create_file :: (cmdx: *CmdX, file_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, file_path);
-    
+
+    directory_end_index, directory_end_found := search_path_for_folder_slash_reverse(absolute_path);
+    if directory_end_found {
+        // Make sure that the folder into which the file should be written actually exists.
+        folder := substring_view(absolute_path, 0, directory_end_index);
+        create_folder(folder);
+    }
+        
     if !write_file(absolute_path, "", false) {
         error_string := win32_last_error_to_string();
         add_formatted_line(cmdx, cmdx.active_screen, "Cannot create file '%': %", absolute_path, error_string);

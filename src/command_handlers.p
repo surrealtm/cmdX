@@ -87,6 +87,11 @@ cat_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     cat(cmdx, file_path);
 }
 
+mkdir_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    file_path := get_string_argument(argument_values, 0);
+    mkdir(cmdx, file_path);
+}
+
 create_file_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     file_path := get_string_argument(argument_values, 0);
     create_file(cmdx, file_path);
@@ -186,9 +191,13 @@ register_all_commands :: (cmdx: *CmdX) {
     cat := register_command(cmdx, "cat", "Dumps the contents of the specified file into the backlog", cat_handler);
     register_command_argument(cat, "file_path", .String);
     
+    mkdir := register_command(cmdx, "create_folder", "Creates a new directory if it does not yet exist", mkdir_handler);
+    register_command_alias(mkdir, "mkdir");
+    register_command_argument(mkdir, "folder_path", .String);
+
     cf := register_command(cmdx, "create_file", "Creates a new empty file at the specified relative or absolute path", create_file_handler);
     register_command_argument(cf, "file_path", .String);
-
+    
     cbf := register_command(cmdx, "create_big_file", "Creates a new big file with random content for testing purposes", create_big_file_handler);
     register_command_argument(cbf, "file_path", .String);
     register_command_argument(cbf, "file_size", .Integer);
