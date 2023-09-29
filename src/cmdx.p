@@ -844,7 +844,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // see that this is not the active one.
     if cmdx.active_screen != screen {
         deactive_color := Color.{ 0, 0, 0, 100 };
-        draw_quad(*cmdx.renderer, screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], deactive_color);
+        draw_quad(*cmdx.renderer, screen.rectangle[0], screen.rectangle[1], screen.rectangle[2], screen.rectangle[3], deactive_color);
     }
 
     // Disable scissors after the screen has been rendered to avoid some weird artifacts. To avoid some left-over
@@ -1060,13 +1060,18 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         new_scroll_target := screen.scroll_target_offset;
 
         if cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift] {
-            // Only actually do scrolling if this is either the active screen, or the shift key is held,
+            // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
             new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+        }
+
+        if cmdx.active_screen == screen {
+            // Only actually do keyboard scrolling if this is either the active screen, or the shift key is held,
+            // indicating that all screens should be scrolled simultaneously
             if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.lines.count; // Scroll to the bottom of the backlog.
             if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog.
         }
-
+        
         previous_scroll_offset := screen.scroll_line_offset;
 
         // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
