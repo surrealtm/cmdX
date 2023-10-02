@@ -419,6 +419,16 @@ config :: (cmdx: *CmdX) {
     }
 }
 
+overlay :: (cmdx: *CmdX, string_flag: string) {
+    flag: Draw_Overlay = .None;
+
+    if compare_strings(string_flag, "line_backgrounds") flag = .Line_Backgrounds;
+    else if compare_strings(string_flag, "whitespaces") flag = .Whitespaces;
+    else add_formatted_line(cmdx, cmdx.active_screen, "The specified overlay flag '%' does not exist.", string_flag);
+
+    cmdx.draw_overlays ^= flag; // Toggle the flag in the bitfield
+}
+
 edit_property :: (cmdx: *CmdX, property_name: string, property_value: string) {
     property := find_property(*cmdx.config, property_name);
     if !property {

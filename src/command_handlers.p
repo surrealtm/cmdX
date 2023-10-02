@@ -43,6 +43,11 @@ config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     config(cmdx);
 }
 
+overlay_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+    string_flag := get_string_argument(argument_values, 0);
+    overlay(cmdx, string_flag);
+}
+
 edit_property_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     property_name := get_string_argument(argument_values, 0);
     property_value := get_string_argument(argument_values, 1);
@@ -164,6 +169,9 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
     register_command(cmdx, ":config", "Prints information about the current config", config_handler);
 
+    overlay := register_command(cmdx, ":overlay", "Toggles whether a specific overlay should be drawn.", overlay_handler);
+    register_command_argument(overlay, "flag", .String);
+    
     edit_property := register_command(cmdx, ":edit-property", "Assigns a new value to a generic property", edit_property_handler);
     register_command_argument(edit_property, "property_name", .String);
     register_command_argument(edit_property, "property_value", .String);
