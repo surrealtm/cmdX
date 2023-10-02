@@ -941,6 +941,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         activate_screen(cmdx, screen);
     }
 
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.mouse_scroll_turns != 0 {
+        cmdx.font_size += xx cmdx.window.mouse_scroll_turns;
+        update_font(cmdx);
+        render_next_frame(cmdx);
+    }
+    
     // Update the mouse-hovered screen.
     cmdx.hovered_screen = cmdx.active_screen; // Should no actual screen be hovered because the mouse is outside the window, then just set it to the active screen to avoid any weird glitches
     for it := cmdx.screens.first; it != null; it = it.next {
@@ -1072,7 +1078,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         new_scroll_target := screen.scroll_target_offset;
 
-        if cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift] {
+        if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
             // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
             new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
@@ -1087,6 +1093,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         previous_scroll_offset := screen.scroll_line_offset;
 
+
+        
+        
         //
         // Set up drawing data for this frame
         //
