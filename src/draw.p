@@ -226,8 +226,8 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
     flush_font_buffer(renderer);
     
     // Calculate the cursor size
-    cursor_width:  u32 = query_text_width(font, "M");
-    cursor_height: u32 = font.line_height;
+    cursor_width:  s32 = query_text_width(font, "M");
+    cursor_height: s32 = font.line_height;
     if input.cursor != input.count   cursor_width = 2; // If the cursor is in between characters, make it smaller so that it does not obscur any characters
     
     // Render the cursor if the text input is active
@@ -236,7 +236,7 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
 
     cursor_x := x + prefix_string_width + xx input.cursor_interpolated_position;
     cursor_y := y - font.ascender;
-   
+    
     if !input.active {
         // If the text input is not active, render an outlined quad as the cursor
         draw_outlined_quad(renderer, cursor_x, cursor_y, cursor_x + cursor_width, cursor_y + cursor_height, 1, cursor_color_blended);

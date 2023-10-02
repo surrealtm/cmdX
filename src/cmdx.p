@@ -833,7 +833,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
 
         if cmdx.draw_overlays & .Line_Backgrounds {
-            draw_quad(*cmdx.renderer, screen.first_line_x_position, cursor_y - cmdx.font.ascender, cursor_x, cursor_y - cmdx.font.descender, .{ 255, 255, 0, 255 });
+            draw_quad(*cmdx.renderer, screen.first_line_x_position, cursor_y - cmdx.font.line_height, cursor_x, cursor_y, .{ 255, 255, 0, 255 });
         }
 
         // If this is not the last line in the backlog, position the cursor on the next line.
@@ -1127,7 +1127,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5);
         complete_lines_fitting_on_screen: s64 = min(active_screen_size / cmdx.font.line_height, screen.lines.count);
         partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_size / xx cmdx.font.line_height), screen.lines.count);
-
+        
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
         highest_allowed_scroll_offset := screen.lines.count - complete_lines_fitting_on_screen;
@@ -1514,19 +1514,19 @@ cmdx :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
 
     // Set up all the required config properties, and read the config file if it exists
-    create_s64_property(*cmdx.config, "backlog-size",       *cmdx.backlog_size);
-    create_s64_property(*cmdx.config, "history-size",       *cmdx.history_size);
-    create_s64_property(*cmdx.config, "scroll-speed",       *cmdx.scroll_speed);
-    create_string_property(*cmdx.config, "theme",           *cmdx.active_theme_name);
-    create_string_property(*cmdx.config, "font-name",       *cmdx.font_path);
-    create_s64_property(*cmdx.config, "font-size",          *cmdx.font_size);
-    create_bool_property(*cmdx.config, "window-borderless", *cmdx.disabled_title_bar);
-    create_s32_property(*cmdx.config, "window-x",           *cmdx.window.xposition);
-    create_s32_property(*cmdx.config, "window-y",           *cmdx.window.yposition);
-    create_u32_property(*cmdx.config, "window-width",       *cmdx.window.width);
-    create_u32_property(*cmdx.config, "window-height",      *cmdx.window.height);
-    create_bool_property(*cmdx.config, "window-maximized",  *cmdx.window.maximized);
-    create_f32_property(*cmdx.config, "window-fps", *cmdx.requested_fps);
+    create_s64_property(*cmdx.config,    "backlog-size",      *cmdx.backlog_size);
+    create_s64_property(*cmdx.config,    "history-size",      *cmdx.history_size);
+    create_s64_property(*cmdx.config,    "scroll-speed",      *cmdx.scroll_speed);
+    create_string_property(*cmdx.config, "theme",             *cmdx.active_theme_name);
+    create_string_property(*cmdx.config, "font-name",         *cmdx.font_path);
+    create_s64_property(*cmdx.config,    "font-size",         *cmdx.font_size);
+    create_bool_property(*cmdx.config,   "window-borderless", *cmdx.disabled_title_bar);
+    create_s32_property(*cmdx.config,    "window-x",          *cmdx.window.xposition);
+    create_s32_property(*cmdx.config,    "window-y",          *cmdx.window.yposition);
+    create_u32_property(*cmdx.config,    "window-width",      *cmdx.window.width);
+    create_u32_property(*cmdx.config,    "window-height",     *cmdx.window.height);
+    create_bool_property(*cmdx.config,   "window-maximized",  *cmdx.window.maximized);
+    create_f32_property(*cmdx.config,    "window-fps",        *cmdx.requested_fps);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer
@@ -1616,5 +1616,3 @@ WinMain :: () -> s32 {
 
 // @Incomplete store history in a file to restore it after program restart
 // @Incomplete put all these screen hotkeys into the config file somehow (create, close, next screen...)
-// @Incomplete draw-line-backgrounds mode to debug whether the seemingly empty line at maximized window
-// is actually valid on the top of the backlog
