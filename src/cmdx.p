@@ -1048,15 +1048,23 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             win32_detach_spawned_process(cmdx, screen);
         }
 
+        //
         // Update the text input's cursor rendering data
+        //
         text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
         text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
         cursor_alpha_previous := screen.text_input.cursor_alpha;
         set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
         update_text_input_rendering_data(*screen.text_input);
         if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+
+
+
         
+        //
         // Handle scrolling in this screen
+        //
+        
         new_scroll_target := screen.scroll_target_offset;
 
         if cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift] {
@@ -1074,36 +1082,44 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         previous_scroll_offset := screen.scroll_line_offset;
 
+        //
+        // Set up drawing data for this frame
+        //
+        
         // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
         // go below that number. This means that we cannot scroll past the very first line at the very top
-        // of the screen.        
+        // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
+        // with the top-most line potentially being partly cut off at the top of the window.
         active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5);
-        complete_lines_fitting_on_active_screen_size := active_screen_size / cmdx.font.line_height;
-        
-        complete_drawn_line_count     := min(complete_lines_fitting_on_active_screen_size, screen.lines.count);
-        highest_allowed_scroll_offset := screen.lines.count - complete_drawn_line_count;
-        
+        complete_lines_fitting_on_screen: s64 = min(active_screen_size / cmdx.font.line_height, screen.lines.count);
+        partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_size / xx cmdx.font.line_height), screen.lines.count);
+               
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
-        screen.scroll_target_offset  = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
-        screen.scroll_interpolation += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
-        screen.scroll_line_offset    = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
+        highest_allowed_scroll_offset := screen.lines.count - complete_lines_fitting_on_screen;
+        screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
+        screen.scroll_interpolation   += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
+        screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
 
-        // Calculate the actual number of drawn lines at the new scrolling offset.        
-        partial_lines_fitting_on_active_screen_size := complete_lines_fitting_on_active_screen_size;
-        if screen.scroll_line_offset > 0 partial_lines_fitting_on_active_screen_size = xx ceilf(xx active_screen_size / xx cmdx.font.line_height); // When we are not completely scrolled to the top, allow lines before the scroll offset to be partially cut off of the screen
-        partial_drawn_line_count := min(partial_lines_fitting_on_active_screen_size, screen.lines.count);
+        // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
+        // scrolled all the way to the top, allow one line to be cut off partially.
+        final_drawn_line_count: s64 = 0;
+        if screen.scroll_line_offset > 0 {
+            final_drawn_line_count = partial_lines_fitting_on_screen;
+        } else
+            final_drawn_line_count = complete_lines_fitting_on_screen;
         
-        screen.first_line_to_draw = screen.scroll_line_offset - (partial_drawn_line_count - complete_drawn_line_count);
-        screen.last_line_to_draw  = screen.first_line_to_draw + partial_drawn_line_count - 1;
+        screen.first_line_to_draw = screen.scroll_line_offset - (final_drawn_line_count - complete_lines_fitting_on_screen);
+        screen.last_line_to_draw  = screen.first_line_to_draw + final_drawn_line_count - 1;
 
         // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
         // the input line. If we are completely scrolled to the bottom, that line is shared between the
         // backlog and the input line.
         if screen.last_line_to_draw != screen.lines.count - 1 --screen.last_line_to_draw;
-        
+
+        // Set the appropriate screen space coordinates for the first backlog line to be drawn.
         screen.first_line_x_position = screen.rectangle[0] + 5;
-        screen.first_line_y_position = screen.rectangle[3] - (partial_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
+        screen.first_line_y_position = screen.rectangle[3] - (final_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
 
         // If any of the lines above the first line to be rendered already wrapped around the backlog, that
         // information needs to be stored for drawing each backlog line to properly handle color wrapping.
@@ -1113,17 +1129,35 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         
         if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
 
-        // Update the scroll bar of this screen
+        
+
+        
+        //
+        // Update the scroll bar of this screen. The scroll bar is always oriented around the scroll target, not
+        // the scroll position. This looks smoother when a lot of input is coming in (the knob doesn't jump
+        // around), and the user also expects to control the scroll target with the knob, not the scroll posiiton.
+        // For that to work, we need to manually calculate the first and last line that would be drawn if the
+        // scroll target was the actual scroll position right now, since that is what the scroll bar should
+        // represent.
+        //
+        
         full_scrollbar_width: s32 = 6;
 
-        first_line_percentage   := cast(f32) (screen.first_line_to_draw) / cast(f32) screen.lines.count;
-        visible_line_percentage := cast(f32) (screen.last_line_to_draw - screen.first_line_to_draw + 1) / cast(f32) screen.lines.count;
+        visible_lines_in_scrollbar_area: s64 = 0;
+        if screen.scroll_target_offset > 0 {
+            visible_lines_in_scrollbar_area = partial_lines_fitting_on_screen;
+        } else
+            visible_lines_in_scrollbar_area = complete_lines_fitting_on_screen;
+
+        first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - (visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen);        
+        first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.lines.count;
+        visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.lines.count;
         
         screen.scrollbar_background_rectangle = { screen.rectangle[2] - full_scrollbar_width - 5, screen.rectangle[1] + 5, screen.rectangle[2] - 5, screen.rectangle[3] - 5 };
 
         scrollbar_background_height := screen.scrollbar_background_rectangle[3] - screen.scrollbar_background_rectangle[1];
-        scrollbar_knob_offset: s32 = cast(s32) (cast(f32) scrollbar_background_height * first_line_percentage);
-        scrollbar_knob_height: s32 = cast(s32) (cast(f32) scrollbar_background_height * visible_line_percentage);
+        scrollbar_knob_offset: s64 = cast(s32) (cast(f64) scrollbar_background_height * first_line_percentage);
+        scrollbar_knob_height: s64 = cast(s32) (cast(f64) scrollbar_background_height * visible_line_percentage);
 
         screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
 
@@ -1435,18 +1469,18 @@ cmdx :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
 
     // Set up all the required config properties, and read the config file if it exists
-    create_s64_property(*cmdx.config, "backlog-size", *cmdx.backlog_size);
-    create_s64_property(*cmdx.config, "history-size", *cmdx.history_size);
-    create_s64_property(*cmdx.config, "scroll-speed", *cmdx.scroll_speed);
-    create_string_property(*cmdx.config, "theme", *cmdx.active_theme_name);
-    create_string_property(*cmdx.config, "font-name", *cmdx.font_path);
-    create_s64_property(*cmdx.config, "font-size",     *cmdx.font_size);
+    create_s64_property(*cmdx.config, "backlog-size",       *cmdx.backlog_size);
+    create_s64_property(*cmdx.config, "history-size",       *cmdx.history_size);
+    create_s64_property(*cmdx.config, "scroll-speed",       *cmdx.scroll_speed);
+    create_string_property(*cmdx.config, "theme",           *cmdx.active_theme_name);
+    create_string_property(*cmdx.config, "font-name",       *cmdx.font_path);
+    create_s64_property(*cmdx.config, "font-size",          *cmdx.font_size);
     create_bool_property(*cmdx.config, "window-borderless", *cmdx.disabled_title_bar);
-    create_s32_property(*cmdx.config, "window-x",      *cmdx.window.xposition);
-    create_s32_property(*cmdx.config, "window-y",      *cmdx.window.yposition);
-    create_u32_property(*cmdx.config, "window-width",  *cmdx.window.width);
-    create_u32_property(*cmdx.config, "window-height", *cmdx.window.height);
-    create_bool_property(*cmdx.config, "window-maximized", *cmdx.window.maximized);
+    create_s32_property(*cmdx.config, "window-x",           *cmdx.window.xposition);
+    create_s32_property(*cmdx.config, "window-y",           *cmdx.window.yposition);
+    create_u32_property(*cmdx.config, "window-width",       *cmdx.window.width);
+    create_u32_property(*cmdx.config, "window-height",      *cmdx.window.height);
+    create_bool_property(*cmdx.config, "window-maximized",  *cmdx.window.maximized);
     create_f32_property(*cmdx.config, "window-fps", *cmdx.requested_fps);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
@@ -1522,12 +1556,6 @@ cmdx :: () -> s32 {
     return 0;
 }
 
-/*
-Depending on the selected subsystem, one of these main procedures will be exported in the object file.
-The command to compile this program is:
-  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
-*/
-
 main :: () -> s32 {
     return cmdx();
 }
@@ -1536,5 +1564,12 @@ WinMain :: () -> s32 {
     return cmdx();
 }
 
+/*
+  The command to compile this program is:
+  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
+*/
+
 // @Incomplete store history in a file to restore it after program restart
 // @Incomplete put all these screen hotkeys into the config file somehow (create, close, next screen...)
+// @Incomplete draw-line-backgrounds mode to debug whether the seemingly empty line at maximized window
+// is actually valid on the top of the backlog
