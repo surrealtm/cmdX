@@ -89,7 +89,8 @@ CmdX_Screen :: struct {
     scroll_target_offset: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
-
+    enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
+    
     // Drawing data cached for this screen
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the lines should start
     first_line_y_position: s64; // The y-position in screen-pixel-space at which the first line should be rendered.
@@ -448,8 +449,12 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     }
 
     ++screen.viewport_height;
-    screen.scroll_target_offset = xx screen.lines.count; // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
-
+    
+    if screen.enable_auto_scroll {
+        // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
+        screen.scroll_target_offset = xx screen.lines.count;
+    }
+    
     render_next_frame(cmdx);
 }
 
@@ -1100,7 +1105,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
         screen.scroll_interpolation   += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
-
+        screen.enable_auto_scroll = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
+        
         // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
         // scrolled all the way to the top, allow one line to be cut off partially.
         final_drawn_line_count: s64 = 0;
