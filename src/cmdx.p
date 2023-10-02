@@ -103,6 +103,7 @@ CmdX_Screen :: struct {
     scrollbar_background_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar background. This changes the visual feedback to the user to indicate the hovering
     scrollbar_knob_rectangle: [4]s32; // The top left and bottom right screen coordinates for the knob on the scrollbar
     scrollbar_knob_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar knob. This changes the visual feedback to the user to indicate the hovering
+    scrollbar_knob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
     
     // Subprocess data
     current_directory: string;
@@ -841,6 +842,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
         scrollbar_knob_color := cmdx.active_theme.colors[Color_Index.Default];
         if screen.scrollbar_background_hovered scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Accent];
+        if screen.scrollbar_knob_dragged scrollbar_knob_color = .{ 255, 0, 0, 255 };
         
         draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0], screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2], screen.scrollbar_knob_rectangle[3], scrollbar_knob_color);
     }
@@ -1176,13 +1178,23 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
         screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
 
+
+        //
+        // Handle mouse input on the scrollbar
+        //
+        
         scrollbar_background_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_background_rectangle);
         scrollbar_knob_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_knob_rectangle);
+        scrollbar_knob_dragged := screen.scrollbar_knob_dragged;
+        
+        if screen.scrollbar_knob_hovered && cmdx.window.button_pressed[Button_Code.Left] scrollbar_knob_dragged = true;
+        if !cmdx.window.button_held[Button_Code.Left] scrollbar_knob_dragged = false;
 
-        if screen.scrollbar_background_hovered != scrollbar_background_hovered || screen.scrollbar_knob_hovered != scrollbar_knob_hovered render_next_frame(cmdx);
+        if screen.scrollbar_background_hovered != scrollbar_background_hovered || screen.scrollbar_knob_hovered != scrollbar_knob_hovered || screen.scrollbar_knob_dragged != scrollbar_knob_dragged render_next_frame(cmdx);
 
         screen.scrollbar_background_hovered = scrollbar_background_hovered;
         screen.scrollbar_knob_hovered = scrollbar_knob_hovered;
+        screen.scrollbar_knob_dragged = scrollbar_knob_dragged;
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
