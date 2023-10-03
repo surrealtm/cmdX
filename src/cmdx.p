@@ -36,10 +36,11 @@ ARIAL            :: "C:/windows/fonts/arial.ttf";
 FIRACODE_REGULAR :: "C:/source/cmdX/run_tree/data/FiraCode-Regular.ttf";
 
 Color_Index :: enum {
-    Default;
-    Cursor;
-    Accent;
-    Background;
+    Default;    // The default font color
+    Cursor;     // The color of the cursor
+    Accent;     // The color of highlit text, e.g. input lines
+    Background; // The background of the terminal backlog
+    Scrollbar;  // The background of the scrollbar
 }
 
 Draw_Overlay :: enum {
@@ -110,6 +111,7 @@ CmdX_Screen :: struct {
     scrollbar_knob_rectangle: [4]s32; // The top left and bottom right screen coordinates for the knob on the scrollbar
     scrollbar_knob_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar knob. This changes the visual feedback to the user to indicate the hovering
     scrollbar_knob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
+    scrollbar_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
 
     // Subprocess data
     current_directory: string;
@@ -846,23 +848,27 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         ++current_line_index;
     }
 
-    // Render the text input at the end of the backlog
+    // Draw the text input at the end of the backlog
     prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
-    // Render the scroll bar only if the backlog is bigger than the available screen size.
+    // Draw the scroll bar only if the backlog is bigger than the available screen size.
     // If the scrollbar is not hovered, make it a bit thinner.
     if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.lines.count {
-        scrollbar_background_indent: s32 = 0;
-        if !screen.scrollbar_background_hovered scrollbar_background_indent = 2;
+        // The scrollbar background rectangle is used to detect whether the mouse is currently hovering it.
+        // The visual of the background is a bit smaller to not look as distracting, but the hitbox being
+        // bigger should make it easier to select.
+        scrollbar_background_indent: s32 = 2;
+        scrollbar_knob_indent: s32 = 2;
+        if screen.scrollbar_background_hovered || screen.scrollbar_knob_dragged scrollbar_background_indent = 4;
 
-        draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0] + scrollbar_background_indent, screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2] - scrollbar_background_indent, screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Default]);
+        draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0] + scrollbar_background_indent, screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2] - scrollbar_background_indent, screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Scrollbar]);
 
         scrollbar_knob_color := cmdx.active_theme.colors[Color_Index.Default];
-        if screen.scrollbar_background_hovered scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Accent];
-        if screen.scrollbar_knob_dragged scrollbar_knob_color = .{ 255, 0, 0, 255 };
+        if screen.scrollbar_background_hovered scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Default];
+        if screen.scrollbar_knob_dragged scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Accent];
 
-        draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0], screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2], screen.scrollbar_knob_rectangle[3], scrollbar_knob_color);
+        draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0] + scrollbar_knob_indent, screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2] - scrollbar_knob_indent, screen.scrollbar_knob_rectangle[3], scrollbar_knob_color);
     }
 
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
@@ -1176,15 +1182,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // represent.
         //
 
-        full_scrollbar_width: s32 = 6;
+        full_scrollbar_width: s32 = 10;
 
         visible_lines_in_scrollbar_area: s64 = 0;
-        if screen.scroll_target_offset > 0 {
+        if screen.scroll_target_offset >= 1 {
             visible_lines_in_scrollbar_area = partial_lines_fitting_on_screen;
         } else
             visible_lines_in_scrollbar_area = complete_lines_fitting_on_screen;
 
-        first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - (visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen);
+        first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
+        
+        first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
         first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.lines.count;
         visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.lines.count;
 
@@ -1195,19 +1203,41 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         scrollbar_knob_height: s64 = cast(s32) (cast(f64) scrollbar_background_height * visible_line_percentage);
 
         screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
-
+        
 
         //
-        // Handle mouse input on the scrollbar
+        // Handle mouse input on the scrollbar. Store the input state in local variables first, and then check
+        // if anything changed to the last frame, so that a new frame is only rendered if the state (and
+        // therefore the visual feedback on screen) changed.
         //
 
         scrollbar_background_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_background_rectangle);
         scrollbar_knob_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_knob_rectangle);
         scrollbar_knob_dragged := screen.scrollbar_knob_dragged;
 
-        if screen.scrollbar_knob_hovered && cmdx.window.button_pressed[Button_Code.Left] scrollbar_knob_dragged = true;
-        if !cmdx.window.button_held[Button_Code.Left] scrollbar_knob_dragged = false;
+        if scrollbar_knob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+            scrollbar_knob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
+            screen.scrollbar_drag_offset = xx (cmdx.window.mouse_y - screen.scrollbar_knob_rectangle[1]);
+        }
+            
+        if !scrollbar_knob_dragged && scrollbar_background_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+            // If the user left-clicked somewhere on the scrollbar outside of the knob, then immediatly move
+            // the knob to the mouse position, and start dragging. The knob's center should be placed under
+            // the cursor, that feels juicy when warping the knob under the cursor.
+            scrollbar_knob_dragged = true;
+            screen.scrollbar_drag_offset = xx (screen.scrollbar_knob_rectangle[3] - screen.scrollbar_knob_rectangle[1]) / 2;
+        }
 
+        if scrollbar_knob_dragged {
+            target_inside_scrollbar_area: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_background_rectangle[1]) - screen.scrollbar_drag_offset;
+            percentage_inside_scrollbar_area: f64 = target_inside_scrollbar_area / xx (screen.scrollbar_background_rectangle[3] - screen.scrollbar_background_rectangle[1]);
+
+            target_line_in_backlog: f64 = percentage_inside_scrollbar_area * xx screen.lines.count + xx first_line_offset;
+            screen.scroll_target_offset = target_line_in_backlog;
+        }
+        
+        if !cmdx.window.button_held[Button_Code.Left] scrollbar_knob_dragged = false; // Stop dragging the knob when the user released the left mouse button
+        
         if screen.scrollbar_background_hovered != scrollbar_background_hovered || screen.scrollbar_knob_hovered != scrollbar_knob_hovered || screen.scrollbar_knob_dragged != scrollbar_knob_dragged render_next_frame(cmdx);
 
         screen.scrollbar_background_hovered = scrollbar_background_hovered;
@@ -1380,6 +1410,8 @@ welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
     add_line(cmdx, screen, "Use the :help command as a starting point.");
     add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
     new_line(cmdx, screen); // Insert a new line for more visual clarity
+
+    for i := 0; i < 100; ++i add_formatted_line(cmdx, screen, "Welcome to cmdx :)"); // nocheckin
 }
 
 get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
@@ -1390,13 +1422,14 @@ get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
     return finish_string_builder(*string_builder);
 }
 
-create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color) -> *Theme {
+create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color, scrollbar: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
     theme.colors[Color_Index.Default]    = default;
     theme.colors[Color_Index.Cursor]     = cursor;
     theme.colors[Color_Index.Accent]     = accent;
     theme.colors[Color_Index.Background] = background;
+    theme.colors[Color_Index.Scrollbar]  = scrollbar;
     return theme;
 }
 
@@ -1544,11 +1577,11 @@ cmdx :: () -> s32 {
     update_font(*cmdx);
 
     // Create the builtin themes
-    create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 });
-    create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 });
-    create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 });
-    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 });
-    create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 });
+    create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 }, .{ 100, 100, 100, 255 });
     update_active_theme_pointer(*cmdx);
 
     // Create the ui
