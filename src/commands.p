@@ -342,8 +342,7 @@ clear :: (cmdx: *CmdX) {
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
-    cmdx.active_theme_name = copy_string(theme_name, Default_Allocator);
-    update_active_theme_pointer(cmdx);
+    update_active_theme_pointer(cmdx, theme_name);
 }
 
 theme_lister :: (cmdx: *CmdX) {

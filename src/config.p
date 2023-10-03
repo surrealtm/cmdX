@@ -45,7 +45,7 @@ Config :: struct {
     allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
     actions: [..]Action;
-    
+
     accumulate_errors: bool; // When the config file is currently being read, then all errors should be accumulated and reported together for better formatting. If some other process uses the config_error, then it should be immediately printed onto the screen.
     error_messages: [..]string;
 
@@ -55,14 +55,14 @@ Config :: struct {
 
 property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
-    
+
     switch #complete type {
     case .String; result = "String";
     case .Bool; result = "Bool";
-    case .S64, .S32, .U32; result = "Integer";        
+    case .S64, .S32, .U32; result = "Integer";
     case .F32; result = "Float";
     }
-    
+
     return result;
 }
 
@@ -120,18 +120,18 @@ find_property :: (config: *Config, name: string) -> *Property {
         property := array_get(*config.properties, i);
         if compare_strings(property.name, name) return property;
     }
-    
+
     return null;
 }
 
 assign_property_value_from_string :: (config: *Config, property: *Property, value_string: string) -> bool {
     valid := false;
-    
+
     switch #complete property.type {
     case .String;
         ~property.value._string = copy_string(value_string, config.allocator);
         valid = true;
-        
+
     case .Bool;
         result: bool = ---;
         result, valid = string_to_bool(value_string);
@@ -146,10 +146,10 @@ assign_property_value_from_string :: (config: *Config, property: *Property, valu
         result: s32 = ---;
         result, valid = string_to_int(value_string);
         if valid ~property.value._s32 = result;
-        
+
     case .U32;
         result: u32 = ---;
-        result, valid = string_to_int(value_string); 
+        result, valid = string_to_int(value_string);
         if valid ~property.value._u32 = result;
 
     case .F32;
@@ -169,7 +169,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
         return;
     }
-    
+
     name  := trim_string_right(substring_view(line, 0, space));
     value := trim_string(substring_view(line, space + 1, line.count));
     if value.count > 1 && value[0] == '"' && value[value.count - 1] == '"' value = substring_view(value, 1, value.count - 1);
@@ -179,7 +179,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
         config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
         return;
     }
-    
+
     property := find_property(config, name);
     if !property {
         config_error(cmdx, "Malformed config property in line %:", line_count);
@@ -188,7 +188,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     }
 
     valid := assign_property_value_from_string(config, property, value);
-    
+
     if !valid {
         config_error(cmdx, "Malformed config property in line %:", line_count);
         config_error(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
@@ -200,7 +200,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     config.properties.allocator = config.allocator;
     config.actions.allocator    = config.allocator;
     config.accumulate_errors    = true;
-    
+
     file_data, found := read_file(file_path);
     if !found return false; // No config file could be found
 
@@ -223,16 +223,16 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     // Start parsing the config file
     original_file_data := file_data;
     defer free_file_data(original_file_data);
-    
+
     version_line := get_first_line(*file_data);
-    
+
     line_count := 1; // Version line was already read
-    
+
     current_section := Section_Type.Unknown; // Mark as "no section has been encountered yet"
-    
+
     while file_data.count {
         ++line_count;
-        
+
         line := get_first_line(*file_data);
 
         hashtag, found_hashtag := search_string(line, '#');
@@ -240,9 +240,9 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         if found_hashtag line = substring_view(line, 0, hashtag);
 
         line = trim_string(line);
-        
+
         if line.count == 0 continue; // Ignore empty lines. Since the line was already cut with the #-symbol for comments, and trimmed to exclude any trailing whitespace, this will catch any line that does not actually hold some content to parse
-        
+
         if line[0] == ':' && line[1] == '/' {
             // New section identifier. Try to parse the section type and move on to the next line
             identifier := substring_view(line, 2, line.count);
@@ -255,10 +255,10 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
                 config_error(cmdx, "    Unknown section identifier.");
                 current_section = 0;
             }
-            
+
             continue;
         }
-        
+
         switch #complete current_section {
         case .General; read_property(cmdx, config, line, line_count);
         case .Actions; read_action(cmdx, config, line, line_count);
@@ -274,24 +274,24 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         config.last_modification_check = get_hardware_time();
         config.last_modification_time = file_info.last_modified_time;
     }
-    
+
     return true;
 }
 
 write_config_file :: (config: *Config, file_path: string) {
     delete_file(file_path); // Delete the file to write a fresh version of the config into it
-    
+
     file_printer: Print_Buffer = ---;
     create_file_printer(*file_printer, file_path);
-    
+
     bprint(*file_printer, "[1] # version number, do not change\n");
     bprint(*file_printer, ":/general\n");
-    
+
     for i := 0; i < config.properties.count; ++i {
         // Write property to file
         property := array_get(*config.properties, i);
         bprint(*file_printer, "% ", property.name);
-        
+
         switch #complete property.type {
         case .String;  bprint(*file_printer, "\"%\"", ~property.value._string);
         case .Bool;    bprint(*file_printer, "%", ~property.value._bool);
@@ -300,15 +300,15 @@ write_config_file :: (config: *Config, file_path: string) {
         case .U32;     bprint(*file_printer, "%", ~property.value._u32);
         case .F32;     bprint(*file_printer, "%", ~property.value._f32);
         }
-        
+
         bprint(*file_printer, "\n");
     }
-    
+
     bprint(*file_printer, "\n");
     bprint(*file_printer, ":/actions\n");
-    
+
     write_actions_to_file(*config.actions, *file_printer);
-    
+
     close_file_printer(*file_printer);
 }
 
@@ -319,7 +319,7 @@ check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
     if time_since_last_check > CONFIG_HOTLOAD_CHECK_INTERVAL {
         file_info, success := get_file_information(CONFIG_FILE_NAME); // @@Speed maybe only query the time here, not the complete file information.
         config.last_modification_check = current_hardware_time;
-        
+
         if success && config.last_modification_time < file_info.last_modified_time {
             // If the file has changed since the last time we read it, then reload the config.
             // This will set the last modification time for this config.
@@ -355,13 +355,13 @@ reload_config :: (cmdx: *CmdX, reload_command: bool) {
 
     // Now that the values of the config have been updated, we need to actually apply these new values to cmdX.
     apply_config_changes(cmdx);
-    
+
     flush_config_errors(cmdx, reload_command); // Now display any config errors that may have been encountered during the last parse
     render_next_frame(cmdx);
 }
 
 apply_config_changes :: (cmdx: *CmdX) {
-    update_active_theme_pointer(cmdx);
+    update_active_theme_pointer(cmdx, cmdx.active_theme_name);
     update_font(cmdx);
     update_backlog_size(cmdx);
     update_history_size(cmdx);
@@ -385,7 +385,7 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
         set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
         add_formatted_text(cmdx, cmdx.active_screen, format, ..parameters);
         new_line(cmdx, cmdx.active_screen);
-        set_themed_color(cmdx.active_screen, .Default);    
+        set_themed_color(cmdx.active_screen, .Default);
     }
 }
 
@@ -395,10 +395,12 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
 // If the config was reloaded from a command, it is the other way around. We want a new-line before (which is
 // not there), but the command-handling automatically does one after the command, so we do not want one there.
 flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
+    cmdx.config.accumulate_errors = false;
+
     if !cmdx.config.error_messages.count return false;
 
     if reload_command new_line(cmdx, cmdx.active_screen);
-    
+
     set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
     for i := 0; i < cmdx.config.error_messages.count; ++i {
         message := array_get_value(*cmdx.config.error_messages, i);
@@ -407,10 +409,9 @@ flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
     }
 
     if !reload_command new_line(cmdx, cmdx.active_screen);
-    
-    set_themed_color(cmdx.active_screen, .Default);    
+
+    set_themed_color(cmdx.active_screen, .Default);
     array_clear(*cmdx.config.error_messages);
-    cmdx.config.accumulate_errors = false;
 
     return true;
 }

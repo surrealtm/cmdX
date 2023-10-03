@@ -1410,8 +1410,6 @@ welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
     add_line(cmdx, screen, "Use the :help command as a starting point.");
     add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
     new_line(cmdx, screen); // Insert a new line for more visual clarity
-
-    for i := 0; i < 100; ++i add_formatted_line(cmdx, screen, "Welcome to cmdx :)"); // nocheckin
 }
 
 get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
@@ -1433,18 +1431,25 @@ create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accen
     return theme;
 }
 
-update_active_theme_pointer :: (cmdx: *CmdX) {
+update_active_theme_pointer :: (cmdx: *CmdX, theme_name: string) {
     // Try to find a theme in the list with the specified name
     for i := 0; i < cmdx.themes.count; ++i {
         t := array_get(*cmdx.themes, i);
-        if compare_strings(t.name, cmdx.active_theme_name) {
+        if compare_strings(t.name, theme_name) {
+            // Always keep the active_theme_name on the config allocator, as it may also come from a command
+            // or something similar. This way, we can always free it properly and don't leak anything. In case
+            // the theme_name parameter is the active_theme_name (e.g. when reloading the config), copy the
+            // string before freeing it.
+            previous_string := cmdx.active_theme_name;
+            cmdx.active_theme_name = copy_string(theme_name, cmdx.config.allocator);
+            free_string(previous_string, cmdx.config.allocator);
             cmdx.active_theme = t;
             return;
         }
     }
 
     // No theme with that name could be found. Report it back to the user.
-    config_error(cmdx, "No loaded theme named '%' could be found.", cmdx.active_theme_name);
+    config_error(cmdx, "No loaded theme named '%' could be found.", theme_name);
 
     if !cmdx.active_theme {
         // If there is no valid active theme pointer, revert back to the default since a theme pointer
@@ -1580,9 +1585,9 @@ cmdx :: () -> s32 {
     create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 }, .{ 100, 100, 100, 255 });
     create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 }, .{ 100, 100, 100, 255 });
     create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 }, .{ 100, 100, 100, 255 });
-    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 200, 200, 200, 255 });
     create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 }, .{ 100, 100, 100, 255 });
-    update_active_theme_pointer(*cmdx);
+    update_active_theme_pointer(*cmdx, cmdx.active_theme_name);
 
     // Create the ui
     ui_callbacks: UI_Callbacks = .{
