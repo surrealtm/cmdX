@@ -340,6 +340,13 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
             total_removed_range.one_plus_last = existing_line.one_plus_last;
             total_removed_range.wrapped       = total_removed_range.one_plus_last < total_removed_range.first;
             array_remove(*screen.lines, 0);
+
+            // Since the scroll offset is an index into the backlog, we need to adjust the scroll offset
+            // whenever indices shift. The text on screen should not visually move, so disable any
+            // smoothing animation by decreasing all three values.
+            screen.scroll_target_offset -= 1;
+            screen.scroll_interpolation -= 1;
+            screen.scroll_line_offset   -= 1;
         } else {
             // If the new line does not collide with the current source range, then there is enough space
             // made for the new line in the backlog, and we should stop removing more lines, since that
@@ -1131,9 +1138,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // clamped with the correct values.
         highest_allowed_scroll_offset := screen.lines.count - complete_lines_fitting_on_screen;
         screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
-        screen.scroll_interpolation    = damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time);
+        screen.scroll_interpolation    = clamp(damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll_offset);
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
-        screen.enable_auto_scroll = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
+        screen.enable_auto_scroll      = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
 
 
 
