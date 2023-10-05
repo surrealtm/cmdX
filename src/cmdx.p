@@ -1183,12 +1183,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // represent.
         //
 
-        visible_lines_in_scrollbar_area: s64 = 0;
-        if screen.scroll_target_offset >= 1 {
-            visible_lines_in_scrollbar_area = partial_lines_fitting_on_screen;
-        } else
-            visible_lines_in_scrollbar_area = complete_lines_fitting_on_screen;
-
+        visible_lines_in_scrollbar_area: s64 = complete_lines_fitting_on_screen;
         first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
         
         first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
