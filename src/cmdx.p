@@ -1119,13 +1119,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
         previous_scroll_offset := screen.scroll_line_offset;
 
-
-
-
-        //
-        // Set up drawing data for this frame
-        //
-
         // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
         // go below that number. This means that we cannot scroll past the very first line at the very top
         // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
@@ -1142,6 +1135,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
         screen.enable_auto_scroll = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
 
+
+
+        //
+        // Set up drawing data for this frame
+        //
+       
         // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
         // scrolled all the way to the top, allow one line to be cut off partially.
         final_drawn_line_count: s64 = 0;
@@ -1587,6 +1586,7 @@ cmdx :: () -> s32 {
     create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 }, .{ 100, 100, 100, 255 });
     create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 200, 200, 200, 255 });
     create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 }, .{ 100, 100, 100, 255 });
+    create_theme(*cmdx, "autumn",  .{ 209, 184, 151, 255 }, .{ 255, 160, 122, 255 }, .{ 255, 127,  36, 255 }, .{   6,  36,  40, 255 }, .{  19, 115, 130, 255 });
     update_active_theme_pointer(*cmdx, cmdx.active_theme_name);
 
     // Create the ui
