@@ -1131,7 +1131,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // clamped with the correct values.
         highest_allowed_scroll_offset := screen.lines.count - complete_lines_fitting_on_screen;
         screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
-        screen.scroll_interpolation   += (screen.scroll_target_offset - screen.scroll_interpolation) * 0.25;
+        screen.scroll_interpolation    = damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time);
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
         screen.enable_auto_scroll = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
 

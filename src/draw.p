@@ -246,8 +246,16 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
 }
 
 
+/* Helper Procedures */
 
-/* UI CALLBACKS */
+
+damp :: (from: f64, to: f64, lambda: f64, delta: f64) -> f64 {
+    lerp := 1 - exp(-lambda * delta);    
+    return to * lerp + from * (1 - lerp);
+}
+
+
+/* UI Callbacks */
 
 convert_ui_color :: (ui: UI_Color) -> Color {
     return .{ ui.r, ui.g, ui.b, ui.a };
