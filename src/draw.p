@@ -189,6 +189,10 @@ draw_outlined_quad :: (renderer: *Renderer, x0: s32, y0: s32, x1: s32, y1: s32, 
     draw_quad(renderer, x1 - border, y0, x1, y1, color); // Right edge
 }
 
+draw_rectangle :: (renderer: *Renderer, corners: [4]s32, color: Color) {
+    draw_quad(renderer, corners[0], corners[1], corners[2], corners[3], color);
+}
+
 draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Text_Input, prefix_string: string, x: s32, y: s32) {
     // Gather the actually input string
     input_string := get_string_view_from_text_input(input);

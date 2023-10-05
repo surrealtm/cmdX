@@ -72,6 +72,13 @@ CmdX_Screen :: struct {
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
     marked_for_closing: bool = false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
 
+    // Backlog
+    backlog: *s8 = ---;
+    backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
+    colors: [..]Color_Range;
+    lines: [..]Source_Range;
+    viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
+
     // Text Input
     text_input: Text_Input;
     history: [..]string;
@@ -84,34 +91,31 @@ CmdX_Screen :: struct {
     auto_complete_start := 0; // This is the first character that is part of the auto-complete. This is usually the start of the current "word"
     auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
 
-    // Backlog
-    backlog: *s8 = ---;
-    backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
-
-    colors: [..]Color_Range;
-    lines: [..]Source_Range;
-    viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
-
-    // Backlog scrolling
+    // Backlog scrolling information
     scroll_target_offset: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
     enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
 
-    // Drawing data cached for this screen
+    // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the lines should start
-    first_line_y_position: s64; // The y-position in screen-pixel-space at which the first line should be rendered.
+    first_line_y_position: s64; // The y-position in screen-pixel-space at which the first line should be rendered
     first_line_to_draw: s64; // Index of the line that goes at the very top of the screen
     last_line_to_draw: s64; // Index of the last line to be rendered towards the bottom of the screen
     line_wrapped_before_first: bool; // If the line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
 
     // Scrollbar data, which needs to be in sync for the logic and drawing
-    scrollbar_background_rectangle: [4]s32; // The top left and bottom right screen coordinates for this scrollbar
-    scrollbar_background_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar background. This changes the visual feedback to the user to indicate the hovering
-    scrollbar_knob_rectangle: [4]s32; // The top left and bottom right screen coordinates for the knob on the scrollbar
-    scrollbar_knob_hovered: bool; // Set to true if the mouse is currently hovering the scrollbar knob. This changes the visual feedback to the user to indicate the hovering
-    scrollbar_knob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
-    scrollbar_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
+    scrollbar_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll bar
+    scrollbar_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
+    scrollbar_hitbox_hovered: bool;
+    scrollbar_visual_color: Color; // The color with which to render the visual rectangle. Changes depending on the hover state
+    scrollknob_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll knob
+    scrollknob_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
+    scrollknob_hitbox_hovered: bool;
+    scrollknob_visual_color: Color;
+    
+    scrollknob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
+    scrollknob_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
 
     // Subprocess data
     current_directory: string;
@@ -865,17 +869,8 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         // The scrollbar background rectangle is used to detect whether the mouse is currently hovering it.
         // The visual of the background is a bit smaller to not look as distracting, but the hitbox being
         // bigger should make it easier to select.
-        scrollbar_background_indent: s32 = 2;
-        scrollbar_knob_indent: s32 = 2;
-        if screen.scrollbar_background_hovered || screen.scrollbar_knob_dragged scrollbar_background_indent = 4;
-
-        draw_quad(*cmdx.renderer, screen.scrollbar_background_rectangle[0] + scrollbar_background_indent, screen.scrollbar_background_rectangle[1], screen.scrollbar_background_rectangle[2] - scrollbar_background_indent, screen.scrollbar_background_rectangle[3], cmdx.active_theme.colors[Color_Index.Scrollbar]);
-
-        scrollbar_knob_color := cmdx.active_theme.colors[Color_Index.Default];
-        if screen.scrollbar_background_hovered scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Default];
-        if screen.scrollbar_knob_dragged scrollbar_knob_color = cmdx.active_theme.colors[Color_Index.Accent];
-
-        draw_quad(*cmdx.renderer, screen.scrollbar_knob_rectangle[0] + scrollbar_knob_indent, screen.scrollbar_knob_rectangle[1], screen.scrollbar_knob_rectangle[2] - scrollbar_knob_indent, screen.scrollbar_knob_rectangle[3], scrollbar_knob_color);
+        draw_rectangle(*cmdx.renderer, screen.scrollbar_visual_rectangle, screen.scrollbar_visual_color);
+        draw_rectangle(*cmdx.renderer, screen.scrollknob_visual_rectangle, screen.scrollknob_visual_color);
     }
 
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
@@ -1188,8 +1183,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // represent.
         //
 
-        full_scrollbar_width: s32 = 10;
-
         visible_lines_in_scrollbar_area: s64 = 0;
         if screen.scroll_target_offset >= 1 {
             visible_lines_in_scrollbar_area = partial_lines_fitting_on_screen;
@@ -1202,13 +1195,14 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.lines.count;
         visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.lines.count;
 
-        screen.scrollbar_background_rectangle = { screen.rectangle[2] - full_scrollbar_width - 5, screen.rectangle[1] + 5, screen.rectangle[2] - 5, screen.rectangle[3] - 5 };
+        scrollbar_hitbox_width: s32 = 10;
+        scrollbar_hitbox_height := screen.rectangle[3] - 5 - screen.rectangle[1] - 5;
+        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - scrollbar_hitbox_width - 5, screen.rectangle[1] + 5, screen.rectangle[2] - 5, screen.rectangle[1] + 5 + scrollbar_hitbox_height };
 
-        scrollbar_background_height := screen.scrollbar_background_rectangle[3] - screen.scrollbar_background_rectangle[1];
-        scrollbar_knob_offset: s64 = cast(s32) (cast(f64) scrollbar_background_height * first_line_percentage);
-        scrollbar_knob_height: s64 = cast(s32) (cast(f64) scrollbar_background_height * visible_line_percentage);
+        scrollknob_hitbox_offset: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * first_line_percentage);
+        scrollknob_hitbox_height: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * visible_line_percentage);
 
-        screen.scrollbar_knob_rectangle = { screen.scrollbar_background_rectangle[0], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset, screen.scrollbar_background_rectangle[2], screen.scrollbar_background_rectangle[1] + scrollbar_knob_offset + scrollbar_knob_height };
+        screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset, screen.scrollbar_hitbox_rectangle[2], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset + scrollknob_hitbox_height };
         
 
         //
@@ -1217,38 +1211,58 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // therefore the visual feedback on screen) changed.
         //
 
-        scrollbar_background_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_background_rectangle);
-        scrollbar_knob_hovered := mouse_over_rectangle(cmdx, screen.scrollbar_knob_rectangle);
-        scrollbar_knob_dragged := screen.scrollbar_knob_dragged;
+        scrollbar_hovered  := mouse_over_rectangle(cmdx, screen.scrollbar_hitbox_rectangle);
+        scrollknob_hovered := mouse_over_rectangle(cmdx, screen.scrollknob_hitbox_rectangle);
+        scrollknob_dragged := screen.scrollknob_dragged;
 
-        if scrollbar_knob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
-            scrollbar_knob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
-            screen.scrollbar_drag_offset = xx (cmdx.window.mouse_y - screen.scrollbar_knob_rectangle[1]);
+        if scrollknob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+            scrollknob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
+            screen.scrollknob_drag_offset = xx (cmdx.window.mouse_y - screen.scrollknob_hitbox_rectangle[1]);
         }
             
-        if !scrollbar_knob_dragged && scrollbar_background_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+        if !scrollknob_dragged && scrollbar_hovered && cmdx.window.button_pressed[Button_Code.Left] {
             // If the user left-clicked somewhere on the scrollbar outside of the knob, then immediatly move
             // the knob to the mouse position, and start dragging. The knob's center should be placed under
             // the cursor, that feels juicy when warping the knob under the cursor.
-            scrollbar_knob_dragged = true;
-            screen.scrollbar_drag_offset = xx (screen.scrollbar_knob_rectangle[3] - screen.scrollbar_knob_rectangle[1]) / 2;
+            scrollknob_dragged = true;
+            screen.scrollknob_drag_offset = xx (screen.scrollknob_hitbox_rectangle[3] - screen.scrollknob_hitbox_rectangle[1]) / 2;
         }
 
-        if scrollbar_knob_dragged {
-            target_inside_scrollbar_area: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_background_rectangle[1]) - screen.scrollbar_drag_offset;
-            percentage_inside_scrollbar_area: f64 = target_inside_scrollbar_area / xx (screen.scrollbar_background_rectangle[3] - screen.scrollbar_background_rectangle[1]);
+        if scrollknob_dragged {
+            target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
+            target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
 
-            target_line_in_backlog: f64 = percentage_inside_scrollbar_area * xx screen.lines.count + xx first_line_offset;
-            screen.scroll_target_offset = target_line_in_backlog;
+            screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.lines.count + xx first_line_offset;
         }
         
-        if !cmdx.window.button_held[Button_Code.Left] scrollbar_knob_dragged = false; // Stop dragging the knob when the user released the left mouse button
-        
-        if screen.scrollbar_background_hovered != scrollbar_background_hovered || screen.scrollbar_knob_hovered != scrollbar_knob_hovered || screen.scrollbar_knob_dragged != scrollbar_knob_dragged render_next_frame(cmdx);
+        if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
 
-        screen.scrollbar_background_hovered = scrollbar_background_hovered;
-        screen.scrollbar_knob_hovered = scrollbar_knob_hovered;
-        screen.scrollbar_knob_dragged = scrollbar_knob_dragged;
+        // If any state changed during this frame, then we should render it to give immediate feedback to the
+        // user.
+        if screen.scrollbar_hitbox_hovered != scrollbar_hovered || screen.scrollknob_hitbox_hovered != scrollknob_hovered || screen.scrollknob_dragged != scrollknob_dragged render_next_frame(cmdx);
+
+        screen.scrollbar_hitbox_hovered  = scrollbar_hovered;
+        screen.scrollknob_hitbox_hovered = scrollknob_hovered;
+        screen.scrollknob_dragged        = scrollknob_dragged;
+
+        //
+        // Update the visual data for the scrollbar
+        //
+
+        scrollbar_visual_indent:  s32 = 2; // The non-rendered indent on both sided (left + right) of the scrollbar
+        scrollknob_visual_indent: s32 = 2;
+        if screen.scrollbar_hitbox_hovered || screen.scrollknob_dragged   scrollbar_visual_indent = 4;
+
+        screen.scrollbar_visual_rectangle = { screen.scrollbar_hitbox_rectangle[0] + scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[3] };
+
+        screen.scrollknob_visual_rectangle = { screen.scrollknob_hitbox_rectangle[0] + scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[3] };
+
+        if screen.scrollknob_dragged
+            screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Accent];
+        else
+            screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Default];
+
+        screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
