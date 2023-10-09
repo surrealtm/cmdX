@@ -164,7 +164,7 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command_argument(font_size, "size", .Integer);
 
     font_name := register_command(cmdx, ":font", "Loads a font from the specified path", font_name_handler);
-    register_command_argument(font_name, "path", .String);
+    register_optional_command_argument(font_name, "path", .String, "");
     
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
     register_command(cmdx, ":config", "Prints information about the current config", config_handler);

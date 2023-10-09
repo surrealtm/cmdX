@@ -361,10 +361,39 @@ font_size :: (cmdx: *CmdX, size: u32) {
     update_font(cmdx);
 }
 
+Enum_Font_Data :: struct {
+    cmdx: *CmdX;
+    screen: *CmdX_Screen;
+}
+
+// This gets called for every font that is registered in windows. It is used to print out all available system fonts
+// which the user can then select in cmdx.
+enumerate_font_callback :: (logfont: LPLOGFONTA, text_metric: LPTEXTMETRIC, font_type: DWORD, data: *Enum_Font_Data) -> s32 {
+    font_display_name := string_view(logfont.lfFaceName, cstring_length(*logfont.lfFaceName[0]));
+    add_formatted_line(data.cmdx, data.screen, "  > %", font_display_name);
+    return 1; // A non-zero value indicates that the enumeration should continue
+}
+
 font_name :: (cmdx: *CmdX, path: string) {
-    free_string(cmdx.font_path, cmdx.config.allocator);
-    cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
-    update_font(cmdx);
+    // If no specific font name was specified, then list all fonts that the platform supplies. The user can then
+    // either specify an absolute path to a custom font file, or they can supply a font display name, which will
+    // then be translated into a complete file path by a platform API.
+    if path.count == 0 {
+        add_formatted_line(cmdx, cmdx.active_screen, "Available System Fonts:");
+
+        enum_font_data: Enum_Font_Data = .{ cmdx, cmdx.active_screen };
+
+        screenDC := CreateCompatibleDC(null);
+
+        logfont: LOGFONTA;
+        logfont.lfCharSet = ANSI_CHARSET;
+        EnumFontFamiliesExA(screenDC, *logfont, xx enumerate_font_callback, xx *enum_font_data, 0);
+        DeleteDC(screenDC);
+    } else {
+        free_string(cmdx.font_path, cmdx.config.allocator);
+        cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
+        update_font(cmdx);
+    }
 }
 
 debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
