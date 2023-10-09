@@ -1480,6 +1480,7 @@ update_active_theme_pointer :: (cmdx: *CmdX, theme_name: string) {
 
 update_font :: (cmdx: *CmdX) {
     destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
+
     success := create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     
     if !success {

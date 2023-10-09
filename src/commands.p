@@ -391,7 +391,16 @@ font_name :: (cmdx: *CmdX, path: string) {
         DeleteDC(screenDC);
     } else {
         free_string(cmdx.font_path, cmdx.config.allocator);
-        cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
+
+        // Add a few builtin font names for the user's convenvience. Unfortunately, win32 does not really provide
+        // any sort API to resolve font display names to file paths, so this is pretty much all we can do here.
+        if (compare_strings(path, "courier_new"))
+            cmdx.font_path = copy_string(COURIER_NEW, cmdx.config.allocator);
+        else if (compare_strings(path, "cascadia_mono"))
+            cmdx.font_path = copy_string(CASCADIO_MONO, cmdx.config.allocator);
+        else
+            cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
+
         update_font(cmdx);
     }
 }
