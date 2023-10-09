@@ -48,10 +48,10 @@ overlay_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     overlay(cmdx, string_flag);
 }
 
-edit_property_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
+edit_config_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
     property_name := get_string_argument(argument_values, 0);
     property_value := get_string_argument(argument_values, 1);
-    edit_property(cmdx, property_name, property_value);
+    edit_config(cmdx, property_name, property_value);
 }
 
 add_macro_handler :: (cmdx: *CmdX, argument_values: *[..]string) {
@@ -169,12 +169,12 @@ register_all_commands :: (cmdx: *CmdX) {
     register_command(cmdx, ":debug", "Prints debugging information like memory usage", debug_handler);
     register_command(cmdx, ":config", "Prints information about the current config", config_handler);
 
-    overlay := register_command(cmdx, ":overlay", "Toggles whether a specific overlay should be drawn.", overlay_handler);
+    overlay := register_command(cmdx, ":overlay", "Toggles whether a specific overlay should be drawn", overlay_handler);
     register_command_argument(overlay, "flag", .String);
     
-    edit_property := register_command(cmdx, ":edit-property", "Assigns a new value to a generic property", edit_property_handler);
-    register_command_argument(edit_property, "property_name", .String);
-    register_command_argument(edit_property, "property_value", .String);
+    edit_config := register_command(cmdx, ":edit-config", "Assigns a new value to a generic property", edit_config_handler);
+    register_command_argument(edit_config, "property_name", .String);
+    register_command_argument(edit_config, "property_value", .String);
     
     add_macro := register_command(cmdx, ":add-macro", "Adds a new macro to the configuration", add_macro_handler);
     register_command_argument(add_macro, "trigger", .Key_Code);
