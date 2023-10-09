@@ -29,11 +29,11 @@
 #load "create_big_file.p";
 
 // --- Default font paths to remember
-CASCADIO_MONO    :: "C:/windows/fonts/cascadiamono.ttf";
-TIMES_NEW_ROMAN  :: "C:/windows/fonts/times.ttf";
-COURIER_NEW      :: "C:/windows/fonts/cour.ttf";
-ARIAL            :: "C:/windows/fonts/arial.ttf";
-FIRACODE_REGULAR :: "C:/source/cmdX/run_tree/data/FiraCode-Regular.ttf";
+CASCADIO_MONO    :: "C:\\windows\\fonts\\cascadiamono.ttf";
+TIMES_NEW_ROMAN  :: "C:\\windows\\fonts\\times.ttf";
+COURIER_NEW      :: "C:\\windows\\fonts\\cour.ttf";
+ARIAL            :: "C:\\windows\\fonts\\arial.ttf";
+FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
 Color_Index :: enum {
     Default;    // The default font color
@@ -1481,10 +1481,10 @@ update_active_theme_pointer :: (cmdx: *CmdX, theme_name: string) {
 update_font :: (cmdx: *CmdX) {
     destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
     success := create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
-
+    
     if !success {
         config_error(cmdx, "The font '%' could not be found, reverting back to default '%'.", cmdx.font_path, COURIER_NEW);
-        cmdx.font_path = COURIER_NEW;
+        cmdx.font_path = copy_string(COURIER_NEW, cmdx.config.allocator);
         create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     }
 }
