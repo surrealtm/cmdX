@@ -165,7 +165,7 @@ key_code_to_string :: (key: Key_Code) -> string {
 }
 
 parse_action_type :: (string: string) -> Action_Type {
-    result: Action_Type = 0;;
+    result: Action_Type = 0;
 
     if compare_strings(string, "Macro") result = .Macro;
 

@@ -371,7 +371,7 @@ apply_config_changes :: (cmdx: *CmdX) {
 }
 
 
-config_error :: (cmdx: *CmdX, format: string, parameters: ..any) {
+config_error :: (cmdx: *CmdX, format: string, parameters: ..Any) {
     if !cmdx.setup || cmdx.config.accumulate_errors {
         // Since the cmdx backbuffer has not been set up at the time the config gets loaded (since the backbuffer
         // size actually depends on the config, and so on...), we can't just add messages to the backlog.

@@ -73,7 +73,7 @@ CmdX_Screen :: struct {
     marked_for_closing: bool = false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
 
     // Backlog
-    backlog: *s8 = ---;
+    backlog: *u8 = ---;
     backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
     colors: [..]Color_Range;
     lines: [..]Source_Range;
@@ -567,14 +567,14 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     render_next_frame(cmdx);
 }
 
-add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: s8) {
+add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: u8) {
     string: string = ---;
     string.data = *character;
     string.count = 1;
     add_text(cmdx, screen, string);
 }
 
-add_formatted_text :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..any) {
+add_formatted_text :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..Any) {
     required_characters := query_required_print_buffer_size(format, ..args);
     string := allocate_string(required_characters, *cmdx.frame_allocator);
     mprint(string, format, ..args);
@@ -586,7 +586,7 @@ add_line :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     new_line(cmdx, screen);
 }
 
-add_formatted_line :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..any) {
+add_formatted_line :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..Any) {
     add_formatted_text(cmdx, screen, format, ..args);
     new_line(cmdx, screen);
 }
@@ -1555,7 +1555,7 @@ cmdx :: () -> s32 {
     cmdx.commands.allocator = *cmdx.global_allocator;
     cmdx.screens.allocator  = *cmdx.global_allocator;
 
-    cmdx.startup_directory = copy_string(get_working_directory(), *cmdx.global_allocator);
+    cmdx.startup_directory = copy_string(get_working_directory(), *cmdx.global_allocator); // @@Leak: get_working_directory() allocates on the Default_Allocator.
 
     // Register all commands
     register_all_commands(*cmdx);

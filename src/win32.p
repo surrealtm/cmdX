@@ -283,7 +283,7 @@ win32_drain_thread :: (screen: *CmdX_Screen) -> u32 {
     input_buffer: [512]s8 = ---;
     
     while screen.child_process_running {
-        if !ReadFile(screen.win32.output_read_pipe, input_buffer, size_of(input_buffer), null, null)
+        if !ReadFile(screen.win32.output_read_pipe, input_buffer, input_buffer.count, null, null)
         // When ClosePseudoConsole has terminated, this pipe should be broken, at which point we are done.
         break;
     }
@@ -542,7 +542,7 @@ win32_update_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) -> bool {
     if convert_hardware_time(current_time - screen.win32.time_of_last_module_name_update, .Milliseconds) > 500 {
         // Get the current process name and display that in the window title. Only check every once in a while
         // to prevent a lot of sys calls and / or unnecessary allocations.
-        process_name: [MAX_PATH]s8 = ---;
+        process_name: [MAX_PATH]u8 = ---;
         process_name_length := K32GetModuleBaseNameA(screen.win32.child_process_handle, null, process_name, MAX_PATH);
         update_active_process_name(cmdx, screen, string_view(process_name, process_name_length)); // @Cleanup only do this if the given screen is actually the active one
         screen.win32.time_of_last_module_name_update = current_time;
