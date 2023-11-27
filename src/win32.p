@@ -42,17 +42,6 @@ Win32_Input_Parser :: struct {
 }
 
 
-win32_assert :: (active_screen: *CmdX_Screen, condition: bool, text: string) {
-    if condition return;
-
-    debug_print_to_file("cmdx_log.txt", active_screen);
-    c_text := to_cstring(text, Default_Allocator);
-    defer free_cstring(c_text, Default_Allocator);
-    MessageBoxA(null, c_text, cast(cstring) "Assertion Failed", 0x2);
-    assert(condition, text);
-}
-
-
 win32_set_color_for_code :: (screen: *CmdX_Screen, code: u32) {
     color: Color = ---;
     actually_change_color: bool = true;
@@ -160,7 +149,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
                 x := win32_get_input_parser_parameter(*parser, 1, 1) - 1;
                 
                 vertical_offset := y - screen.viewport_height;
-                win32_assert(screen, vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
+                cmdx_assert(screen, vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
                 for i := 0; i < vertical_offset; ++i   new_line(cmdx, screen);
                 
                 horizontal_offset := x - get_cursor_position_in_line(screen);

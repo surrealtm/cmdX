@@ -1,6 +1,4 @@
-@vertex
-#version 330 core
-
+@Vertex(330 core)
 in vec2 in_position;
 in vec2 in_uv;
 
@@ -13,9 +11,7 @@ void main(void) {
     pass_uv = in_uv;
 }
 
-@fragment
-#version 330 core
-
+@Fragment(330 core)
 in vec2 pass_uv;
 
 out vec4 out_color;

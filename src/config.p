@@ -272,7 +272,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     file_info, success := get_file_information(file_path);
     if success {
         config.last_modification_check = get_hardware_time();
-        config.last_modification_time = file_info.last_modified_time;
+        config.last_modification_time = file_info.last_modification_time;
     }
 
     return true;
@@ -317,10 +317,10 @@ check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
     time_since_last_check := convert_hardware_time(current_hardware_time - config.last_modification_check, .Milliseconds);
 
     if time_since_last_check > CONFIG_HOTLOAD_CHECK_INTERVAL {
-        file_info, success := get_file_information(CONFIG_FILE_NAME); // @@Speed maybe only query the time here, not the complete file information.
+        file_info, success := get_file_information(CONFIG_FILE_NAME); // @@Speed: Maybe only query the time here, not the complete file information.
         config.last_modification_check = current_hardware_time;
 
-        if success && config.last_modification_time < file_info.last_modified_time {
+        if success && config.last_modification_time < file_info.last_modification_time {
             // If the file has changed since the last time we read it, then reload the config.
             // This will set the last modification time for this config.
             reload_config(cmdx, false);

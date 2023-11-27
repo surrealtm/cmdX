@@ -253,6 +253,14 @@ random_line :: (cmdx: *CmdX) {
 }
 
 
+cmdx_assert :: (active_screen: *CmdX_Screen, condition: bool, text: string) {
+    if condition return;
+
+    debug_print_to_file("cmdx_log.txt", active_screen);
+    assert(condition, text);
+}
+
+
 
 /* --- Source Range --- */
 
@@ -389,7 +397,7 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
 /* --- Backlog API --- */
 
 get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
-    win32_assert(screen, screen.lines.count > 0, "Screen Backlog is empty");
+    cmdx_assert(screen, screen.lines.count > 0, "Screen Backlog is empty");
 
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
@@ -400,7 +408,7 @@ set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
     line_head := array_get(*screen.lines, screen.lines.count - 1);
     color_head := array_get(*screen.colors, screen.colors.count - 1);
 
-    win32_assert(screen, line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
+    cmdx_assert(screen, line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
     if line_head.first + cursor < screen.backlog_size {
         line_head.one_plus_last = line_head.first + cursor;
@@ -860,7 +868,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     }
 
     // Draw the text input at the end of the backlog
-    prefix_string := get_prefix_string(screen, *cmdx.frame_memory_arena);
+    prefix_string := get_prefix_string(screen, *cmdx.frame_allocator);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
     // Draw the scroll bar only if the backlog is bigger than the available screen size.
@@ -906,7 +914,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         render_next_frame(cmdx);
     }
 
-    if cmdx.window.key_pressed[Key_Code.F7] win32_assert(cmdx.active_screen, false, "F7");
+    if cmdx.window.key_pressed[Key_Code.F7] cmdx_assert(cmdx.active_screen, false, "F7");
 
     if cmdx.window.key_pressed[Key_Code.F11] {
         // Toggle borderless mode
@@ -1067,7 +1075,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
             // Print the complete input line into the backlog
             set_themed_color(cmdx.active_screen, .Accent);
-            add_text(cmdx, cmdx.active_screen, get_prefix_string(cmdx.active_screen, *cmdx.frame_memory_arena));
+            add_text(cmdx, cmdx.active_screen, get_prefix_string(cmdx.active_screen, *cmdx.frame_allocator));
             set_themed_color(cmdx.active_screen, .Default);
             add_line(cmdx, cmdx.active_screen, input_string);
 
@@ -1362,7 +1370,7 @@ activate_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 activate_screen_with_index :: (cmdx: *CmdX, index: s64) {
-    win32_assert(cmdx.active_screen, index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");
+    cmdx_assert(cmdx.active_screen, index >= 0 && index < cmdx.screens.count, "Invalid Screen Index");
     activate_screen(cmdx, linked_list_get(*cmdx.screens, index));
 }
 
@@ -1427,9 +1435,9 @@ welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
     new_line(cmdx, screen); // Insert a new line for more visual clarity
 }
 
-get_prefix_string :: (screen: *CmdX_Screen, arena: *Memory_Arena) -> string {
+get_prefix_string :: (screen: *CmdX_Screen, allocator: *Allocator) -> string {
     string_builder: String_Builder = ---;
-    create_string_builder(*string_builder, arena);
+    create_string_builder(*string_builder, allocator);
     if !screen.child_process_running    append_string(*string_builder, screen.current_directory);
     append_string(*string_builder, "> ");
     return finish_string_builder(*string_builder);
@@ -1501,7 +1509,7 @@ update_active_process_name :: (cmdx: *CmdX, screen: *CmdX_Screen, process_name: 
 
 update_window_name :: (cmdx: *CmdX) {
     builder: String_Builder = ---;
-    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    create_string_builder(*builder, *cmdx.frame_allocator);
     append_string(*builder, "cmdX | ");
     append_string(*builder, cmdx.active_screen.current_directory);
 

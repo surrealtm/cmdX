@@ -43,7 +43,7 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
         
     // Concatenate the relative path with the current directory of cmdx.
     builder: String_Builder = ---;
-    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    create_string_builder(*builder, *cmdx.frame_allocator);
     append_string(*builder, cmdx.active_screen.current_directory);
     append_string(*builder, "\\");
     append_string(*builder, file_path);
@@ -56,7 +56,7 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
 
 print_command_syntax :: (cmdx: *CmdX, command: *Command) {
     builder: String_Builder;
-    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    create_string_builder(*builder, *cmdx.frame_allocator);
     append_format(*builder, " > %", command.name);
     
     for i := 0; i < command.arguments.count; ++i {
@@ -81,7 +81,7 @@ print_command_aliases :: (cmdx: *CmdX, command: *Command) {
     if !command.aliases.count return;
 
     builder: String_Builder;
-    create_string_builder(*builder, *cmdx.frame_memory_arena);
+    create_string_builder(*builder, *cmdx.frame_allocator);
 
     append_string(*builder, " AKA > ");
     
@@ -290,7 +290,7 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
         // the process creation. This may seem redundant, but this allows for custom argument 
         // management, instead of just passing the raw string along.
         string_builder: String_Builder;
-        create_string_builder(*string_builder, *cmdx.frame_memory_arena);
+        create_string_builder(*string_builder, *cmdx.frame_allocator);
         append_string(*string_builder, command_name);
         
         for i := 0; i < command_arguments.count; ++i {
