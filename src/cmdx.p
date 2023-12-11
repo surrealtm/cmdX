@@ -143,7 +143,7 @@ CmdX :: struct {
     renderer: Renderer = ---;
     render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
     render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
-    ui: UI = ---;
+    ui: UI;
     disabled_title_bar: bool = false; // The user can toggle the window's title bar, since not having it may look cleaner, but disables window movement.
     draw_overlays: Draw_Overlay = .None;
 
@@ -914,8 +914,6 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         render_next_frame(cmdx);
     }
 
-    if cmdx.window.key_pressed[Key_Code.F7] cmdx_assert(cmdx.active_screen, false, "F7");
-
     if cmdx.window.key_pressed[Key_Code.F11] {
         // Toggle borderless mode
         cmdx.disabled_title_bar = !cmdx.disabled_title_bar;
@@ -977,8 +975,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         activate_screen(cmdx, screen);
     }
 
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.mouse_scroll_turns != 0 {
-        cmdx.font_size += xx cmdx.window.mouse_scroll_turns;
+    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.mouse_wheel_turns != 0 {
+        cmdx.font_size += xx cmdx.window.mouse_wheel_turns;
         update_font(cmdx);
         render_next_frame(cmdx);
     }
@@ -1117,7 +1115,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
             // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
-            new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_scroll_turns * xx cmdx.scroll_speed;
+            new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
         }
 
         if cmdx.active_screen == screen {
@@ -1302,7 +1300,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
     // Measure the frame time and sleep accordingly
     frame_end := get_hardware_time();
-    active_frame_time := convert_hardware_time(frame_end - frame_start, .Milliseconds);
+    active_frame_time: f32 = xx convert_hardware_time(frame_end - frame_start, .Milliseconds);
     requested_frame_time := 1000 / cmdx.requested_fps;
     if cmdx.requested_fps == 0 requested_frame_time = 0; // Unlimited fps
 

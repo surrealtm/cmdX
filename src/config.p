@@ -153,10 +153,10 @@ assign_property_value_from_string :: (config: *Config, property: *Property, valu
         if valid ~property.value._u32 = result;
 
     case .F32;
-        result: f64 = ---;
+        result: f32 = ---;
         result, valid = string_to_float(value_string);
 
-        if valid ~property.value._f32 = xx result;
+        if valid ~property.value._f32 = result;
     }
 
     return valid;
@@ -314,7 +314,7 @@ write_config_file :: (config: *Config, file_path: string) {
 
 check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
     current_hardware_time := get_hardware_time();
-    time_since_last_check := convert_hardware_time(current_hardware_time - config.last_modification_check, .Milliseconds);
+    time_since_last_check: f32 = xx convert_hardware_time(current_hardware_time - config.last_modification_check, .Milliseconds);
 
     if time_since_last_check > CONFIG_HOTLOAD_CHECK_INTERVAL {
         file_info, success := get_file_information(CONFIG_FILE_NAME); // @@Speed: Maybe only query the time here, not the complete file information.
