@@ -584,7 +584,7 @@ add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: u8) {
 
 add_formatted_text :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..Any) {
     required_characters := query_required_print_buffer_size(format, ..args);
-    string := allocate_string(required_characters, *cmdx.frame_allocator);
+    string := allocate_string(*cmdx.frame_allocator, required_characters);
     mprint(string, format, ..args);
     add_text(cmdx, screen, string);
 }
@@ -717,13 +717,13 @@ add_history :: (cmdx: *CmdX, screen: *CmdX_Screen, input_string: string) {
     // Make space for the new input string if that is required
     if screen.history.count == screen.history_size {
         head := array_get_value(*screen.history, screen.history.count - 1);
-        free_string(head, *cmdx.global_allocator);
+        deallocate_string(*cmdx.global_allocator, *head);
         array_remove(*screen.history, screen.history.count - 1);
     }
 
     // Since the input_string is just a string_view over the text input's buffer,
     // we need to copy it here.
-    array_add_at(*screen.history, 0, copy_string(input_string, *cmdx.global_allocator));
+    array_add_at(*screen.history, 0, copy_string(*cmdx.global_allocator, input_string));
 }
 
 refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
@@ -732,7 +732,7 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Clear the previous auto complete options and deallocate all strings
     for i := 0; i < screen.auto_complete_options.count; ++i {
         string := array_get_value(*screen.auto_complete_options, i);
-        free_string(string, *cmdx.global_allocator);
+        deallocate_string(*cmdx.global_allocator, *string);
     }
 
     array_clear(*screen.auto_complete_options);
@@ -760,7 +760,7 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             if string_starts_with(command.name, text_to_complete) {
                 // Since the options array also includes file names which need to be allocated and freed once
                 // they are no longer needed, we also need to copy this name so that it can be freed.
-                command_name_copy := copy_string(command.name, *cmdx.global_allocator);
+                command_name_copy := copy_string(*cmdx.global_allocator, command.name);
                 array_add(*screen.auto_complete_options, command_name_copy);
             }
         }
@@ -778,7 +778,7 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         files_directory = get_path_relative_to_cd(cmdx, substring_view(screen.text_input.buffer, directory_start, last_slash));
     }
 
-    files := get_files_in_folder(files_directory, *cmdx.frame_allocator);
+    files := get_files_in_folder(*cmdx.frame_allocator, files_directory, false);
 
     for i := 0; i < files.count; ++i {
         file := array_get_value(*files, i);
@@ -787,14 +787,14 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             // to it, to make it easier to just auto-complete to a path without having to type the slashes
             // themselves. @@Robustness maybe return this information along with the path in the
             // get_files_in_folder procedure?
-            full_path := concatenate_strings(files_directory, "\\", *cmdx.frame_allocator);
-            full_path = concatenate_strings(full_path, file, *cmdx.frame_allocator);
+            full_path := concatenate_strings(*cmdx.frame_allocator, files_directory, "\\");
+            full_path = concatenate_strings(*cmdx.frame_allocator, full_path, file);
 
             file_name_copy: string = ---;
             if folder_exists(full_path) {
-                file_name_copy = concatenate_strings(file, "/", *cmdx.global_allocator);
+                file_name_copy = concatenate_strings(*cmdx.global_allocator, file, "/");
             } else
-                file_name_copy = copy_string(file, *cmdx.global_allocator);
+                file_name_copy = copy_string(*cmdx.global_allocator, file);
 
             array_add(*screen.auto_complete_options, file_name_copy);
         }
@@ -809,7 +809,7 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     remaining_input_string := substring_view(screen.text_input.buffer, 0, screen.auto_complete_start);
     auto_completion := array_get_value(*screen.auto_complete_options, screen.auto_complete_index);
 
-    full_string := concatenate_strings(remaining_input_string, auto_completion, *cmdx.frame_allocator);
+    full_string := concatenate_strings(*cmdx.frame_allocator, remaining_input_string, auto_completion);
 
     set_text_input_string(*screen.text_input, full_string);
 
@@ -1053,7 +1053,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.active_screen.text_input.entered {
         // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
         // afterwards, we need to make a copy from the input string, so that it may potentially be used later on.
-        input_string := copy_string(get_string_view_from_text_input(*cmdx.active_screen.text_input), *cmdx.frame_allocator);
+        input_string := copy_string(*cmdx.frame_allocator, get_string_view_from_text_input(*cmdx.active_screen.text_input));
 
         // Reset the text input
         cmdx.active_screen.history_index = -1;
@@ -1321,7 +1321,7 @@ create_screen :: (cmdx: *CmdX) -> *CmdX_Screen {
     screen.history.allocator = *cmdx.global_allocator;
     screen.colors.allocator  = *cmdx.global_allocator;
     screen.lines.allocator   = *cmdx.global_allocator;
-    screen.current_directory = copy_string(cmdx.startup_directory, *cmdx.global_allocator);
+    screen.current_directory = copy_string(*cmdx.global_allocator, cmdx.startup_directory);
     screen.text_input.active = true;
     screen.backlog_size      = cmdx.backlog_size;
     screen.backlog           = allocate(*cmdx.global_allocator, screen.backlog_size);
@@ -1340,7 +1340,7 @@ create_screen :: (cmdx: *CmdX) -> *CmdX_Screen {
 close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Deallocate all the data that was allocated for this screen when it was created
     deallocate(*cmdx.global_allocator, screen.backlog);
-    free_string(screen.current_directory, *cmdx.global_allocator);
+    deallocate_string(*cmdx.global_allocator, *screen.current_directory);
 
     active_screen_index := screen.index % (cmdx.screens.count - 1); // Figure out the index of the new active screen
 
@@ -1423,7 +1423,7 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
 }
 
 welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
-    config_location := concatenate_strings(run_tree, CONFIG_FILE_NAME, *cmdx.frame_allocator);
+    config_location := concatenate_strings(*cmdx.frame_allocator, run_tree, CONFIG_FILE_NAME);
 
     set_themed_color(screen, .Accent);
     add_line(cmdx, screen, "    Welcome to cmdX.");
@@ -1462,8 +1462,8 @@ update_active_theme_pointer :: (cmdx: *CmdX, theme_name: string) {
             // the theme_name parameter is the active_theme_name (e.g. when reloading the config), copy the
             // string before freeing it.
             previous_string := cmdx.active_theme_name;
-            cmdx.active_theme_name = copy_string(theme_name, cmdx.config.allocator);
-            free_string(previous_string, cmdx.config.allocator);
+            cmdx.active_theme_name = copy_string(cmdx.config.allocator, theme_name);
+            deallocate_string(cmdx.config.allocator, *previous_string);
             cmdx.active_theme = t;
             return;
         }
@@ -1480,27 +1480,27 @@ update_active_theme_pointer :: (cmdx: *CmdX, theme_name: string) {
     }
 
     // The config system expects to be able to deallocate this eventually
-    free_string(cmdx.active_theme_name, cmdx.config.allocator);
-    cmdx.active_theme_name = copy_string(cmdx.active_theme.name, cmdx.config.allocator);
+    deallocate_string(cmdx.config.allocator, *cmdx.active_theme_name);
+    cmdx.active_theme_name = copy_string(cmdx.config.allocator, cmdx.active_theme.name);
 }
 
 update_font :: (cmdx: *CmdX) {
     destroy_font(*cmdx.font, xx destroy_gl_texture_2d, null);
 
-    success := create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+    success := create_font_from_file(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     
     if !success {
         config_error(cmdx, "The font '%' could not be found, reverting back to default '%'.", cmdx.font_path, COURIER_NEW);
-        cmdx.font_path = copy_string(COURIER_NEW, cmdx.config.allocator);
-        create_font(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
+        cmdx.font_path = copy_string(cmdx.config.allocator, COURIER_NEW);
+        create_font_from_file(*cmdx.font, cmdx.font_path, cmdx.font_size, true, create_gl_texture_2d, null);
     }
 }
 
 update_active_process_name :: (cmdx: *CmdX, screen: *CmdX_Screen, process_name: string) {
     if compare_strings(screen.child_process_name, process_name) return;
 
-    if screen.child_process_name.count   free_string(screen.child_process_name, *cmdx.global_allocator);
-    screen.child_process_name = copy_string(process_name, *cmdx.global_allocator);
+    if screen.child_process_name.count   deallocate_string(*cmdx.global_allocator, *screen.child_process_name);
+    screen.child_process_name = copy_string(*cmdx.global_allocator, process_name);
 
     update_window_name(cmdx);
 }
@@ -1561,7 +1561,7 @@ cmdx :: () -> s32 {
     cmdx.commands.allocator = *cmdx.global_allocator;
     cmdx.screens.allocator  = *cmdx.global_allocator;
 
-    cmdx.startup_directory = copy_string(get_working_directory(), *cmdx.global_allocator); // @@Leak: get_working_directory() allocates on the Default_Allocator.
+    cmdx.startup_directory = copy_string(*cmdx.global_allocator, get_working_directory()); // @@Leak: get_working_directory() allocates on the Default_Allocator.
 
     // Register all commands
     register_all_commands(*cmdx);
@@ -1569,7 +1569,7 @@ cmdx :: () -> s32 {
     // Set the working directory of this program to where to executable file is, so that the data
     // folder can always be accessed.
     run_tree := get_module_path();
-    defer free_string(run_tree, Default_Allocator);
+    defer deallocate_string(Default_Allocator, *run_tree);
     set_working_directory(run_tree);
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
 

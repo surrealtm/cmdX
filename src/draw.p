@@ -64,7 +64,6 @@ prepare_renderer :: (renderer: *Renderer, theme: *Theme, font: *Font, window: *W
     renderer.width  = window.width;
     renderer.height = window.height;
     renderer.projection_matrix = make_orthographic_projection_matrix(xx renderer.width / 2, xx renderer.height / -2, -1, 1); // The coordinate space for this application is a bit different than for games, here we want positive y to mean downwards...
-    renderer.font_texture_handle = font.texture.handle;
 
     glViewport(0, 0, renderer.width, renderer.height);
     
@@ -111,8 +110,10 @@ flush_font_buffer :: (renderer: *Renderer) {
     renderer.font_glyph_count = 0;
 }
 
-draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x: f32, uv_y: f32, uv_w: f32, uv_h: f32) {
-    if renderer.font_glyph_count == GLYPH_BATCH_COUNT flush_font_buffer(renderer);
+draw_single_glyph :: (renderer: *Renderer, x: s32, y: s32, w: u32, h: u32, uv_x: f32, uv_y: f32, uv_w: f32, uv_h: f32, texture_handle: s64) {
+    if renderer.font_glyph_count == GLYPH_BATCH_COUNT || texture_handle != renderer.font_texture_handle flush_font_buffer(renderer);
+
+    renderer.font_texture_handle = texture_handle;
     
     position := v2f.{ xx x - xx renderer.width / 2, xx y - xx renderer.height / 2 };
     size     := v2f.{ xx w, xx h };

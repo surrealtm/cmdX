@@ -81,8 +81,8 @@ create_property_internal :: (config: *Config, name: string, type: Property_Type)
 create_string_property :: (config: *Config, name: string, value: *string) {
     property := create_property_internal(config, name, .String);
     property.value._string   = value; // Set the pointer for the property value
-    ~property.value._string  = copy_string(~value, config.allocator); // Copy the string into the value, so that this string can later be freed
-    property.default._string = copy_string(~value, config.allocator);
+    ~property.value._string  = copy_string(config.allocator, ~value); // Copy the string into the value, so that this string can later be freed
+    property.default._string = copy_string(config.allocator, ~value);
 }
 
 create_bool_property :: (config: *Config, name: string, value: *bool) {
@@ -129,7 +129,7 @@ assign_property_value_from_string :: (config: *Config, property: *Property, valu
 
     switch #complete property.type {
     case .String;
-        ~property.value._string = copy_string(value_string, config.allocator);
+        ~property.value._string = copy_string(config.allocator, value_string);
         valid = true;
 
     case .Bool;
@@ -211,18 +211,18 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         property := array_get(*config.properties, i);
 
         switch #complete property.type {
-        case .String; ~property.value._string = copy_string(property.default._string, config.allocator);
-        case .Bool; ~property.value._bool = property.default._bool;
-        case .S64; ~property.value._s64 = property.default._s64;
-        case .S32; ~property.value._s32 = property.default._s32;
-        case .U32; ~property.value._u32 = property.default._u32;
-        case .F32; ~property.value._f32 = property.default._f32;
+        case .String; ~property.value._string = copy_string(config.allocator, property.default._string);
+        case .Bool;   ~property.value._bool   = property.default._bool;
+        case .S64;     ~property.value._s64   = property.default._s64;
+        case .S32;     ~property.value._s32   = property.default._s32;
+        case .U32;     ~property.value._u32   = property.default._u32;
+        case .F32;     ~property.value._f32   = property.default._f32;
         }
     }
 
     // Start parsing the config file
     original_file_data := file_data;
-    defer free_file_data(original_file_data);
+    defer free_file_content(*original_file_data);
 
     version_line := get_first_line(*file_data);
 
@@ -337,7 +337,7 @@ check_for_config_reload :: (cmdx: *CmdX, config: *Config) {
 free_config_data :: (config: *Config) {
     for i := 0; i < config.properties.count; ++i {
         property := array_get(*config.properties, i);
-        if property.type == .String    free_string(~property.value._string, config.allocator);
+        if property.type == .String    deallocate_string(config.allocator, property.value._string);
     }
 
     for i := 0; i < config.actions.count; ++i {
@@ -378,7 +378,7 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..Any) {
         // Instead, print them out on the console (in case cmdx actually has a console attached), and add them
         // to a list which will be printed to the actual backbuffer once it has been set up.
         size := query_required_print_buffer_size(format, ..parameters);
-        string := allocate_string(size, Default_Allocator);
+        string := allocate_string(Default_Allocator, size);
         mprint(string, format, ..parameters);
         array_add(*cmdx.config.error_messages, string);
     } else {
@@ -405,7 +405,7 @@ flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
     for i := 0; i < cmdx.config.error_messages.count; ++i {
         message := array_get_value(*cmdx.config.error_messages, i);
         add_line(cmdx, cmdx.active_screen, message);
-        free_string(message, Default_Allocator);
+        deallocate_string(Default_Allocator, *message);
     }
 
     if !reload_command new_line(cmdx, cmdx.active_screen);

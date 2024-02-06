@@ -187,16 +187,16 @@ parse_action_data :: (type: Action_Type, string: string, allocator: *Allocator) 
 
     if type == .Macro {
         if string[0] == '"' && string[string.count - 1] == '"' {
-            result.macro_text = copy_string(substring_view(string, 1, string.count - 1), allocator);
+            result.macro_text = copy_string(allocator, substring_view(string, 1, string.count - 1));
         } else
-            result.macro_text = copy_string(string, allocator);
+            result.macro_text = copy_string(allocator, string);
     }
     
     return result;
 }
 
 read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
-    arguments := split_string(line, ' ', true, *cmdx.frame_allocator);
+    arguments := split_string(*cmdx.frame_allocator, line, ' ', true);
 
     if arguments.count != 3 {
         config_error(cmdx, "Malformed config action in line %:", line_count);
@@ -234,7 +234,7 @@ read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
 }
 
 free_action :: (action: *Action, allocator: *Allocator) {
-    if action.type == .Macro    free_string(action.data.macro_text, allocator);
+    if action.type == .Macro    deallocate_string(allocator, *action.data.macro_text);
 }
 
 write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {

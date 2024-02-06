@@ -426,8 +426,8 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     // The working directory of CmdX is NOT the 'current' directory (since CmdX needs to be relative to it's data
     // folder). However, when launching a process, Win32 takes the current directory as first possible path,
     // therefore we need to quickly change the working directory when doing that.
-    c_current_directory := to_cstring(screen.current_directory, *cmdx.frame_allocator);
-    c_command_string    := to_cstring(command_string, *cmdx.frame_allocator);
+    c_current_directory := to_cstring(*cmdx.frame_allocator, screen.current_directory);
+    c_command_string    := to_cstring(*cmdx.frame_allocator, command_string);
     
     // For some god-forsaken reason the working directory must be reset before the hPtyReference handle gets
     // closed, or else opening files won't work??? Thats why we cannot use defer here, and instead must do
@@ -449,7 +449,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
         
 #if USE_PSEUDO_CONSOLE        DeleteProcThreadAttributeList(extended_startup_info.lpAttributeList);
         set_working_directory(previous_working_directory);
-        free_string(previous_working_directory, Default_Allocator);
+        deallocate_string(Default_Allocator, *previous_working_directory);
         win32_cleanup(cmdx, screen);
 		close_viewport(cmdx, screen);
         return false;
@@ -457,7 +457,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
 
     // Reset the working directory.
     set_working_directory(previous_working_directory);
-    free_string(previous_working_directory, Default_Allocator);
+    deallocate_string(Default_Allocator, *previous_working_directory);
 
 #if USE_PSEUDO_CONSOLE {
     // Delete the proc thread attribute, since that is no longer needed after the process has been spawned

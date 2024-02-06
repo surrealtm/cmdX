@@ -36,9 +36,9 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
     while file_path[file_path.count - 1] == '/' || file_path[file_path.count - 1] == '\\' file_path.count -= 1;
     
     // If the path is already absolute, then do not apply the relative working directory
-    cstring := to_cstring(file_path, *cmdx.frame_allocator);
+    cstring := to_cstring(*cmdx.frame_allocator, file_path);
     if !PathIsRelativeA(cstring) {
-        return get_absolute_path(file_path, *cmdx.frame_allocator); 
+        return get_absolute_path(*cmdx.frame_allocator, file_path); 
     }
         
     // Concatenate the relative path with the current directory of cmdx.
@@ -50,7 +50,7 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
     concatenation := finish_string_builder(*builder);
 
     // Remove any redundency in the path (e.g. parent/../)
-    new_path := get_absolute_path(concatenation, *cmdx.frame_allocator);
+    new_path := get_absolute_path(*cmdx.frame_allocator, concatenation);
     return new_path;
 }
 
@@ -390,16 +390,16 @@ font_name :: (cmdx: *CmdX, path: string) {
         EnumFontFamiliesExA(screenDC, *logfont, xx enumerate_font_callback, xx *enum_font_data, 0);
         DeleteDC(screenDC);
     } else {
-        free_string(cmdx.font_path, cmdx.config.allocator);
+        deallocate_string(cmdx.config.allocator, *cmdx.font_path);
 
         // Add a few builtin font names for the user's convenvience. Unfortunately, win32 does not really provide
         // any sort API to resolve font display names to file paths, so this is pretty much all we can do here.
         if (compare_strings(path, "courier_new"))
-            cmdx.font_path = copy_string(COURIER_NEW, cmdx.config.allocator);
+            cmdx.font_path = copy_string(cmdx.config.allocator, COURIER_NEW);
         else if (compare_strings(path, "cascadia_mono"))
-            cmdx.font_path = copy_string(CASCADIO_MONO, cmdx.config.allocator);
+            cmdx.font_path = copy_string(cmdx.config.allocator, CASCADIO_MONO);
         else
-            cmdx.font_path = copy_string(get_path_relative_to_cd(cmdx, path), cmdx.config.allocator);
+            cmdx.font_path = copy_string(cmdx.config.allocator, get_path_relative_to_cd(cmdx, path));
 
         update_font(cmdx);
     }
@@ -414,7 +414,7 @@ debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
 debug :: (cmdx: *CmdX) {
     working_directory := get_working_directory();
     add_formatted_line(cmdx, cmdx.active_screen, "CmdX working directory: %", working_directory);
-    free_string(working_directory, Default_Allocator);
+    deallocate_string(Default_Allocator, *working_directory);
 
     static_size, static_size_unit := convert_to_biggest_memory_unit(size_of(CmdX));
     add_formatted_line(cmdx, cmdx.active_screen, "Static memory usage: %*%", static_size, memory_unit_string(static_size_unit));
@@ -489,7 +489,7 @@ add_macro :: (cmdx: *CmdX, trigger: Key_Code, text: string) {
     action        := array_push(*cmdx.config.actions);
     action.trigger = trigger;
     action.type    = .Macro;
-    action.data.macro_text = copy_string(text, cmdx.config.allocator);
+    action.data.macro_text = copy_string(cmdx.config.allocator, text);
 }
 
 remove_macro :: (cmdx: *CmdX, trigger: Key_Code) {
@@ -519,7 +519,7 @@ ls :: (cmdx: *CmdX, directory: string) {
     
     add_formatted_line(cmdx, cmdx.active_screen, "Contents of folder '%':", complete_directory);
     
-    files := get_files_in_folder(complete_directory, *cmdx.frame_allocator);
+    files := get_files_in_folder(*cmdx.frame_allocator, complete_directory, false);
     
     for i := 0; i < files.count; ++i {
         file_name := array_get_value(*files, i);
@@ -532,7 +532,7 @@ cat :: (cmdx: *CmdX, file_path: string) {
 
     file_contents, file_found := read_file(absolute_path);
     original_file_contents := file_contents;
-    defer free_file_data(original_file_contents);
+    defer free_file_content(*original_file_contents);
     
     if !file_found {
         error_string := win32_last_error_to_string();
@@ -551,8 +551,8 @@ cd :: (cmdx: *CmdX, folder_path: string) {
     absolute_path := get_path_relative_to_cd(cmdx, folder_path);
 
     if folder_exists(absolute_path) {
-        free_string(cmdx.active_screen.current_directory, *cmdx.global_allocator);
-        cmdx.active_screen.current_directory = copy_string(absolute_path, *cmdx.global_allocator); // The new directory must survive the screen
+        deallocate_string(*cmdx.global_allocator, *cmdx.active_screen.current_directory);
+        cmdx.active_screen.current_directory = copy_string(*cmdx.global_allocator, absolute_path); // The new directory must survive the screen
         update_window_name(cmdx);
     } else {
         error_string := win32_last_error_to_string();
