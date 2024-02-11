@@ -357,7 +357,7 @@ reload_config :: (cmdx: *CmdX, reload_command: bool) {
     apply_config_changes(cmdx);
 
     flush_config_errors(cmdx, reload_command); // Now display any config errors that may have been encountered during the last parse
-    render_next_frame(cmdx);
+    draw_next_frame(cmdx);
 }
 
 apply_config_changes :: (cmdx: *CmdX) {

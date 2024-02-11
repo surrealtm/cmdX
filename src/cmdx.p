@@ -35,6 +35,10 @@ COURIER_NEW      :: "C:\\windows\\fonts\\cour.ttf";
 ARIAL            :: "C:\\windows\\fonts\\arial.ttf";
 FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
+// --- Some visual constants
+OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
+SCROLL_BAR_WIDTH :: 10;
+
 Color_Index :: enum {
     Default;    // The default font color
     Cursor;     // The color of the cursor
@@ -66,6 +70,10 @@ Color_Range :: struct {
     true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
 }
 
+Virtual_Line :: struct {
+    source: Source_Range;
+}
+
 CmdX_Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
@@ -75,8 +83,9 @@ CmdX_Screen :: struct {
     // Backlog
     backlog: *u8 = ---;
     backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
-    colors: [..]Color_Range;
-    lines: [..]Source_Range;
+    backlog_colors: [..]Color_Range;
+    backlog_lines: [..]Source_Range; // The actual lines as they are read in from the input.
+    virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
 
     // Text Input
@@ -92,17 +101,17 @@ CmdX_Screen :: struct {
     auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
 
     // Backlog scrolling information
-    scroll_target_offset: f64; // The target scroll offset in lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
+    scroll_target_offset: f64; // The target scroll offset in virtual lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
-    scroll_line_offset: s64; // The index for the first line to be rendered at the top of the screen. This is always the scroll position rounded down
+    scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
     enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
 
     // Cached drawing information
-    first_line_x_position: s64; // The x-position in screen-pixel-space at which the lines should start
-    first_line_y_position: s64; // The y-position in screen-pixel-space at which the first line should be rendered
-    first_line_to_draw: s64; // Index of the line that goes at the very top of the screen
-    last_line_to_draw: s64; // Index of the last line to be rendered towards the bottom of the screen
-    line_wrapped_before_first: bool; // If the line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
+    first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
+    first_line_y_position: s64; // The y-position in screen-pixel-space at which the first virtual line should be rendered
+    first_line_to_draw: s64; // Index of the virtual line that goes at the very top of the screen
+    last_line_to_draw: s64; // Index of the virtual last line to be rendered towards the bottom of the screen
+    line_wrapped_before_first: bool; // If the virtual line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
 
     // Scrollbar data, which needs to be in sync for the logic and drawing
     scrollbar_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll bar
@@ -141,8 +150,8 @@ CmdX :: struct {
     // Output
     window: Window;
     renderer: Renderer = ---;
-    render_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
-    render_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
+    draw_frame: bool; // When nothing has changed on screen, then there is no need to re-render everything. Save GPU power by not rendering this frame, and instead just reuse the current backbuffer.
+    draw_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
     ui: UI;
     disabled_title_bar: bool = false; // The user can toggle the window's title bar, since not having it may look cleaner, but disables window movement.
     draw_overlays: Draw_Overlay = .None;
@@ -179,8 +188,8 @@ CmdX :: struct {
 debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
     bprint(printer, "=== LINES ===\n");
 
-    for i := 0; i < screen.lines.count; ++i {
-        line := array_get(*screen.lines, i);
+    for i := 0; i < screen.backlog_lines.count; ++i {
+        line := array_get(*screen.backlog_lines, i);
         bprint(printer, "I %: % -> % ", i, line.first, line.one_plus_last);
 
         if line.wrapped
@@ -197,8 +206,8 @@ debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
 debug_print_colors :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
     bprint(printer, "=== COLORS ===\n");
 
-    for i := 0; i < screen.colors.count; ++i {
-        range := array_get(*screen.colors, i);
+    for i := 0; i < screen.backlog_colors.count; ++i {
+        range := array_get(*screen.backlog_colors, i);
         bprint(printer, "C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
         if range.source.wrapped bprint(printer, " (wrapped)");
         bprint(printer, "\n");
@@ -338,12 +347,8 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
 
-    // TODO(Victor): Since the given range does not overlap with the first line, this while-loop instantly
-    // breaks out, leading to absolutely dogshit being done. Do we maybe not want to break out here, or
-    // is another procedure required? Not sure if the breaking-out is required for some cases?
-
-    while screen.lines.count > 1 {
-        existing_line := array_get(*screen.lines, 0);
+    while screen.backlog_lines.count > 1 {
+        existing_line := array_get(*screen.backlog_lines, 0);
 
         if source_ranges_overlap(~existing_line, new_line) {
             // If the source ranges overlap, then the existing line must be removed to make space for the
@@ -351,7 +356,7 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
             if total_removed_range.first == -1    total_removed_range.first = existing_line.first;
             total_removed_range.one_plus_last = existing_line.one_plus_last;
             total_removed_range.wrapped       = total_removed_range.one_plus_last < total_removed_range.first;
-            array_remove(*screen.lines, 0);
+            array_remove(*screen.backlog_lines, 0);
 
             // Since the scroll offset is an index into the backlog, we need to adjust the scroll offset
             // whenever indices shift. The text on screen should not visually move, so disable any
@@ -372,14 +377,14 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
         // operated on the now-removed space should also be removed (since they are useless and actually
         // wrong now). If a color range partly covered the removed space, but also covers other space,
         // that color range should be adapted to not cover the removed space.
-        while screen.colors.count {
-            color_range := array_get(*screen.colors, 0);
+        while screen.backlog_colors.count {
+            color_range := array_get(*screen.backlog_colors, 0);
 
-            if screen.colors.count > 1 && (source_range_empty(color_range.source) || source_range_enclosed(screen, color_range.source, total_removed_range)) {
+            if screen.backlog_colors.count > 1 && (source_range_empty(color_range.source) || source_range_enclosed(screen, color_range.source, total_removed_range)) {
                 // Color range is not used in any remaining line, so it should be removed. This should only
                 // happen if it is not the last color range in the list, since the backlog always requires
                 // at least one color for rendering.
-                array_remove(*screen.colors, 0);
+                array_remove(*screen.backlog_colors, 0);
             } else if source_ranges_overlap(color_range.source, total_removed_range) {
                 // Remove the removed space from the color range
                 color_range.source.wrapped = color_range.source.one_plus_last < total_removed_range.one_plus_last;
@@ -390,23 +395,23 @@ remove_overlapping_lines_until_free :: (screen: *CmdX_Screen, new_line: Source_R
         }
     }
 
-    return array_get(*screen.lines, screen.lines.count - 1);
+    return array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
 }
 
 
 /* --- Backlog API --- */
 
 get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
-    cmdx_assert(screen, screen.lines.count > 0, "Screen Backlog is empty");
+    cmdx_assert(screen, screen.backlog_lines.count > 0, "Screen Backlog is empty");
 
-    line_head := array_get(*screen.lines, screen.lines.count - 1);
+    line_head := array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
 
 set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
     // Remove part of the backlog line. The color range must obviously also be adjusted
-    line_head := array_get(*screen.lines, screen.lines.count - 1);
-    color_head := array_get(*screen.colors, screen.colors.count - 1);
+    line_head := array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
+    color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
 
     cmdx_assert(screen, line_head.first + cursor < line_head.one_plus_last || line_head.wrapped, "Invalid cursor position");
 
@@ -415,8 +420,8 @@ set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
         line_head.wrapped = false;
 
         while !source_ranges_overlap(~line_head, color_head.source) {
-            array_remove(*screen.colors, screen.colors.count - 1);
-            color_head = array_get(*screen.colors, screen.colors.count - 1);
+            array_remove(*screen.backlog_colors, screen.backlog_colors.count - 1);
+            color_head = array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
         }
 
         color_head.source.one_plus_last = line_head.one_plus_last;
@@ -442,7 +447,7 @@ close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // empty line and we are good. If the subprocess ended on an unfinished line (which can happen if the
     // process is terminated, or if the process just has weird formatting...) we need to complete that line,
     // and then add the empty one.
-    line_head := array_get(*cmdx.active_screen.lines, cmdx.active_screen.lines.count - 1);
+    line_head := array_get(*cmdx.active_screen.backlog_lines, cmdx.active_screen.backlog_lines.count - 1);
     if line_head.first != line_head.one_plus_last new_line(cmdx, cmdx.active_screen);
 
     new_line(cmdx, screen);
@@ -450,21 +455,22 @@ close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
 
 clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
-    array_clear(*screen.lines);
-    array_clear(*screen.colors);
+    array_clear(*screen.backlog_lines);
+    array_clear(*screen.virtual_lines);
+    array_clear(*screen.backlog_colors);
     new_line(cmdx, screen);
     set_themed_color(screen, .Default);
 }
 
 new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     // Add a new line to the backlog
-    new_line_head := array_push(*screen.lines);
+    new_line_head := array_push(*screen.backlog_lines);
 
-    if screen.lines.count > 1 {
+    if screen.backlog_lines.count > 1 {
         // If there was a previous line, set the start of the new line in the backlog buffer to point
         // just after the previous line, but only if that previous line does not end on the actual
         // backlog end, which would lead to unfortunate behaviour later on.
-        old_line_head := array_get(*screen.lines, screen.lines.count - 2);
+        old_line_head := array_get(*screen.backlog_lines, screen.backlog_lines.count - 2);
 
         if old_line_head.one_plus_last < screen.backlog_size {
             // The first character is inclusive. If the previous line ends on the backlog size, that would be
@@ -481,17 +487,17 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
 
     if screen.enable_auto_scroll {
         // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
-        screen.scroll_target_offset = xx screen.lines.count;
+        screen.scroll_target_offset = xx screen.backlog_lines.count;
     }
 
-    render_next_frame(cmdx);
+    draw_next_frame(cmdx);
 }
 
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     // Figure out the line to which to append the text. If no line exists yet in the backlog, then
     // create a new one. If there is at least one line, only append to the existing line if it isn't
     // complete yet. If it is, then create a new line and add the text to that.
-    current_line := array_get(*screen.lines, screen.lines.count - 1);
+    current_line := array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
 
     // Edge-Case: If the current line already has wrapped, and it completely fills the backlog, then there
     // simply is no more space for this new text, therefore just ignore it.
@@ -525,7 +531,7 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
         current_line.wrapped = true;
         current_line.one_plus_last = after_wrap_length;
 
-        color_head := array_get(*screen.colors, screen.colors.count - 1);
+        color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
         color_head.source.wrapped       = true;
         color_head.source.one_plus_last = after_wrap_length;
         return;
@@ -549,12 +555,12 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
         // Update the current line end, It now takes over the complete backlog
         current_line.one_plus_last = current_line.first;
 
-        color_head := array_get(*screen.colors, screen.colors.count - 1);
+        color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
         color_head.source.one_plus_last = current_line.first;
         return;
     }
 
-    first_line := array_get(*screen.lines, 0);
+    first_line := array_get(*screen.backlog_lines, 0);
     if projected_one_plus_last > first_line.first {
         // If the current line would flow into the next line in the backlog (which is actually the first line
         // in the array), then that line will need to be removed.
@@ -568,11 +574,11 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     // The current line now has grown. Increase the source ranges
     current_line.one_plus_last = current_line.one_plus_last + text.count;
 
-    color_head := array_get(*screen.colors, screen.colors.count - 1);
+    color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
     color_head.source.one_plus_last = current_line.one_plus_last;
     color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
 
-    render_next_frame(cmdx);
+    draw_next_frame(cmdx);
 }
 
 add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: u8) {
@@ -605,21 +611,21 @@ compare_color_range :: (existing: Color_Range, true_color: Color, color_index: C
 }
 
 set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Color_Index) {
-    if screen.colors.count {
-        color_head := array_get(*screen.colors, screen.colors.count - 1);
+    if screen.backlog_colors.count {
+        color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
 
         if color_head.source.first == color_head.source.one_plus_last && !color_head.source.wrapped {
             // If the previous color was not actually used in any source range, then just overwrite that
             // entry with the new data to save space.
             merged_with_previous := false;
 
-            if screen.colors.count >= 2 {
-                previous_color_head := array_get(*screen.colors, screen.colors.count - 2);
+            if screen.backlog_colors.count >= 2 {
+                previous_color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 2);
                 if compare_color_range(~previous_color_head, true_color, color_index) {
                     previous_color_head.color_index = color_index;
                     previous_color_head.true_color  = true_color;
                     merged_with_previous = true;
-                    array_remove(*screen.colors, screen.colors.count - 1); // Remove the new head, since it is useless
+                    array_remove(*screen.backlog_colors, screen.backlog_colors.count - 1); // Remove the new head, since it is useless
                 }
             }
 
@@ -634,12 +640,12 @@ set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Col
             first := color_head.source.one_plus_last;
             if first == screen.backlog_size first = 0; // one_plus_last can go one over the backlog bounds, but first cannot, so detect that edge case here
             range: Color_Range = .{ .{ first, first, false }, color_index, true_color };
-            array_add(*screen.colors, range);
+            array_add(*screen.backlog_colors, range);
         }
     } else {
         // If this is the first color to be set, it obviously starts at the beginning of the backlog
         range: Color_Range = .{ .{}, color_index, true_color };
-        array_add(*screen.colors, range);
+        array_add(*screen.backlog_colors, range);
     }
 }
 
@@ -665,16 +671,16 @@ activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
     else set_foreground_color(*cmdx.renderer, color_range.true_color);
 }
 
-draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
+draw_backlog_text :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
     set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
 
     for cursor := start; cursor < end; ++cursor {
         character := screen.backlog[cursor];
 
-        while cursor_after_range(cursor, wrapped_before, color_range.source) && ~color_range_index + 1 < screen.colors.count {
+        while cursor_after_range(cursor, wrapped_before, color_range.source) && ~color_range_index + 1 < screen.backlog_colors.count {
             // Increase the current color range
             ~color_range_index += 1;
-            ~color_range = array_get_value(*screen.colors, ~color_range_index);
+            ~color_range = array_get_value(*screen.backlog_colors, ~color_range_index);
 
             // Set the actual foreground color.
             activate_color_range(cmdx, color_range);
@@ -699,12 +705,12 @@ draw_backlog_line :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, l
         }
     }
 
-    if end == color_range.source.one_plus_last && color_range_index + 1 < screen.colors.count {
+    if end == color_range.source.one_plus_last && color_range_index + 1 < screen.backlog_colors.count {
         // There is an edge case where the color range's one_plus_last == backlog_size, and so the cursor
         // never reaches one_plus_last in the above loop, therefore the color range never gets skipped.
         // Deal with this edge case here.
         ~color_range_index += 1;
-        ~color_range = array_get_value(*screen.colors, ~color_range_index);
+        ~color_range = array_get_value(*screen.backlog_colors, ~color_range_index);
 
         // Set the actual foreground color.
         activate_color_range(cmdx, color_range);
@@ -822,6 +828,16 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     if screen.auto_complete_options.count == 1    screen.auto_complete_dirty = true;
 }
 
+build_virtual_lines_for_screen :: (screen: *CmdX_Screen) {
+    array_clear(*screen.virtual_lines);
+    
+    for i := 0; i < screen.backlog_lines.count; ++i {
+        backlog_line := array_get(*screen.backlog_lines, i);
+        virtual_line := array_push(*screen.virtual_lines);
+        virtual_line.source = ~backlog_line;
+    }
+}
+
 
 draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Set up the cursor coordinates for rendering.
@@ -831,7 +847,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Set up the color ranges.
     wrapped_before := screen.line_wrapped_before_first;
     color_range_index: s64 = 0;
-    color_range: Color_Range = array_get_value(*screen.colors, color_range_index);
+    color_range: Color_Range = array_get_value(*screen.backlog_colors, color_range_index);
     activate_color_range(cmdx, *color_range);
 
     // Set scissors to avoid drawing into other screens' spaces.
@@ -840,18 +856,19 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Draw all visible lines
     current_line_index := screen.first_line_to_draw;
     while current_line_index <= screen.last_line_to_draw {
-        line := array_get(*screen.lines, current_line_index);
-
-        if line.wrapped {
+        line := array_get(*screen.virtual_lines, current_line_index);
+        source_range := line.source;
+        
+        if source_range.wrapped {
             // If this line wraps, then the line actually contains two parts. The first goes from the start
             // until the end of the backlog, the second part starts at the beginning of the backlog and goes
             // until the end of the line. It is easier for draw_backlog_split to do it like this.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, screen.backlog_size, true, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, source_range.first, screen.backlog_size, true, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
             wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
             cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, screen.backlog[screen.backlog_size - 1], screen.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, 0, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, 0, source_range.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
         } else
-            cursor_x, cursor_y = draw_backlog_line(cmdx, screen, line.first, line.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, source_range.first, source_range.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
 
         if cmdx.draw_overlays & .Line_Backgrounds {
             draw_quad(*cmdx.renderer, screen.first_line_x_position, cursor_y - cmdx.font.line_height, cursor_x, cursor_y, .{ 255, 255, 0, 255 });
@@ -859,7 +876,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
         // If this is not the last line in the backlog, position the cursor on the next line.
         // If it is the last line, then the text input should be appened to this line.
-        if current_line_index + 1 != screen.lines.count {
+        if current_line_index + 1 != screen.virtual_lines.count {
             cursor_y += cmdx.font.line_height;
             cursor_x = screen.first_line_x_position;
         }
@@ -873,7 +890,7 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
     // Draw the scroll bar only if the backlog is bigger than the available screen size.
     // If the scrollbar is not hovered, make it a bit thinner.
-    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.lines.count {
+    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
         // The scrollbar background rectangle is used to detect whether the mouse is currently hovering it.
         // The visual of the background is a bit smaller to not look as distracting, but the hitbox being
         // bigger should make it easier to select.
@@ -904,14 +921,14 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.moved {
         // Because sometimes windows is a little bitch, when resizing a window
         // which is partially outside of the desktop frame, things go bad and we need to re-render.
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     if cmdx.window.resized {
         // If the window was resized, adjust the screen rectangles and render next frame to properly
         // fill the new screen area
         adjust_screen_rectangles(cmdx);
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     if cmdx.window.key_pressed[Key_Code.F11] {
@@ -924,17 +941,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // By changing the window style, the window size changes, meaning text layout changes, therefore
         // the next frame should be rendered
         adjust_screen_rectangles(cmdx);
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     if cmdx.window.focused != cmdx.active_screen.text_input.active {
         // If the user just tabbed in or out of cmdx, render the next frame so that the cursor filling
         // state is not stale. This indicates visually to the user whether cmdx is currently focused
         // and ready for keyboard input.
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
-    if cmdx.render_ui {
+    if cmdx.draw_ui {
         // Prepare the ui
         input: UI_Input = ---;
         input.mouse_position         = .{ xx cmdx.window.mouse_x, xx cmdx.window.mouse_y };
@@ -978,7 +995,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.key_held[Key_Code.Control] && cmdx.window.mouse_wheel_turns != 0 {
         cmdx.font_size += xx cmdx.window.mouse_wheel_turns;
         update_font(cmdx);
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     // Update the mouse-hovered screen.
@@ -1009,7 +1026,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     // The text buffer was updated, update the auto complete options and render the next frame
     if handled_some_text_input {
         cmdx.active_screen.auto_complete_dirty = true;
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     // Do one cycle of auto-complete if the tab key has been pressed.
@@ -1026,7 +1043,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     // Go down in the history
@@ -1040,7 +1057,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
-        render_next_frame(cmdx);
+        draw_next_frame(cmdx);
     }
 
     // Check for potential control keys
@@ -1086,7 +1103,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
 
+        //
         // Update the currently running child process
+        //
         if screen.child_process_running && !win32_update_spawned_process(cmdx, screen) {
             // If CmdX is terminating, or if the child process has disconnected from us (either by terminating
             // itself, or by closing the pipes), then close the connectoin to it.
@@ -1094,17 +1113,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         //
-        // Update the text input's cursor rendering data
+        // Update the virtual line list for this screen
         //
-        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
-        text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
-        cursor_alpha_previous := screen.text_input.cursor_alpha;
-        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
-        update_text_input_rendering_data(*screen.text_input);
-        if cursor_alpha_previous != screen.text_input.cursor_alpha    render_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
-
-
-
+        build_virtual_lines_for_screen(screen);
 
         //
         // Handle scrolling in this screen
@@ -1121,7 +1132,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if cmdx.active_screen == screen {
             // Only actually do keyboard scrolling if this is either the active screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
-            if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.lines.count; // Scroll to the bottom of the backlog.
+            if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.virtual_lines.count; // Scroll to the bottom of the backlog.
             if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog.
         }
 
@@ -1131,18 +1142,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // go below that number. This means that we cannot scroll past the very first line at the very top
         // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
         // with the top-most line potentially being partly cut off at the top of the window.
-        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - 5);
-        complete_lines_fitting_on_screen: s64 = min(active_screen_size / cmdx.font.line_height, screen.lines.count);
-        partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_size / xx cmdx.font.line_height), screen.lines.count);
+        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
+        complete_lines_fitting_on_screen: s64 = min(active_screen_size / cmdx.font.line_height, screen.virtual_lines.count);
+        partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_size / xx cmdx.font.line_height), screen.virtual_lines.count);
         
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
-        highest_allowed_scroll_offset := screen.lines.count - complete_lines_fitting_on_screen;
+        highest_allowed_scroll_offset := screen.virtual_lines.count - complete_lines_fitting_on_screen;
         screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
         screen.scroll_interpolation    = clamp(damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll_offset);
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
         screen.enable_auto_scroll      = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
-
 
 
         //
@@ -1163,21 +1173,19 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
         // the input line. If we are completely scrolled to the bottom, that line is shared between the
         // backlog and the input line.
-        if screen.last_line_to_draw != screen.lines.count - 1 --screen.last_line_to_draw;
+        if screen.last_line_to_draw != screen.virtual_lines.count - 1    --screen.last_line_to_draw;
 
         // Set the appropriate screen space coordinates for the first backlog line to be drawn.
-        screen.first_line_x_position = screen.rectangle[0] + 5;
-        screen.first_line_y_position = screen.rectangle[3] - (final_drawn_line_count - 1) * cmdx.font.line_height - 5; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
+        screen.first_line_x_position = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
+        screen.first_line_y_position = screen.rectangle[3] - (final_drawn_line_count - 1) * cmdx.font.line_height - OFFSET_FROM_SCREEN_BORDER; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
 
         // If any of the lines above the first line to be rendered already wrapped around the backlog, that
         // information needs to be stored for drawing each backlog line to properly handle color wrapping.
-        first_line_in_backlog := array_get(*screen.lines, 0);
-        first_line_to_draw := array_get(*screen.lines, screen.first_line_to_draw);
-        screen.line_wrapped_before_first = first_line_to_draw.first < first_line_in_backlog.first;
+        first_line_in_backlog := array_get(*screen.virtual_lines, 0);
+        first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
+        screen.line_wrapped_before_first = first_line_to_draw.source.first < first_line_in_backlog.source.first;
 
-        if previous_scroll_offset != screen.scroll_line_offset render_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
-
-
+        if previous_scroll_offset != screen.scroll_line_offset draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
 
 
         //
@@ -1193,12 +1201,12 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
         
         first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
-        first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.lines.count;
-        visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.lines.count;
+        first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.virtual_lines.count;
+        visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.virtual_lines.count;
 
-        scrollbar_hitbox_width: s32 = 10;
-        scrollbar_hitbox_height := screen.rectangle[3] - 5 - screen.rectangle[1] - 5;
-        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - scrollbar_hitbox_width - 5, screen.rectangle[1] + 5, screen.rectangle[2] - 5, screen.rectangle[1] + 5 + scrollbar_hitbox_height };
+        scrollbar_hitbox_width: s32 = SCROLL_BAR_WIDTH;
+        scrollbar_hitbox_height := screen.rectangle[3] - OFFSET_FROM_SCREEN_BORDER - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER;
+        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - scrollbar_hitbox_width - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER, screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER + scrollbar_hitbox_height };
 
         scrollknob_hitbox_offset: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * first_line_percentage);
         scrollknob_hitbox_height: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * visible_line_percentage);
@@ -1233,19 +1241,20 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
             target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
 
-            screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.lines.count + xx first_line_offset;
+            screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.virtual_lines.count + xx first_line_offset;
         }
         
         if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
 
         // If any state changed during this frame, then we should render it to give immediate feedback to the
         // user.
-        if screen.scrollbar_hitbox_hovered != scrollbar_hovered || screen.scrollknob_hitbox_hovered != scrollknob_hovered || screen.scrollknob_dragged != scrollknob_dragged render_next_frame(cmdx);
+        if screen.scrollbar_hitbox_hovered != scrollbar_hovered || screen.scrollknob_hitbox_hovered != scrollknob_hovered || screen.scrollknob_dragged != scrollknob_dragged draw_next_frame(cmdx);
 
         screen.scrollbar_hitbox_hovered  = scrollbar_hovered;
         screen.scrollknob_hitbox_hovered = scrollknob_hovered;
         screen.scrollknob_dragged        = scrollknob_dragged;
 
+        
         //
         // Update the visual data for the scrollbar
         //
@@ -1264,6 +1273,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Default];
 
         screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
+
+        
+        //
+        // Update the text input's cursor rendering data
+        //
+        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
+        text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
+        cursor_alpha_previous := screen.text_input.cursor_alpha;
+        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
+        update_text_input_rendering_data(*screen.text_input);
+        if cursor_alpha_previous != screen.text_input.cursor_alpha    draw_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
     }
 
     // Destroy all screens that are marked for closing. Do it before the drawing for a faster respone
@@ -1272,7 +1292,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         if it.data.marked_for_closing    close_screen(cmdx, *it.data);
     }
 
-    if cmdx.render_frame && cmdx.window.width > 0 && cmdx.window.height > 0 {
+    if cmdx.draw_frame && cmdx.window.width > 0 && cmdx.window.height > 0 {
         // Actually prepare the renderer now if we want to render this screen.
         // Also make sure that the window is not zero-sized, which can happen if the user minimizes
         // this window.
@@ -1284,7 +1304,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
 
         // Render the ui on top of the actual terminal stuff
-        if cmdx.render_ui {
+        if cmdx.draw_ui {
             draw_ui(*cmdx.ui, cmdx.window.frame_time);
             flush_font_buffer(*cmdx.renderer); // Flush all remaining ui texta
         }
@@ -1292,7 +1312,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // Finish the screen, sleep until the next one
         swap_gl_buffers(*cmdx.window);
 
-        cmdx.render_frame = false;
+        cmdx.draw_frame = false;
     }
 
     // Reset the frame arena
@@ -1318,15 +1338,16 @@ create_screen :: (cmdx: *CmdX) -> *CmdX_Screen {
     // Actually create the new screen, set the proper allocators for arrays and so forth
     screen := linked_list_push(*cmdx.screens);
     screen.auto_complete_options.allocator = *cmdx.global_allocator;
-    screen.history.allocator = *cmdx.global_allocator;
-    screen.colors.allocator  = *cmdx.global_allocator;
-    screen.lines.allocator   = *cmdx.global_allocator;
-    screen.current_directory = copy_string(*cmdx.global_allocator, cmdx.startup_directory);
-    screen.text_input.active = true;
-    screen.backlog_size      = cmdx.backlog_size;
-    screen.backlog           = allocate(*cmdx.global_allocator, screen.backlog_size);
-    screen.history_size      = cmdx.history_size;
-    screen.index             = cmdx.screens.count - 1;
+    screen.history.allocator        = *cmdx.global_allocator;
+    screen.backlog_colors.allocator = *cmdx.global_allocator;
+    screen.backlog_lines.allocator  = *cmdx.global_allocator;
+    screen.virtual_lines.allocator  = *cmdx.global_allocator;
+    screen.current_directory        = copy_string(*cmdx.global_allocator, cmdx.startup_directory);
+    screen.text_input.active        = true;
+    screen.backlog_size             = cmdx.backlog_size;
+    screen.backlog                  = allocate(*cmdx.global_allocator, screen.backlog_size);
+    screen.history_size             = cmdx.history_size;
+    screen.index                    = cmdx.screens.count - 1;
 
     // Set up the backlog for this screen
     clear_backlog(cmdx, screen);
@@ -1364,7 +1385,7 @@ activate_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
     // Render the next frame to report the change to the user
     update_window_name(cmdx);
-    render_next_frame(cmdx);
+    draw_next_frame(cmdx);
 }
 
 activate_screen_with_index :: (cmdx: *CmdX, index: s64) {
@@ -1409,8 +1430,8 @@ adjust_screen_indices :: (cmdx: *CmdX) {
 
 /* --- SETUP CODE --- */
 
-render_next_frame :: (cmdx: *CmdX) {
-    cmdx.render_frame = true;
+draw_next_frame :: (cmdx: *CmdX) {
+    cmdx.draw_frame = true;
 }
 
 get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Window_Style_Flags {
@@ -1595,7 +1616,7 @@ cmdx :: () -> s32 {
 
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
-    render_next_frame(*cmdx);
+    draw_next_frame(*cmdx);
 
     // Now set the taskbar for the window, cause win32 sucks some ass.
     set_window_icon(*cmdx.window, "data/cmdx.ico");
