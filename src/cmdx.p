@@ -675,7 +675,8 @@ set_themed_color :: (screen: *CmdX_Screen, index: Color_Index) {
 /* --- DRAWING --- */
 
 mouse_over_rectangle :: (cmdx: *CmdX, rectangle: []s32) -> bool {
-    return cmdx.window.mouse_x >= rectangle[0] && cmdx.window.mouse_x < rectangle[2] &&
+    return cmdx.window.mouse_active &&
+        cmdx.window.mouse_x >= rectangle[0] && cmdx.window.mouse_x < rectangle[2] &&
         cmdx.window.mouse_y >= rectangle[1] && cmdx.window.mouse_y < rectangle[3];
 }
 
@@ -1273,7 +1274,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         scrollbar_hovered  := mouse_over_rectangle(cmdx, screen.scrollbar_hitbox_rectangle);
         scrollknob_hovered := mouse_over_rectangle(cmdx, screen.scrollknob_hitbox_rectangle);
         scrollknob_dragged := screen.scrollknob_dragged;
-
+        
         if scrollknob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
             scrollknob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
             screen.scrollknob_drag_offset = xx (cmdx.window.mouse_y - screen.scrollknob_hitbox_rectangle[1]);
@@ -1749,4 +1750,3 @@ WinMain :: () -> s32 {
 // @Incomplete: Store history in a file to restore it after program restart
 // @Incomplete: Put all these screen hotkeys into the config file somehow (create, close, next screen...)
 // @Incomplete: When hovering the scroll bar and then quickly leaving the screen area, the frame doesn't get redrawn, and so the scroll bar is still visually hovered
-// @Incomplete: enable_auto_scroll is broken
