@@ -72,6 +72,7 @@ Color_Range :: struct {
 
 Virtual_Line :: struct {
     source: Source_Range;
+    is_first_in_backlog_line: bool;
 }
 
 CmdX_Screen :: struct {
@@ -505,6 +506,12 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
 }
 
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
+    defer {
+        // Snap scrolling, draw the next frame
+        screen.added_text_this_frame = true;
+        draw_next_frame(cmdx);
+    };
+
     // Figure out the line to which to append the text. If no line exists yet in the backlog, then
     // create a new one. If there is at least one line, only append to the existing line if it isn't
     // complete yet. If it is, then create a new line and add the text to that.
@@ -588,10 +595,6 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
     color_head.source.one_plus_last = current_line.one_plus_last;
     color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
-
-    // Snap scrolling, draw the next frame
-    screen.added_text_this_frame = true;
-    draw_next_frame(cmdx);
 }
 
 add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: u8) {
@@ -846,8 +849,9 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
 
     if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
-        // Scroll bar is drawn, decrease the active screen width
-        active_screen_width = screen.scrollbar_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
+        // Scroll bar is drawn, decrease the active screen width. The scroll bar changes visual size on hover,
+        // the knob doesn't.
+        active_screen_width = screen.scrollknob_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
     }
 
     array_clear(*screen.virtual_lines);
@@ -859,12 +863,14 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             // Empty lines should just be copied into the virtual line array.
             virtual_line := array_push(*screen.virtual_lines);
             virtual_line.source = backlog_line;
+            virtual_line.is_first_in_backlog_line = true;
             continue;
         }
         
         virtual_range := Source_Range.{ backlog_line.first, backlog_line.first, false };
         virtual_width := 0; // The current virtual line width in pixels
-
+        is_first_in_backlog_line := true;
+        
         while source_range_ends_before_other_source_range(virtual_range, backlog_line) {
             next_character := screen.backlog[virtual_range.one_plus_last];
             
@@ -876,7 +882,9 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
             virtual_line := array_push(*screen.virtual_lines);
             virtual_line.source = virtual_range;
-
+            virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
+            
+            is_first_in_backlog_line = false;
             virtual_width = 0;
             virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
         }
@@ -1749,4 +1757,3 @@ WinMain :: () -> s32 {
 
 // @Incomplete: Store history in a file to restore it after program restart
 // @Incomplete: Put all these screen hotkeys into the config file somehow (create, close, next screen...)
-// @Incomplete: When hovering the scroll bar and then quickly leaving the screen area, the frame doesn't get redrawn, and so the scroll bar is still visually hovered
