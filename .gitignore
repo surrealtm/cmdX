@@ -57,3 +57,4 @@ dkms.conf
 *.cmdx-config
 *.rdbg
 *.4coder
+*.raddbg*

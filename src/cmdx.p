@@ -105,7 +105,8 @@ CmdX_Screen :: struct {
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
     enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
-
+    added_text_this_frame: bool; // Auto scroll works when virtual lines are, but we build the virtual lines array every frame, so we need this for a heuristic to know the virtual lines array has changed.
+    
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
     first_line_y_position: s64; // The y-position in screen-pixel-space at which the first virtual line should be rendered
@@ -498,11 +499,7 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     }
 
     ++screen.viewport_height;
-
-    if screen.enable_auto_scroll {
-        // Snap the view back to the bottom. Maybe in the future, we only do this if we are close the the bottom anyway?
-        screen.scroll_target_offset = xx screen.backlog_lines.count;
-    }
+    screen.added_text_this_frame = true;
 
     draw_next_frame(cmdx);
 }
@@ -592,6 +589,8 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     color_head.source.one_plus_last = current_line.one_plus_last;
     color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
 
+    // Snap scrolling, draw the next frame
+    screen.added_text_this_frame = true;
     draw_next_frame(cmdx);
 }
 
@@ -881,6 +880,13 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
         }
     }
+
+    if screen.enable_auto_scroll && screen.added_text_this_frame {
+        // Snap the view back to the bottom.
+        screen.scroll_target_offset = xx screen.virtual_lines.count;
+    }
+
+    screen.added_text_this_frame = false;
 }
 
 
@@ -1198,8 +1204,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         screen.scroll_interpolation    = clamp(damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll_offset);
         screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
         screen.enable_auto_scroll      = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
-
-
+                
         //
         // Set up drawing data for this frame
         //
