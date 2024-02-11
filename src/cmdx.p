@@ -297,6 +297,12 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     return overlap;
 }
 
+source_range_ends_before_other_source_range :: (lhs: Source_Range, rhs: Source_Range) -> bool {
+    if !lhs.wrapped && rhs.wrapped return true;
+    if lhs.wrapped && !rhs.wrapped return false;
+    return lhs.one_plus_last < rhs.one_plus_last;    
+}
+
 // Returns true if lhs is completely enclosed by rhs, meaning that there is no character
 // in lhs that is not also owned by rhs.
 source_range_enclosed :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
@@ -324,6 +330,14 @@ source_range_enclosed :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_R
     }
 
     return enclosed;
+}
+
+increase_source_range :: (screen: *CmdX_Screen, range: *Source_Range) {
+    ++range.one_plus_last;
+    if range.one_plus_last > screen.backlog_size {
+        range.one_plus_last = 0;
+        range.wrapped = true;
+    }
 }
 
 source_range_empty :: (source: Source_Range) -> bool {
@@ -828,13 +842,44 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     if screen.auto_complete_options.count == 1    screen.auto_complete_dirty = true;
 }
 
-build_virtual_lines_for_screen :: (screen: *CmdX_Screen) {
+build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
+
+    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
+        // Scroll bar is drawn, decrease the active screen width
+        active_screen_width = screen.scrollbar_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
+    }
+
     array_clear(*screen.virtual_lines);
     
     for i := 0; i < screen.backlog_lines.count; ++i {
-        backlog_line := array_get(*screen.backlog_lines, i);
-        virtual_line := array_push(*screen.virtual_lines);
-        virtual_line.source = ~backlog_line;
+        backlog_line  := array_get_value(*screen.backlog_lines, i);
+
+        if source_range_empty(backlog_line) {
+            // Empty lines should just be copied into the virtual line array.
+            virtual_line := array_push(*screen.virtual_lines);
+            virtual_line.source = backlog_line;
+            continue;
+        }
+        
+        virtual_range := Source_Range.{ backlog_line.first, backlog_line.first, false };
+        virtual_width := 0; // The current virtual line width in pixels
+
+        while source_range_ends_before_other_source_range(virtual_range, backlog_line) {
+            next_character := screen.backlog[virtual_range.one_plus_last];
+            
+            while source_range_ends_before_other_source_range(virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
+                virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
+                increase_source_range(screen, *virtual_range);
+                next_character = screen.backlog[virtual_range.one_plus_last];
+            }
+
+            virtual_line := array_push(*screen.virtual_lines);
+            virtual_line.source = virtual_range;
+
+            virtual_width = 0;
+            virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
+        }
     }
 }
 
@@ -1115,7 +1160,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         //
         // Update the virtual line list for this screen
         //
-        build_virtual_lines_for_screen(screen);
+        build_virtual_lines_for_screen(cmdx, screen);
 
         //
         // Handle scrolling in this screen
@@ -1142,9 +1187,9 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // go below that number. This means that we cannot scroll past the very first line at the very top
         // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
         // with the top-most line potentially being partly cut off at the top of the window.
-        active_screen_size := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
-        complete_lines_fitting_on_screen: s64 = min(active_screen_size / cmdx.font.line_height, screen.virtual_lines.count);
-        partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_size / xx cmdx.font.line_height), screen.virtual_lines.count);
+        active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
+        complete_lines_fitting_on_screen: s64 = min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
+        partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_height / xx cmdx.font.line_height), screen.virtual_lines.count);
         
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
@@ -1696,5 +1741,7 @@ WinMain :: () -> s32 {
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
 */
 
-// @Incomplete store history in a file to restore it after program restart
-// @Incomplete put all these screen hotkeys into the config file somehow (create, close, next screen...)
+// @Incomplete: Store history in a file to restore it after program restart
+// @Incomplete: Put all these screen hotkeys into the config file somehow (create, close, next screen...)
+// @Incomplete: When hovering the scroll bar and then quickly leaving the screen area, the frame doesn't get redrawn, and so the scroll bar is still visually hovered
+// @Incomplete: enable_auto_scroll is broken
