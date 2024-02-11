@@ -38,6 +38,7 @@ FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 // --- Some visual constants
 OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
 SCROLL_BAR_WIDTH :: 10;
+OFFSET_FOR_WRAPPED_LINES :: 15;
 
 Color_Index :: enum {
     Default;    // The default font color
@@ -88,7 +89,8 @@ CmdX_Screen :: struct {
     backlog_lines: [..]Source_Range; // The actual lines as they are read in from the input.
     virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
-
+    previous_frame_virtual_line_count: s64; // This is used to determine whether the virtual lines have changed, and if so to apply auto scrolling (if enable_auto_scrolling is true).
+    
     // Text Input
     text_input: Text_Input;
     history: [..]string;
@@ -106,7 +108,6 @@ CmdX_Screen :: struct {
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
     enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
-    added_text_this_frame: bool; // Auto scroll works when virtual lines are, but we build the virtual lines array every frame, so we need this for a heuristic to know the virtual lines array has changed.
     
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
@@ -479,6 +480,10 @@ clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
+    // Snap scrolling, draw the next frame
+    ++screen.viewport_height;
+    draw_next_frame(cmdx);
+
     // Add a new line to the backlog
     new_line_head := array_push(*screen.backlog_lines);
 
@@ -498,19 +503,11 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
 
         new_line_head.one_plus_last = new_line_head.first;
     }
-
-    ++screen.viewport_height;
-    screen.added_text_this_frame = true;
-
-    draw_next_frame(cmdx);
 }
 
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
-    defer {
-        // Snap scrolling, draw the next frame
-        screen.added_text_this_frame = true;
-        draw_next_frame(cmdx);
-    };
+    // Snap scrolling, draw the next frame
+    draw_next_frame(cmdx);
 
     // Figure out the line to which to append the text. If no line exists yet in the backlog, then
     // create a new one. If there is at least one line, only append to the existing line if it isn't
@@ -857,7 +854,7 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     array_clear(*screen.virtual_lines);
     
     for i := 0; i < screen.backlog_lines.count; ++i {
-        backlog_line  := array_get_value(*screen.backlog_lines, i);
+        backlog_line := array_get_value(*screen.backlog_lines, i);
 
         if source_range_empty(backlog_line) {
             // Empty lines should just be copied into the virtual line array.
@@ -885,17 +882,17 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
             
             is_first_in_backlog_line = false;
-            virtual_width = 0;
+            virtual_width = OFFSET_FOR_WRAPPED_LINES;
             virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
         }
     }
 
-    if screen.enable_auto_scroll && screen.added_text_this_frame {
+    if screen.enable_auto_scroll && screen.previous_frame_virtual_line_count != screen.virtual_lines.count {
         // Snap the view back to the bottom.
         screen.scroll_target_offset = xx screen.virtual_lines.count;
     }
 
-    screen.added_text_this_frame = false;
+    screen.previous_frame_virtual_line_count = screen.virtual_lines.count;
 }
 
 
@@ -918,6 +915,16 @@ draw_cmdx_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     while current_line_index <= screen.last_line_to_draw {
         line := array_get(*screen.virtual_lines, current_line_index);
         source_range := line.source;
+
+        if !line.is_first_in_backlog_line {
+            // Indicate the wrapped line with a special character and some space
+            previous_foreground_color := cmdx.renderer.foreground_color;
+            flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
+            set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Scrollbar]);
+            render_single_character_with_font(*cmdx.font, 0xbb, cursor_x, cursor_y, draw_single_glyph, *cmdx.renderer);
+            cursor_x += OFFSET_FOR_WRAPPED_LINES;
+            set_foreground_color(*cmdx.renderer, previous_foreground_color);                                 
+        }
         
         if source_range.wrapped {
             // If this line wraps, then the line actually contains two parts. The first goes from the start
