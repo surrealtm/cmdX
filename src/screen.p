@@ -521,7 +521,40 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     if screen.auto_complete_options.count == 1    screen.auto_complete_dirty = true;
 }
 
-build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtual_line: *Virtual_Line) {
+    //
+    // Allocate the offset array
+    //
+    count := virtual_line.source.one_plus_last - virtual_line.source.first;
+    if virtual_line.source.wrapped count = screen.backlog_size - virtual_line.source.first + virtual_line.source.one_plus_last;
+    virtual_line.x = allocate_array(*cmdx.global_allocator, count, s16);
+
+    //
+    // Fill the offset array with screen coordinates
+    //
+    range := virtual_line.source; // Copy this so that we can modify it
+    backlog_index := virtual_line.source.first;
+    line_index := 0;
+    x := OFFSET_FROM_SCREEN_BORDER;
+
+    if !virtual_line.is_first_in_backlog_line x = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+    
+    while backlog_index != range.one_plus_last {
+        virtual_line.x[line_index] = x;
+
+        character := screen.backlog[backlog_index];
+        x += query_glyph_horizontal_advance(*cmdx.font, character);
+
+        ++line_index;
+        ++backlog_index;
+        if backlog_index == screen.backlog_size && range.wrapped {
+            range.wrapped = false;
+            backlog_index = 0;
+        }
+    }
+}
+
+build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
 
     if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
@@ -530,6 +563,10 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         active_screen_width = screen.scrollknob_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
     }
 
+    for i := 0; i < screen.virtual_lines.count; ++i {
+        virtual_line := array_get(*screen.virtual_lines, i);
+        deallocate_array(*cmdx.global_allocator, *virtual_line.x);
+    }
     array_clear(*screen.virtual_lines);
     
     for i := 0; i < screen.backlog_lines.count; ++i {
@@ -559,9 +596,10 @@ build_virtual_lines_for_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             virtual_line := array_push(*screen.virtual_lines);
             virtual_line.source = virtual_range;
             virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
+            setup_x_positions_for_virtual_line(cmdx, screen, virtual_line);
             
             is_first_in_backlog_line = false;
-            virtual_width = OFFSET_FOR_WRAPPED_LINES;
+            virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
             virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
         }
     }
@@ -649,7 +687,7 @@ draw_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
             set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Scrollbar]);
             render_single_character_with_font(*cmdx.font, 0xbb, cursor_x, cursor_y, draw_single_glyph, *cmdx.renderer);
-            cursor_x += OFFSET_FOR_WRAPPED_LINES;
+            cursor_x += OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
             set_foreground_color(*cmdx.renderer, previous_foreground_color);                                 
         }
         
@@ -718,7 +756,7 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     //
     // Update the virtual line list for this screen
     //
-    build_virtual_lines_for_screen(cmdx, screen);
+    build_virtual_lines(cmdx, screen);
 
     //
     // Handle scrolling in this screen
@@ -875,6 +913,15 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Default];
 
     screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
+
+    //
+    // Handle mouse selection of backlog text
+    //
+
+    if cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender {
+        hovered_virtual_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
+        hovered_virtual_line := array_get(*screen.virtual_lines, hovered_virtual_line_index);
+    }
 
     
     //

@@ -39,9 +39,9 @@ FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
 /* =========================== Visual Constants =========================== */
 
-OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
 SCROLL_BAR_WIDTH :: 10;
-OFFSET_FOR_WRAPPED_LINES :: 15;
+OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
+OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES :: 15;
 
 /* =========================== Data Structures =========================== */
 
@@ -78,6 +78,7 @@ Color_Range :: struct {
 
 Virtual_Line :: struct {
     source: Source_Range;
+    x: []s16; // The x coordinates of all characters in the source range, for mouse selection
     is_first_in_backlog_line: bool;
 }
 
