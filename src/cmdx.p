@@ -241,10 +241,14 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     return overlap;
 }
 
-source_range_ends_before_other_source_range :: (lhs: Source_Range, rhs: Source_Range) -> bool {
-    if !lhs.wrapped && rhs.wrapped return true;
+source_range_ends_before_other_source_range :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
+    if !lhs.wrapped && rhs.wrapped {
+        return (lhs.first < rhs.one_plus_last && lhs.one_plus_last < rhs.one_plus_last) ||
+            (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
+    }
+
     if lhs.wrapped && !rhs.wrapped return false;
-    return lhs.one_plus_last < rhs.one_plus_last;    
+    return lhs.one_plus_last < rhs.one_plus_last;
 }
 
 source_range_enclosed :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
@@ -265,7 +269,7 @@ source_range_enclosed :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_R
         // | ->           |  lhs
         // |            ->|  lhs
         enclosed = (lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last) ||
-        (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
+            (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
     } else {
         // If neither are wrapped, then lhs must start after and end before rhs
         enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;

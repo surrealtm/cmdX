@@ -408,7 +408,7 @@ font_name :: (cmdx: *CmdX, path: string) {
 debug_print_allocator :: (cmdx: *CmdX, name: string, allocator: *Allocator) {
     working_set_size, working_set_unit := convert_to_biggest_memory_unit(allocator.stats.working_set);
     peak_working_set_size, peak_working_set_unit := convert_to_biggest_memory_unit(allocator.stats.peak_working_set);
-    add_formatted_line(cmdx, cmdx.active_screen, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % alive allocations.", name, format_int(working_set_size, false, 3, .Decimal, false), memory_unit_string(working_set_unit), format_int(peak_working_set_size, false, 3, .Decimal, false), memory_unit_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
+    add_formatted_line(cmdx, cmdx.active_screen, "% : %*% working_set,    %*% peak_working_set,   % total allocations, % alive allocations.", name, format_int(working_set_size, false, 3, .Decimal, false), memory_unit_to_string(working_set_unit), format_int(peak_working_set_size, false, 3, .Decimal, false), memory_unit_to_string(peak_working_set_unit), allocator.stats.allocations, allocator.stats.allocations - allocator.stats.deallocations);
 }
 
 debug :: (cmdx: *CmdX) {
@@ -417,7 +417,7 @@ debug :: (cmdx: *CmdX) {
     deallocate_string(Default_Allocator, *working_directory);
 
     static_size, static_size_unit := convert_to_biggest_memory_unit(size_of(CmdX));
-    add_formatted_line(cmdx, cmdx.active_screen, "Static memory usage: %*%", static_size, memory_unit_string(static_size_unit));
+    add_formatted_line(cmdx, cmdx.active_screen, "Static memory usage: %*%", static_size, memory_unit_to_string(static_size_unit));
 
     debug_print_allocator(cmdx, "Heap  ", *Heap_Allocator);
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);

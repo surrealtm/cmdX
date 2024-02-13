@@ -584,10 +584,10 @@ build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         virtual_width := 0; // The current virtual line width in pixels
         is_first_in_backlog_line := true;
         
-        while source_range_ends_before_other_source_range(virtual_range, backlog_line) {
+        while source_range_ends_before_other_source_range(screen, virtual_range, backlog_line) {
             next_character := screen.backlog[virtual_range.one_plus_last];
             
-            while source_range_ends_before_other_source_range(virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
+            while source_range_ends_before_other_source_range(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
                 virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
                 increase_source_range(screen, *virtual_range);
                 next_character = screen.backlog[virtual_range.one_plus_last];
@@ -918,7 +918,7 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     // Handle mouse selection of backlog text
     //
 
-    if cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender {
+    if cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender && cmdx.window.mouse_y < screen.first_line_y_position + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
         hovered_virtual_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
         hovered_virtual_line := array_get(*screen.virtual_lines, hovered_virtual_line_index);
     }
@@ -934,3 +934,6 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     update_text_input_rendering_data(*screen.text_input);
     if cursor_alpha_previous != screen.text_input.cursor_alpha    draw_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
 }
+
+
+// @Cleanup: Auto scroll breaks when spamming 'help' enough... Maybe after the wrapping or something...
