@@ -423,6 +423,9 @@ debug :: (cmdx: *CmdX) {
     debug_print_allocator(cmdx, "Global", *cmdx.global_allocator);
     debug_print_allocator(cmdx, "Frame ", *cmdx.frame_allocator);
 
+    total_size, total_size_unit := convert_to_biggest_memory_unit(size_of(CmdX) + Heap_Allocator.stats.working_set + cmdx.global_allocator.stats.working_set);
+    add_formatted_line(cmdx, cmdx.active_screen, "> Total: % %\n", total_size, memory_unit_to_string(total_size_unit));
+
     debug_print(cmdx.active_screen);
 }
 

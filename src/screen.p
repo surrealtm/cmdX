@@ -10,6 +10,7 @@ CmdX_Screen :: struct {
     backlog_colors: [..]Color_Range;
     backlog_lines: [..]Source_Range; // The actual lines as they are read in from the input.
     virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
+    rebuild_virtual_lines: s64 = true; // Set to true if the virtual lines may be invalid, e.g. because text was added to the backlog or the window size changed.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
     
     // Text Input
@@ -29,7 +30,6 @@ CmdX_Screen :: struct {
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
     enable_auto_scroll: s64 = true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
-    do_auto_scroll_this_frame: s64 = true; // If this and enable_auto_scroll is set to true, then the scroll target offset will be changed when building the virtual lines.
     
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
@@ -227,7 +227,7 @@ clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     // Snap scrolling, draw the next frame
     ++screen.viewport_height;
-    screen.do_auto_scroll_this_frame = true;
+    screen.rebuild_virtual_lines = true;
     draw_next_frame(cmdx);
 
     // Add a new line to the backlog
@@ -254,7 +254,7 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     // Snap scrolling, draw the next frame
     draw_next_frame(cmdx);
-    screen.do_auto_scroll_this_frame = true;
+    screen.rebuild_virtual_lines = true;
 
     // Figure out the line to which to append the text. If no line exists yet in the backlog, then
     // create a new one. If there is at least one line, only append to the existing line if it isn't
@@ -558,12 +558,15 @@ setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtua
 }
 
 build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+    if !screen.rebuild_virtual_lines return;
+
     active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
 
     if screen.scrollbar_enabled {
-        // Scroll bar is drawn, decrease the active screen width. The scroll bar changes visual size on hover,
-        // the knob doesn't.
-        active_screen_width = screen.scrollknob_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
+        // Scroll bar is drawn, decrease the active screen width. We cannot use the scrollbar rectangle
+        // here, since that gets build after this procedure, therefore referencing the previous frame
+        // which is invalid if the window was resized.
+        active_screen_width = screen.rectangle[2] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
     }
 
     for i := 0; i < screen.virtual_lines.count; ++i {
@@ -606,18 +609,19 @@ build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
             virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
         }
     }
+    
+    screen.rebuild_virtual_lines = false;
+    
 
-    if screen.enable_auto_scroll && screen.do_auto_scroll_this_frame {
+    if screen.enable_auto_scroll {
         // Snap the view back to the bottom.
         screen.scroll_target_offset = xx screen.virtual_lines.count;
     }
 
     previous_scrollbar_enabled := screen.scrollbar_enabled;
 
-    screen.do_auto_scroll_this_frame = false;
     screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
-
-    if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.do_auto_scroll_this_frame = true;
+    if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
 }
 
 
@@ -943,6 +947,3 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     update_text_input_rendering_data(*screen.text_input);
     if cursor_alpha_previous != screen.text_input.cursor_alpha    draw_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
 }
-
-
-// @Cleanup: Auto scroll breaks when spamming 'help' enough... Maybe after the wrapping or something...

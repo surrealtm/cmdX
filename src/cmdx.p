@@ -491,6 +491,8 @@ adjust_screen_rectangles :: (cmdx: *CmdX) {
 
         next_screen_left = screen.rectangle[2];
         next_screen_top  = screen.rectangle[1];
+
+        screen.rebuild_virtual_lines = true;
     }
 }
 
@@ -608,8 +610,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         }
     }
 
+    // Activate a screen when it is hovered and pressed
     if cmdx.window.button_pressed[Button_Code.Left] && cmdx.hovered_screen != cmdx.active_screen {
-        // Activate a screen when it is hovered and pressed
         activate_screen(cmdx, cmdx.hovered_screen);
     }
 
@@ -727,7 +729,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
             flush_font_buffer(*cmdx.renderer); // Flush all remaining ui texta
         }
 
-        // Finish the screen, sleep until the next one
+        // Finish the screen
         swap_gl_buffers(*cmdx.window);
 
         cmdx.draw_frame = false;
