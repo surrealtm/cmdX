@@ -11,7 +11,6 @@ CmdX_Screen :: struct {
     backlog_lines: [..]Source_Range; // The actual lines as they are read in from the input.
     virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
-    previous_frame_virtual_line_count: s64; // This is used to determine whether the virtual lines have changed, and if so to apply auto scrolling (if enable_auto_scrolling is true).
     
     // Text Input
     text_input: Text_Input;
@@ -29,7 +28,8 @@ CmdX_Screen :: struct {
     scroll_target_offset: f64; // The target scroll offset in virtual lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
     scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
     scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
-    enable_auto_scroll: s64; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
+    enable_auto_scroll: s64 = true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
+    do_auto_scroll_this_frame: s64 = true; // If this and enable_auto_scroll is set to true, then the scroll target offset will be changed when building the virtual lines.
     
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
@@ -39,6 +39,7 @@ CmdX_Screen :: struct {
     line_wrapped_before_first: bool; // If the virtual line which wraps around the buffer comes before the first line to be drawn, that information is required for color range skipping.
 
     // Scrollbar data, which needs to be in sync for the logic and drawing
+    scrollbar_enabled: bool; // The scroll bar only gets enabled when enough (virtual) lines are in the backlog to overflow the available screen space
     scrollbar_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll bar
     scrollbar_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
     scrollbar_hitbox_hovered: bool;
@@ -54,7 +55,7 @@ CmdX_Screen :: struct {
     // Subprocess data
     current_directory: string;
     child_process_name: string;
-    child_process_running: bool;
+    child_process_running: bool = false;
 
     // Platform data
     win32: Win32 = ---;
@@ -226,6 +227,7 @@ clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     // Snap scrolling, draw the next frame
     ++screen.viewport_height;
+    screen.do_auto_scroll_this_frame = true;
     draw_next_frame(cmdx);
 
     // Add a new line to the backlog
@@ -252,6 +254,7 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
 add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     // Snap scrolling, draw the next frame
     draw_next_frame(cmdx);
+    screen.do_auto_scroll_this_frame = true;
 
     // Figure out the line to which to append the text. If no line exists yet in the backlog, then
     // create a new one. If there is at least one line, only append to the existing line if it isn't
@@ -557,7 +560,7 @@ setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtua
 build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
 
-    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
+    if screen.scrollbar_enabled {
         // Scroll bar is drawn, decrease the active screen width. The scroll bar changes visual size on hover,
         // the knob doesn't.
         active_screen_width = screen.scrollknob_visual_rectangle[0] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
@@ -604,12 +607,17 @@ build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         }
     }
 
-    if screen.enable_auto_scroll && screen.previous_frame_virtual_line_count != screen.virtual_lines.count {
+    if screen.enable_auto_scroll && screen.do_auto_scroll_this_frame {
         // Snap the view back to the bottom.
         screen.scroll_target_offset = xx screen.virtual_lines.count;
     }
 
-    screen.previous_frame_virtual_line_count = screen.virtual_lines.count;
+    previous_scrollbar_enabled := screen.scrollbar_enabled;
+
+    screen.do_auto_scroll_this_frame = false;
+    screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
+
+    if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.do_auto_scroll_this_frame = true;
 }
 
 
@@ -722,7 +730,7 @@ draw_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
     // Draw the scroll bar only if the backlog is bigger than the available screen size.
     // If the scrollbar is not hovered, make it a bit thinner.
-    if screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count {
+    if screen.scrollbar_enabled {
         // The scrollbar background rectangle is used to detect whether the mouse is currently hovering it.
         // The visual of the background is a bit smaller to not look as distracting, but the hitbox being
         // bigger should make it easier to select.
@@ -794,7 +802,7 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     screen.scroll_interpolation    = clamp(damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll_offset);
     screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
     screen.enable_auto_scroll      = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
-            
+
     //
     // Set up drawing data for this frame
     //
@@ -827,92 +835,93 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 
     if previous_scroll_offset != screen.scroll_line_offset draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
 
+    if screen.scrollbar_enabled {
+        //
+        // Update the scroll bar of this screen. The scroll bar is always oriented around the scroll target, not
+        // the scroll position. This looks smoother when a lot of input is coming in (the knob doesn't jump
+        // around), and the user also expects to control the scroll target with the knob, not the scroll posiiton.
+        // For that to work, we need to manually calculate the first and last line that would be drawn if the
+        // scroll target was the actual scroll position right now, since that is what the scroll bar should
+        // represent.
+        //
 
-    //
-    // Update the scroll bar of this screen. The scroll bar is always oriented around the scroll target, not
-    // the scroll position. This looks smoother when a lot of input is coming in (the knob doesn't jump
-    // around), and the user also expects to control the scroll target with the knob, not the scroll posiiton.
-    // For that to work, we need to manually calculate the first and last line that would be drawn if the
-    // scroll target was the actual scroll position right now, since that is what the scroll bar should
-    // represent.
-    //
-
-    visible_lines_in_scrollbar_area: s64 = complete_lines_fitting_on_screen;
-    first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
-    
-    first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
-    first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.virtual_lines.count;
-    visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.virtual_lines.count;
-
-    scrollbar_hitbox_width: s32 = SCROLL_BAR_WIDTH;
-    scrollbar_hitbox_height := screen.rectangle[3] - OFFSET_FROM_SCREEN_BORDER - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER;
-    screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - scrollbar_hitbox_width - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER, screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER + scrollbar_hitbox_height };
-
-    scrollknob_hitbox_offset: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * first_line_percentage);
-    scrollknob_hitbox_height: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * visible_line_percentage);
-
-    screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset, screen.scrollbar_hitbox_rectangle[2], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset + scrollknob_hitbox_height };
-    
-
-    //
-    // Handle mouse input on the scrollbar. Store the input state in local variables first, and then check
-    // if anything changed to the last frame, so that a new frame is only rendered if the state (and
-    // therefore the visual feedback on screen) changed.
-    //
-
-    scrollbar_hovered  := mouse_over_rectangle(cmdx, screen.scrollbar_hitbox_rectangle);
-    scrollknob_hovered := mouse_over_rectangle(cmdx, screen.scrollknob_hitbox_rectangle);
-    scrollknob_dragged := screen.scrollknob_dragged;
-    
-    if scrollknob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
-        scrollknob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
-        screen.scrollknob_drag_offset = xx (cmdx.window.mouse_y - screen.scrollknob_hitbox_rectangle[1]);
-    }
+        visible_lines_in_scrollbar_area: s64 = complete_lines_fitting_on_screen;
+        first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
         
-    if !scrollknob_dragged && scrollbar_hovered && cmdx.window.button_pressed[Button_Code.Left] {
-        // If the user left-clicked somewhere on the scrollbar outside of the knob, then immediatly move
-        // the knob to the mouse position, and start dragging. The knob's center should be placed under
-        // the cursor, that feels juicy when warping the knob under the cursor.
-        scrollknob_dragged = true;
-        screen.scrollknob_drag_offset = xx (screen.scrollknob_hitbox_rectangle[3] - screen.scrollknob_hitbox_rectangle[1]) / 2;
+        first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
+        first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.virtual_lines.count;
+        visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.virtual_lines.count;
+
+        scrollbar_hitbox_width: s32 = SCROLL_BAR_WIDTH;
+        scrollbar_hitbox_height := screen.rectangle[3] - OFFSET_FROM_SCREEN_BORDER - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER;
+        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - scrollbar_hitbox_width - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER, screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER, screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER + scrollbar_hitbox_height };
+
+        scrollknob_hitbox_offset: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * first_line_percentage);
+        scrollknob_hitbox_height: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * visible_line_percentage);
+
+        screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset, screen.scrollbar_hitbox_rectangle[2], screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset + scrollknob_hitbox_height };
+        
+        //
+        // Handle mouse input on the scrollbar. Store the input state in local variables first, and then check
+        // if anything changed to the last frame, so that a new frame is only rendered if the state (and
+        // therefore the visual feedback on screen) changed.
+        //
+
+        scrollbar_hovered  := mouse_over_rectangle(cmdx, screen.scrollbar_hitbox_rectangle);
+        scrollknob_hovered := mouse_over_rectangle(cmdx, screen.scrollknob_hitbox_rectangle);
+        scrollknob_dragged := screen.scrollknob_dragged;
+        
+        if scrollknob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+            scrollknob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
+            screen.scrollknob_drag_offset = xx (cmdx.window.mouse_y - screen.scrollknob_hitbox_rectangle[1]);
+        }
+            
+        if !scrollknob_dragged && scrollbar_hovered && cmdx.window.button_pressed[Button_Code.Left] {
+            // If the user left-clicked somewhere on the scrollbar outside of the knob, then immediatly move
+            // the knob to the mouse position, and start dragging. The knob's center should be placed under
+            // the cursor, that feels juicy when warping the knob under the cursor.
+            scrollknob_dragged = true;
+            screen.scrollknob_drag_offset = xx (screen.scrollknob_hitbox_rectangle[3] - screen.scrollknob_hitbox_rectangle[1]) / 2;
+        }
+
+        if scrollknob_dragged {
+            target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
+            target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
+
+            screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.virtual_lines.count + xx first_line_offset;
+        }
+        
+        if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
+
+        // If any state changed during this frame, then we should render it to give immediate feedback to the
+        // user.
+        if screen.scrollbar_hitbox_hovered != scrollbar_hovered || screen.scrollknob_hitbox_hovered != scrollknob_hovered || screen.scrollknob_dragged != scrollknob_dragged draw_next_frame(cmdx);
+
+        screen.scrollbar_hitbox_hovered  = scrollbar_hovered;
+        screen.scrollknob_hitbox_hovered = scrollknob_hovered;
+        screen.scrollknob_dragged        = scrollknob_dragged;
+
+        
+        //
+        // Update the visual data for the scrollbar
+        //
+
+        scrollbar_visual_indent:  s32 = 2; // The non-rendered indent on both sided (left + right) of the scrollbar
+        scrollknob_visual_indent: s32 = 2;
+        if screen.scrollbar_hitbox_hovered || screen.scrollknob_dragged   scrollbar_visual_indent = 4;
+
+        screen.scrollbar_visual_rectangle = { screen.scrollbar_hitbox_rectangle[0] + scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[3] };
+
+        screen.scrollknob_visual_rectangle = { screen.scrollknob_hitbox_rectangle[0] + scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[3] };
+
+        if screen.scrollknob_dragged
+            screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Accent];
+        else
+            screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Default];
+
+        screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
     }
 
-    if scrollknob_dragged {
-        target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
-        target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
-
-        screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.virtual_lines.count + xx first_line_offset;
-    }
-    
-    if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
-
-    // If any state changed during this frame, then we should render it to give immediate feedback to the
-    // user.
-    if screen.scrollbar_hitbox_hovered != scrollbar_hovered || screen.scrollknob_hitbox_hovered != scrollknob_hovered || screen.scrollknob_dragged != scrollknob_dragged draw_next_frame(cmdx);
-
-    screen.scrollbar_hitbox_hovered  = scrollbar_hovered;
-    screen.scrollknob_hitbox_hovered = scrollknob_hovered;
-    screen.scrollknob_dragged        = scrollknob_dragged;
-
-    
-    //
-    // Update the visual data for the scrollbar
-    //
-
-    scrollbar_visual_indent:  s32 = 2; // The non-rendered indent on both sided (left + right) of the scrollbar
-    scrollknob_visual_indent: s32 = 2;
-    if screen.scrollbar_hitbox_hovered || screen.scrollknob_dragged   scrollbar_visual_indent = 4;
-
-    screen.scrollbar_visual_rectangle = { screen.scrollbar_hitbox_rectangle[0] + scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollbar_visual_indent, screen.scrollbar_hitbox_rectangle[3] };
-
-    screen.scrollknob_visual_rectangle = { screen.scrollknob_hitbox_rectangle[0] + scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[1], screen.scrollbar_hitbox_rectangle[2] - scrollknob_visual_indent, screen.scrollknob_hitbox_rectangle[3] };
-
-    if screen.scrollknob_dragged
-        screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Accent];
-    else
-        screen.scrollknob_visual_color = cmdx.active_theme.colors[Color_Index.Default];
-
-    screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
 
     //
     // Handle mouse selection of backlog text
