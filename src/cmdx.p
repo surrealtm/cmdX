@@ -48,9 +48,10 @@ OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES :: 15;
 Color_Index :: enum {
     Default;    // The default font color
     Cursor;     // The color of the cursor
-    Accent;     // The color of highlit text, e.g. input lines
+    Accent;     // The color of highlit text, e.g. the working directory
     Background; // The background of the terminal backlog
     Scrollbar;  // The background of the scrollbar
+    Selection;  // The selection color for both the backlog and the text input
 }
 
 Draw_Overlay :: enum {
@@ -78,7 +79,7 @@ Color_Range :: struct {
 
 Virtual_Line :: struct {
     source: Source_Range;
-    x: []s16; // The x coordinates of all characters in the source range, for mouse selection
+    x: []s16; // The left x coordinates of all characters in the source range, for mouse selection
     is_first_in_backlog_line: bool;
 }
 
@@ -346,7 +347,7 @@ get_prefix_string :: (screen: *CmdX_Screen, allocator: *Allocator) -> string {
 
 /* =========================== CmdX Properties =========================== */
 
-create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color, scrollbar: Color) -> *Theme {
+create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color, scrollbar: Color, selection: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
     theme.name = name;
     theme.colors[Color_Index.Default]    = default;
@@ -354,6 +355,7 @@ create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accen
     theme.colors[Color_Index.Accent]     = accent;
     theme.colors[Color_Index.Background] = background;
     theme.colors[Color_Index.Scrollbar]  = scrollbar;
+    theme.colors[Color_Index.Selection]  = selection;
     return theme;
 }
 
@@ -807,12 +809,12 @@ cmdx :: () -> s32 {
     update_font(*cmdx);
 
     // Create the builtin themes
-    create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 }, .{ 100, 100, 100, 255 });
-    create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 }, .{ 100, 100, 100, 255 });
-    create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 }, .{ 100, 100, 100, 255 });
-    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 200, 200, 200, 255 });
-    create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 }, .{ 100, 100, 100, 255 });
-    create_theme(*cmdx, "autumn",  .{ 209, 184, 151, 255 }, .{ 255, 160, 122, 255 }, .{ 255, 127,  36, 255 }, .{   6,  36,  40, 255 }, .{  19, 115, 130, 255 });
+    create_theme(*cmdx, "blue",    .{ 186, 196, 214, 255 }, .{ 248, 173,  52, 255 }, .{ 248, 173,  52, 255 }, .{  21,  33,  42, 255 }, .{ 100, 100, 100, 255 }, .{ 73, 149, 236, 255 } );
+    create_theme(*cmdx, "dark",    .{ 255, 255, 255, 255 }, .{ 255, 255, 255, 255 }, .{ 248, 173,  52, 255 }, .{   0,   0,   0, 255 }, .{ 100, 100, 100, 255 }, .{ 73, 149, 236, 255 } );
+    create_theme(*cmdx, "gruvbox", .{ 230, 214, 174, 255 }, .{ 230, 214, 174, 255 }, .{ 250, 189,  47, 255 }, .{  40,  40,  40, 255 }, .{ 100, 100, 100, 255 }, .{ 73, 149, 236, 255 } );
+    create_theme(*cmdx, "light",   .{  10,  10,  10, 255 }, .{  30,  30,  30, 255 }, .{  51,  94, 168, 255 }, .{ 255, 255, 255, 255 }, .{ 200, 200, 200, 255 }, .{ 73, 149, 236, 255 } );
+    create_theme(*cmdx, "monokai", .{ 202, 202, 202, 255 }, .{ 231, 231, 231, 255 }, .{ 141, 208,   6, 255 }, .{  39,  40,  34, 255 }, .{ 100, 100, 100, 255 }, .{ 73, 149, 236, 255 } );
+    create_theme(*cmdx, "autumn",  .{ 209, 184, 151, 255 }, .{ 255, 160, 122, 255 }, .{ 255, 127,  36, 255 }, .{   6,  36,  40, 255 }, .{  19, 115, 130, 255 }, .{ 73, 149, 236, 255 } );
     update_active_theme_pointer(*cmdx, cmdx.active_theme_name);
 
     // Create the ui

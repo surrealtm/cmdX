@@ -202,23 +202,21 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
     if input.selection_start != -1 {
         // There is currently an active selection. Render the selection background with a specific color
         // under the location where the selected text will be rendered later.
-        selection_color := Color.{ 73, 149, 236, 255 };
-
         text_until_selection := substring_view(input.buffer, 0, input.selection_start);
         selection_text       := substring_view(input.buffer, input.selection_start, input.selection_end);
         text_after_selection := substring_view(input.buffer, input.selection_end, input.count);
         
         // Draw the actual selection background.
-        selection_offset: s32 = query_text_width(font, text_until_selection); // @Cleanup apply kerning from the first char included in the selection to the last char before the selection
+        selection_offset: s32 = query_text_width(font, text_until_selection); // @Cleanup Apply kerning from the first char included in the selection to the last char before the selection
         selection_width:  s32 = query_text_width(font, selection_text);
         selection_start_x := x + prefix_string_width + selection_offset;
         selection_start_y := y - font.ascender;
-        draw_quad(renderer, selection_start_x, selection_start_y, selection_start_x + selection_width, selection_start_y + font.line_height, selection_color);
+        draw_quad(renderer, selection_start_x, selection_start_y, selection_start_x + selection_width, selection_start_y + font.line_height, theme.colors[Color_Index.Selection]);
 
         // Since the background color for the selected part of the input is different, we need to split the
         // text rendering in three parts and set the cursor accordingly.
         draw_text(renderer, font, text_until_selection, x + prefix_string_width, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Background]);
-        draw_text(renderer, font, selection_text, x + prefix_string_width + selection_offset, y, theme.colors[Color_Index.Default], selection_color);
+        draw_text(renderer, font, selection_text, x + prefix_string_width + selection_offset, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Selection]);
         draw_text(renderer, font, text_after_selection, x + prefix_string_width + selection_offset + selection_width, y, theme.colors[Color_Index.Default], theme.colors[Color_Index.Background]);
     } else
         // Render the complete input string without any selection

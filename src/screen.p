@@ -536,6 +536,8 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 get_backlog_selection_as_string :: (cmdx: *CmdX, screen: *CmdX_Screen) -> string {
     string: string = ---;
 
+    // @Cleanup: We might wanna manually insert the new-lines here, by going through
+    // the selected virtual lines and using a string builder...
     if screen.backlog_selection.wrapped {
         before_wrap := cmdx.backlog_size - screen.backlog_selection.first;
         count := before_wrap + screen.backlog_selection.one_plus_last;
@@ -551,7 +553,7 @@ get_backlog_selection_as_string :: (cmdx: *CmdX, screen: *CmdX_Screen) -> string
     return string;
 }
 
-get_backlog_index_for_screen_position_in_virtual :: (cmdx: *CmdX, line: *Virtual_Line, position: s64) -> s64 {
+get_backlog_index_for_screen_position_in_virtual :: (cmdx: *CmdX, line: *Virtual_Line, position: s64) -> s64, s64 {
     backlog_index := line.source.first;
     line_index := 0;
 
@@ -561,7 +563,7 @@ get_backlog_index_for_screen_position_in_virtual :: (cmdx: *CmdX, line: *Virtual
         if line.source.wrapped && backlog_index == cmdx.backlog_size backlog_index = 0;
     }
 
-    return backlog_index;
+    return backlog_index, line_index;
 }
 
 setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtual_line: *Virtual_Line) {
@@ -595,6 +597,10 @@ setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtua
             backlog_index = 0;
         }
     }
+}
+
+get_upper_y_position_for_vertical_line :: (cmdx: *CmdX, screen: *CmdX_Screen, vertical_line_index: s64) -> s64 {
+    return screen.first_line_y_position + (vertical_line_index - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.ascender;
 }
 
 build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
@@ -723,10 +729,42 @@ draw_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     color_range: Color_Range = array_get_value(*screen.backlog_colors, color_range_index);
     activate_color_range(cmdx, *color_range);
 
+    //
     // Set scissors to avoid drawing into other screens' spaces.
+    //
     set_scissors(screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], cmdx.window.height);
 
+    //
+    // Draw the backlog selection if it is active
+    //
+    if screen.do_backlog_selection && !source_range_empty(screen.backlog_selection) {
+        virtual_line_index := screen.virtual_selection_l0;
+        
+        while virtual_line_index <= screen.virtual_selection_l1 {
+            virtual_line := array_get(*screen.virtual_lines, virtual_line_index);
+            
+            if source_range_empty(virtual_line.source) {
+                ++virtual_line_index;
+                continue;
+            }
+            
+            x0 := 0;
+            y0 := get_upper_y_position_for_vertical_line(cmdx, screen, virtual_line_index);
+            x1 := virtual_line.x[virtual_line.x.count - 1] + 4 * query_glyph_horizontal_advance(*cmdx.font, ' ');
+            y1 := get_upper_y_position_for_vertical_line(cmdx, screen, virtual_line_index) + cmdx.font.line_height;
+            
+            if virtual_line_index == screen.virtual_selection_l0 x0 = virtual_line.x[screen.virtual_selection_c0];
+            if virtual_line_index == screen.virtual_selection_l1 x1 = virtual_line.x[screen.virtual_selection_c1] + query_glyph_horizontal_advance(*cmdx.font, ' ');
+
+            draw_quad(*cmdx.renderer, x0, y0, x1, y1, cmdx.active_theme.colors[Color_Index.Selection]);
+        
+            ++virtual_line_index;
+        }
+    }
+
+    //
     // Draw all visible lines
+    //
     current_line_index := screen.first_line_to_draw;
     while current_line_index <= screen.last_line_to_draw {
         line := array_get(*screen.virtual_lines, current_line_index);
@@ -978,35 +1016,39 @@ update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
         backlog_character_index, virtual_character_index := get_backlog_index_for_screen_position_in_virtual(cmdx, virtual_line, cmdx.window.mouse_x);
 
         // @Cleanup: Handle selection over the wrapping of the backlog.
+        // @Cleanup: Cancel selection when rebuilding virtual lines since that would mess up all our indices
+        // @Cleanup: Handle drawing the selection if start or end are outside of the visible screen space
+        // @Cleanup: Set the proper background color for text rendering inside the selection
         // @Incomplete: Start drawing the selection
         // @Incomplete: Debug print the current selection, then allow the copying of it.
         // @Incomplete: Disable the text input during selection.
 
-        if !screen.do_backlog_selection && cmdx.window.button_pressed[Button_Code.Left] {
+        if cmdx.window.button_pressed[Button_Code.Left] {
             screen.do_backlog_selection = true;
-            screen.backlog_selection = .{ backlog_character_index, backlog_character_index + 1, false };
+            screen.backlog_selection = .{ backlog_character_index, backlog_character_index, false };
             screen.virtual_selection_l0 = virtual_line_index;
             screen.virtual_selection_c0 = virtual_character_index;
             screen.virtual_selection_l1 = virtual_line_index;
             screen.virtual_selection_c1 = virtual_character_index;
-        } else if screen.do_backlog_selection && backlog_character_index > screen.backlog_selection.first {
+            draw_next_frame(cmdx);
+        } else if cmdx.window.button_held[Button_Code.Left] && screen.do_backlog_selection && backlog_character_index > screen.backlog_selection.first {
             screen.backlog_selection.one_plus_last = backlog_character_index + 1;
             screen.virtual_selection_l1 = virtual_line_index;
             screen.virtual_selection_c1 = virtual_character_index;
-        } else if screen.do_backlog_selection && backlog_character_index < screen.backlog_selection.one_plus_last {
+            draw_next_frame(cmdx);
+        } else if cmdx.window.button_held[Button_Code.Left] && screen.do_backlog_selection && backlog_character_index < screen.backlog_selection.one_plus_last {
             screen.backlog_selection.first = backlog_character_index;
             screen.virtual_selection_l0 = virtual_line_index;
             screen.virtual_selection_c0 = virtual_character_index;
+            draw_next_frame(cmdx);
         } 
     }
 
-    if !cmdx.window.button_held[Button_Code.Left] {
-        screen.backlog_selection = .{};
+    if screen.do_backlog_selection && cmdx.window.button_released[Button_Code.Left] && source_range_empty(screen.backlog_selection) {
         screen.do_backlog_selection = false;
+        draw_next_frame(cmdx);
     }
 
-    if screen.do_backlog_selection print("Selected: %\n", get_backlog_selection_as_string(cmdx, screen));
-    
     //
     // Update the text input's cursor rendering data
     //
