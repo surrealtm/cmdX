@@ -1,4 +1,4 @@
-CmdX_Screen :: struct {
+Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
@@ -70,7 +70,7 @@ CmdX_Screen :: struct {
 }
 
 
-create_screen :: (cmdx: *CmdX) -> *CmdX_Screen {
+create_screen :: (cmdx: *CmdX) -> *Screen {
     // Actually create the new screen, set the proper allocators for arrays and so forth
     screen := linked_list_push(*cmdx.screens);
     screen.auto_complete_options.allocator = *cmdx.global_allocator;
@@ -94,7 +94,7 @@ create_screen :: (cmdx: *CmdX) -> *CmdX_Screen {
     return screen;
 }
 
-close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+close_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Deallocate all the data that was allocated for this screen when it was created
     deallocate(*cmdx.global_allocator, screen.backlog);
     deallocate_string(*cmdx.global_allocator, *screen.current_directory);
@@ -116,7 +116,7 @@ close_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 // the oldest line in the backlog, to make space for the new text. Remove as many lines as needed
 // so that the new text has enough space in it. After removing the necessary lines, also remove
 // any color ranges that lived in the now freed-up space.
-remove_overlapping_lines :: (screen: *CmdX_Screen, new_line: Source_Range) -> *Source_Range {
+remove_overlapping_lines :: (screen: *Screen, new_line: Source_Range) -> *Source_Range {
     total_removed_range: Source_Range;
     total_removed_range.first = -1;
 
@@ -171,14 +171,14 @@ remove_overlapping_lines :: (screen: *CmdX_Screen, new_line: Source_Range) -> *S
     return array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
 }
 
-get_cursor_position_in_line :: (screen: *CmdX_Screen) -> s64 {
+get_cursor_position_in_line :: (screen: *Screen) -> s64 {
     cmdx_assert(screen, screen.backlog_lines.count > 0, "Screen Backlog is empty");
 
     line_head := array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
     return line_head.one_plus_last - line_head.first; // The current cursor position is considered to be at the end of the current line
 }
 
-set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
+set_cursor_position_in_line :: (screen: *Screen, cursor: s64) {
     // Remove part of the backlog line. The color range must obviously also be adjusted
     line_head := array_get(*screen.backlog_lines, screen.backlog_lines.count - 1);
     color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
@@ -202,16 +202,16 @@ set_cursor_position_in_line :: (screen: *CmdX_Screen, cursor: s64) {
     }
 }
 
-set_cursor_position_to_beginning_of_line :: (screen: *CmdX_Screen) {
+set_cursor_position_to_beginning_of_line :: (screen: *Screen) {
     set_cursor_position_in_line(screen, 0);
 }
 
 
-prepare_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+prepare_viewport :: (cmdx: *CmdX, screen: *Screen) {
     screen.viewport_height = 0;
 }
 
-close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+close_viewport :: (cmdx: *CmdX, screen: *Screen) {
     // When closing the viewport, we want one empty line between the last text of the called process (or builtin
     // command), and the next input line. If the subprocess ended on an empty line, we only need to add one
     // empty line and we are good. If the subprocess ended on an unfinished line (which can happen if the
@@ -223,7 +223,7 @@ close_viewport :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     new_line(cmdx, screen);
 }
 
-clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+clear_backlog :: (cmdx: *CmdX, screen: *Screen) {
     array_clear(*screen.backlog_lines);
     array_clear(*screen.virtual_lines);
     array_clear(*screen.backlog_colors);
@@ -232,7 +232,7 @@ clear_backlog :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 
-new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
+new_line :: (cmdx: *CmdX, screen: *Screen)  {
     // Snap scrolling, draw the next frame
     ++screen.viewport_height;
     screen.rebuild_virtual_lines = true;
@@ -259,7 +259,7 @@ new_line :: (cmdx: *CmdX, screen: *CmdX_Screen)  {
     }
 }
 
-add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
+add_text :: (cmdx: *CmdX, screen: *Screen, text: string) {
     // Snap scrolling, draw the next frame
     draw_next_frame(cmdx);
     screen.rebuild_virtual_lines = true;
@@ -349,32 +349,32 @@ add_text :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
     color_head.source.wrapped = color_head.source.one_plus_last <= color_head.source.first;
 }
 
-add_character :: (cmdx: *CmdX, screen: *CmdX_Screen, character: u8) {
+add_character :: (cmdx: *CmdX, screen: *Screen, character: u8) {
     string: string = ---;
     string.data = *character;
     string.count = 1;
     add_text(cmdx, screen, string);
 }
 
-add_formatted_text :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..Any) {
+add_formatted_text :: (cmdx: *CmdX, screen: *Screen, format: string, args: ..Any) {
     required_characters := query_required_print_buffer_size(format, ..args);
     string := allocate_string(*cmdx.frame_allocator, required_characters);
     mprint(string, format, ..args);
     add_text(cmdx, screen, string);
 }
 
-add_line :: (cmdx: *CmdX, screen: *CmdX_Screen, text: string) {
+add_line :: (cmdx: *CmdX, screen: *Screen, text: string) {
     add_text(cmdx, screen, text);
     new_line(cmdx, screen);
 }
 
-add_formatted_line :: (cmdx: *CmdX, screen: *CmdX_Screen, format: string, args: ..Any) {
+add_formatted_line :: (cmdx: *CmdX, screen: *Screen, format: string, args: ..Any) {
     add_formatted_text(cmdx, screen, format, ..args);
     new_line(cmdx, screen);
 }
 
 
-set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Color_Index) {
+set_color_internal :: (screen: *Screen, true_color: Color, color_index: Color_Index) {
     if screen.backlog_colors.count {
         color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
 
@@ -413,17 +413,17 @@ set_color_internal :: (screen: *CmdX_Screen, true_color: Color, color_index: Col
     }
 }
 
-set_true_color :: (screen: *CmdX_Screen, color: Color) {
+set_true_color :: (screen: *Screen, color: Color) {
     set_color_internal(screen, color, -1);
 }
 
-set_themed_color :: (screen: *CmdX_Screen, index: Color_Index) {
+set_themed_color :: (screen: *Screen, index: Color_Index) {
     empty_color: Color;
     set_color_internal(screen, empty_color, index);
 }
 
 
-add_history :: (cmdx: *CmdX, screen: *CmdX_Screen, input_string: string) {
+add_history :: (cmdx: *CmdX, screen: *Screen, input_string: string) {
     // Make space for the new input string if that is required
     if screen.history.count == screen.history_size {
         head := array_get_value(*screen.history, screen.history.count - 1);
@@ -436,7 +436,7 @@ add_history :: (cmdx: *CmdX, screen: *CmdX_Screen, input_string: string) {
     array_add_at(*screen.history, 0, copy_string(*cmdx.global_allocator, input_string));
 }
 
-refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     if !screen.auto_complete_dirty return;
 
     // Clear the previous auto complete options and deallocate all strings
@@ -513,7 +513,7 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     screen.auto_complete_dirty = false;
 }
 
-one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+one_autocomplete_cycle :: (cmdx: *CmdX, screen: *Screen) {
     if !cmdx.active_screen.auto_complete_options.count return;
 
     remaining_input_string := substring_view(screen.text_input.buffer, 0, screen.auto_complete_start);
@@ -533,7 +533,7 @@ one_autocomplete_cycle :: (cmdx: *CmdX, screen: *CmdX_Screen) {
 }
 
 
-get_backlog_selection_as_string :: (cmdx: *CmdX, screen: *CmdX_Screen) -> string {
+get_backlog_selection_as_string :: (cmdx: *CmdX, screen: *Screen) -> string {
     string: string = ---;
 
     // @Cleanup: We might wanna manually insert the new-lines here, by going through
@@ -566,7 +566,7 @@ get_backlog_index_for_screen_position_in_virtual :: (cmdx: *CmdX, line: *Virtual
     return backlog_index, line_index;
 }
 
-setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtual_line: *Virtual_Line) {
+setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, virtual_line: *Virtual_Line) {
     //
     // Allocate the offset array
     //
@@ -599,11 +599,11 @@ setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *CmdX_Screen, virtua
     }
 }
 
-get_upper_y_position_for_vertical_line :: (cmdx: *CmdX, screen: *CmdX_Screen, vertical_line_index: s64) -> s64 {
+get_upper_y_position_for_vertical_line :: (cmdx: *CmdX, screen: *Screen, vertical_line_index: s64) -> s64 {
     return screen.first_line_y_position + (vertical_line_index - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.ascender;
 }
 
-build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+build_virtual_lines :: (cmdx: *CmdX, screen: *Screen) {
     if !screen.rebuild_virtual_lines return;
 
     active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
@@ -670,7 +670,7 @@ build_virtual_lines :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
 }
 
-draw_backlog_text :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
+draw_backlog_text :: (cmdx: *CmdX, screen: *Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
     set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
 
     for cursor := start; cursor < end; ++cursor {
@@ -718,7 +718,7 @@ draw_backlog_text :: (cmdx: *CmdX, screen: *CmdX_Screen, start: s64, end: s64, l
     return cursor_x, cursor_y;
 }
 
-draw_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Set up the cursor coordinates for rendering.
     cursor_x: s32 = screen.first_line_x_position;
     cursor_y: s32 = screen.first_line_y_position;
@@ -832,7 +832,7 @@ draw_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     disable_scissors();
 }
 
-update_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+update_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Update the currently running child process
     //

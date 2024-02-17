@@ -32,7 +32,7 @@ Win32 :: struct {
 // the child process.
 Win32_Input_Parser :: struct {
     cmdx: *CmdX;
-    screen: *CmdX_Screen;
+    screen: *Screen;
     
     input: string;
     index: s64;
@@ -42,7 +42,7 @@ Win32_Input_Parser :: struct {
 }
 
 
-win32_set_color_for_code :: (screen: *CmdX_Screen, code: u32) {
+win32_set_color_for_code :: (screen: *Screen, code: u32) {
     color: Color = ---;
     actually_change_color: bool = true;
     
@@ -95,7 +95,7 @@ win32_maybe_process_carriage_return :: (parser: *Win32_Input_Parser) {
     parser.screen.win32.previous_character_was_carriage_return = false;
 }
 
-win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string) {
+win32_process_input_string :: (cmdx: *CmdX, screen: *Screen, input: string) {
     parser: Win32_Input_Parser = ---;
     parser.cmdx  = cmdx;
     parser.screen = screen;
@@ -204,7 +204,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *CmdX_Screen, input: string)
     }
 }
 
-win32_read_from_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+win32_read_from_child_process :: (cmdx: *CmdX, screen: *Screen) {
     if screen.win32.child_closed_the_pipe return;
     
     total_bytes_available: u32 = ---;
@@ -236,7 +236,7 @@ win32_read_from_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     win32_process_input_string(cmdx, screen, string);
 }
 
-win32_write_to_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen, data: string) {
+win32_write_to_child_process :: (cmdx: *CmdX, screen: *Screen, data: string) {
     // Append a new line character to the data so that the child process recognizes a complete line was
     // input from the terminal, since the actual new line character obviously does not get added to the
     // text input.
@@ -268,7 +268,7 @@ win32_write_to_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen, data: string
 // Obviously spawning a thread to detach from the application is absolutely terrible, but this is the only
 // solution that I have found...
 //    - vmat 06.07.23
-win32_drain_thread :: (screen: *CmdX_Screen) -> u32 {
+win32_drain_thread :: (screen: *Screen) -> u32 {
     input_buffer: [512]s8 = ---;
     
     while screen.child_process_running {
@@ -280,7 +280,7 @@ win32_drain_thread :: (screen: *CmdX_Screen) -> u32 {
     return 0;
 }
 
-win32_cleanup :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+win32_cleanup :: (cmdx: *CmdX, screen: *Screen) {
     // Close the input pipe from us to the child process
     CloseHandle(screen.win32.input_write_pipe);
     
@@ -497,7 +497,7 @@ win32_spawn_process_for_command :: (cmdx: *CmdX, command_string: string) -> bool
     return true;
 }
 
-win32_detach_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+win32_detach_spawned_process :: (cmdx: *CmdX, screen: *Screen) {
     // Once the object has closed the pipes, Ctrl+C is no longer required to work. Therefore, reset
     // the job information. This is done to ensure that processes who have detached themselves from
     // us (which are not console applications) are not actually terminated here (they would be if the
@@ -510,7 +510,7 @@ win32_detach_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     close_viewport(cmdx, screen);
 }
 
-win32_terminate_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+win32_terminate_child_process :: (cmdx: *CmdX, screen: *Screen) {
     // If the user forcefully wants to terminate a process by using Ctrl+C, then do not just close the
     // connection, actually shut the process down.
     TerminateProcess(screen.win32.child_process_handle, 0);
@@ -518,7 +518,7 @@ win32_terminate_child_process :: (cmdx: *CmdX, screen: *CmdX_Screen) {
     close_viewport(cmdx, screen);
 }
 
-win32_update_spawned_process :: (cmdx: *CmdX, screen: *CmdX_Screen) -> bool {
+win32_update_spawned_process :: (cmdx: *CmdX, screen: *Screen) -> bool {
     // If the spanwed process has closed the pipes, then it disconnected from this terminal and should
     // no longer be updated. If cmdx was terminated itself, then the connection should also be closed.
     if screen.win32.child_closed_the_pipe || cmdx.window.should_close return false;

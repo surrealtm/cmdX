@@ -363,7 +363,7 @@ font_size :: (cmdx: *CmdX, size: u32) {
 
 Enum_Font_Data :: struct {
     cmdx: *CmdX;
-    screen: *CmdX_Screen;
+    screen: *Screen;
 }
 
 // This gets called for every font that is registered in windows. It is used to print out all available system fonts

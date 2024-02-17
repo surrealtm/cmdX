@@ -126,15 +126,15 @@ CmdX :: struct {
     requested_fps: f32 = 60;
 
     // Screens
-    screens: Linked_List(CmdX_Screen);
-    hovered_screen: *CmdX_Screen; // The screen over which the mouse currently hovers. Scrolling occurs in this screen. When the left button is pressed, this screen gets activated.
-    active_screen: *CmdX_Screen; // Screen with active text input and highlighted rendering.
+    screens: Linked_List(Screen);
+    hovered_screen: *Screen; // The screen over which the mouse currently hovers. Scrolling occurs in this screen. When the left button is pressed, this screen gets activated.
+    active_screen: *Screen; // Screen with active text input and highlighted rendering.
 }
 
 
 /* =========================== Debug Procedures =========================== */
 
-debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+debug_print_lines :: (printer: *Print_Buffer, screen: *Screen) {
     bprint(printer, "=== LINES ===\n");
 
     for i := 0; i < screen.backlog_lines.count; ++i {
@@ -152,7 +152,7 @@ debug_print_lines :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
     bprint(printer, "=== LINES ===\n");
 }
 
-debug_print_colors :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+debug_print_colors :: (printer: *Print_Buffer, screen: *Screen) {
     bprint(printer, "=== COLORS ===\n");
 
     for i := 0; i < screen.backlog_colors.count; ++i {
@@ -165,7 +165,7 @@ debug_print_colors :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
     bprint(printer, "=== COLORS ===\n");
 }
 
-debug_print_history :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
+debug_print_history :: (printer: *Print_Buffer, screen: *Screen) {
     bprint(printer, "=== HISTORY ===\n");
 
     for i := 0; i < screen.history.count; ++i {
@@ -176,7 +176,7 @@ debug_print_history :: (printer: *Print_Buffer, screen: *CmdX_Screen) {
     bprint(printer, "=== HISTORY ===\n");
 }
 
-debug_print_to_file :: (file_path: string, screen: *CmdX_Screen) {
+debug_print_to_file :: (file_path: string, screen: *Screen) {
     printer: Print_Buffer;
     create_file_printer(*printer, file_path);
 
@@ -187,7 +187,7 @@ debug_print_to_file :: (file_path: string, screen: *CmdX_Screen) {
     close_file_printer(*printer);
 }
 
-debug_print :: (screen: *CmdX_Screen) {
+debug_print :: (screen: *Screen) {
     printer: Print_Buffer;
     printer.output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -209,7 +209,7 @@ random_line :: (cmdx: *CmdX) {
     add_line(cmdx, cmdx.active_screen, "Hello World, these are 40 Characters.!!!");
 }
 
-cmdx_assert :: (active_screen: *CmdX_Screen, condition: bool, text: string) {
+cmdx_assert :: (active_screen: *Screen, condition: bool, text: string) {
     if condition return;
 
     debug_print_to_file("cmdx_log.txt", active_screen);
@@ -242,7 +242,7 @@ source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
     return overlap;
 }
 
-source_range_ends_before_other_source_range :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
+source_range_ends_before_other_source_range :: (screen: *Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
     if !lhs.wrapped && rhs.wrapped {
         return (lhs.first < rhs.one_plus_last && lhs.one_plus_last < rhs.one_plus_last) ||
             (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
@@ -252,7 +252,7 @@ source_range_ends_before_other_source_range :: (screen: *CmdX_Screen, lhs: Sourc
     return lhs.one_plus_last < rhs.one_plus_last;
 }
 
-source_range_enclosed :: (screen: *CmdX_Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
+source_range_enclosed :: (screen: *Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
     enclosed := false;
 
     if lhs.wrapped && rhs.wrapped {
@@ -283,7 +283,7 @@ source_range_empty :: (source: Source_Range) -> bool {
     return !source.wrapped && source.first == source.one_plus_last;
 }
 
-increase_source_range :: (screen: *CmdX_Screen, range: *Source_Range) {
+increase_source_range :: (screen: *Screen, range: *Source_Range) {
     ++range.one_plus_last;
     if range.one_plus_last > screen.backlog_size {
         range.one_plus_last = 0;
@@ -325,7 +325,7 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
     return window_style;
 }
 
-welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
+welcome_screen :: (cmdx: *CmdX, screen: *Screen, run_tree: string) {
     config_location := concatenate_strings(*cmdx.frame_allocator, run_tree, CONFIG_FILE_NAME);
 
     set_themed_color(screen, .Accent);
@@ -336,7 +336,7 @@ welcome_screen :: (cmdx: *CmdX, screen: *CmdX_Screen, run_tree: string) {
     new_line(cmdx, screen); // Insert a new line for more visual clarity
 }
 
-get_prefix_string :: (screen: *CmdX_Screen, allocator: *Allocator) -> string {
+get_prefix_string :: (screen: *Screen, allocator: *Allocator) -> string {
     string_builder: String_Builder = ---;
     create_string_builder(*string_builder, allocator);
     if !screen.child_process_running    append_string(*string_builder, screen.current_directory);
@@ -403,7 +403,7 @@ update_font :: (cmdx: *CmdX) {
     }
 }
 
-update_active_process_name :: (cmdx: *CmdX, screen: *CmdX_Screen, process_name: string) {
+update_active_process_name :: (cmdx: *CmdX, screen: *Screen, process_name: string) {
     if compare_strings(screen.child_process_name, process_name) return;
 
     if screen.child_process_name.count   deallocate_string(*cmdx.global_allocator, *screen.child_process_name);
@@ -454,7 +454,7 @@ update_history_size :: (cmdx: *CmdX) {
 
 /* =========================== Screen Handling =========================== */
 
-activate_screen :: (cmdx: *CmdX, screen: *CmdX_Screen) {
+activate_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Deactivate the text input of the previous active screen
     if cmdx.active_screen cmdx.active_screen.text_input.active = false;
 
