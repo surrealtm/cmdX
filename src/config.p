@@ -384,7 +384,7 @@ config_error :: (cmdx: *CmdX, format: string, parameters: ..Any) {
     } else {
         set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
         add_formatted_text(cmdx, cmdx.active_screen, format, ..parameters);
-        new_line(cmdx, cmdx.active_screen);
+        next_line(cmdx, cmdx.active_screen);
         set_themed_color(cmdx.active_screen, .Default);
     }
 }
@@ -399,7 +399,7 @@ flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
 
     if !cmdx.config.error_messages.count return false;
 
-    if reload_command new_line(cmdx, cmdx.active_screen);
+    if reload_command next_line(cmdx, cmdx.active_screen);
 
     set_true_color(cmdx.active_screen, .{ 255, 100, 100, 255 });
     for i := 0; i < cmdx.config.error_messages.count; ++i {
@@ -408,7 +408,7 @@ flush_config_errors :: (cmdx: *CmdX, reload_command: bool) -> bool {
         deallocate_string(Default_Allocator, *message);
     }
 
-    if !reload_command new_line(cmdx, cmdx.active_screen);
+    if !reload_command next_line(cmdx, cmdx.active_screen);
 
     set_themed_color(cmdx.active_screen, .Default);
     array_clear(*cmdx.config.error_messages);

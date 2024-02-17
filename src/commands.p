@@ -338,7 +338,7 @@ quit :: (cmdx: *CmdX) {
 }
 
 clear :: (cmdx: *CmdX) {
-    clear_backlog(cmdx, cmdx.active_screen);
+    clear_screen(cmdx, cmdx.active_screen);
 }
 
 theme :: (cmdx: *CmdX, theme_name: string) {
@@ -352,7 +352,7 @@ theme_lister :: (cmdx: *CmdX) {
         theme := array_get(*cmdx.themes, i);
         add_formatted_text(cmdx, cmdx.active_screen, " > %", theme.name);
         if theme == cmdx.active_theme    add_text(cmdx, cmdx.active_screen, "   * Active");
-        new_line(cmdx, cmdx.active_screen);
+        next_line(cmdx, cmdx.active_screen);
     }
 }
 
@@ -446,7 +446,7 @@ config :: (cmdx: *CmdX) {
         }
     }
 
-    new_line(cmdx, cmdx.active_screen);
+    next_line(cmdx, cmdx.active_screen);
     add_line(cmdx, cmdx.active_screen, "Actions:");
     
     for i := 0; i < cmdx.config.actions.count; ++i {

@@ -150,7 +150,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *Screen, input: string) {
                 
                 vertical_offset := y - screen.viewport_height;
                 cmdx_assert(screen, vertical_offset >= 0, "Invalid Cursor Position"); // For now, we do not support editing previous lines.
-                for i := 0; i < vertical_offset; ++i   new_line(cmdx, screen);
+                for i := 0; i < vertical_offset; ++i   next_line(cmdx, screen);
                 
                 horizontal_offset := x - get_cursor_position_in_line(screen);
                 
@@ -191,7 +191,7 @@ win32_process_input_string :: (cmdx: *CmdX, screen: *Screen, input: string) {
             ++parser.index;
         } else if parser.input[parser.index] == '\n' {
             // Normal single new line character, not sure if that actually ever happens...
-            new_line(cmdx, screen);
+            next_line(cmdx, screen);
             ++parser.index;
         } else if parser.input[parser.index] == '\t' {            
             // If the child outputted tabs, translate them to spaces for better consistency.

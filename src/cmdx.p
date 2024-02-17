@@ -65,24 +65,6 @@ Theme :: struct {
     colors: [Color_Index.count]Color;
 }
 
-Source_Range :: struct {
-    first: s64; // The index containing the first character of this range in the backlog
-    one_plus_last: s64; // One character past the last of this range in the backlog
-    wrapped: bool;
-}
-
-Color_Range :: struct {
-    source: Source_Range;
-    color_index: Color_Index; // If this is a valid value (not -1), then the color from the active theme gets used
-    true_color: Color; // An actual rgb value specified by the child process. Used if the color index invalid.
-}
-
-Virtual_Line :: struct {
-    source: Source_Range;
-    x: []s16; // The left x coordinates of all characters in the source range, for mouse selection
-    is_first_in_backlog_line: bool;
-}
-
 CmdX :: struct {
     setup: bool = false; // This flag gets set to true once the welcome screen was displayed. It indicates that everything has been loaded and initialized, and the terminal will behave as expected. Before this happens, the config may not be loaded yet, the backlog may not exist yet...
     startup_directory: string; // Remember the startup directory, since newly created screens should start in this directory. CmdX sets the working directory to its run_tree folder to have the asset files ready
@@ -156,9 +138,9 @@ debug_print_colors :: (printer: *Print_Buffer, screen: *Screen) {
     bprint(printer, "=== COLORS ===\n");
 
     for i := 0; i < screen.backlog_colors.count; ++i {
-        range := array_get(*screen.backlog_colors, i);
-        bprint(printer, "C %: % -> % (% | %, %, %)", i, range.source.first, range.source.one_plus_last, cast(s32) range.color_index, range.true_color.r, range.true_color.g, range.true_color.b);
-        if range.source.wrapped bprint(printer, " (wrapped)");
+        color := array_get(*screen.backlog_colors, i);
+        bprint(printer, "C %: % -> % (% | %, %, %)", i, color.range.first, color.range.one_plus_last, cast(s32) color.color_index, color.true_color.r, color.true_color.g, color.true_color.b);
+        if color.range.wrapped bprint(printer, " (wrapped)");
         bprint(printer, "\n");
     }
 
@@ -217,97 +199,6 @@ cmdx_assert :: (active_screen: *Screen, condition: bool, text: string) {
 }
 
 
-/* =========================== Source Ranges =========================== */
-
-source_ranges_equal :: (lhs: Source_Range, rhs: Source_Range) -> bool {
-    return lhs.first == rhs.first && lhs.one_plus_last == rhs.one_plus_last && lhs.wrapped == rhs.wrapped;
-}
-
-source_ranges_overlap :: (lhs: Source_Range, rhs: Source_Range) -> bool {
-    if source_ranges_equal(lhs, rhs) return true;
-
-    overlap := false;
-
-    if lhs.wrapped && rhs.wrapped {
-        overlap = true;
-    } else if lhs.wrapped {
-        overlap = rhs.one_plus_last > lhs.first || rhs.first < lhs.one_plus_last;
-    } else if rhs.wrapped {
-        overlap = lhs.one_plus_last > rhs.first || lhs.first < rhs.one_plus_last;
-    } else {
-        overlap = lhs.first <= rhs.first && lhs.one_plus_last > rhs.first ||
-            rhs.first <= lhs.first && rhs.one_plus_last > lhs.first;
-    }
-
-    return overlap;
-}
-
-source_range_ends_before_other_source_range :: (screen: *Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
-    if !lhs.wrapped && rhs.wrapped {
-        return (lhs.first < rhs.one_plus_last && lhs.one_plus_last < rhs.one_plus_last) ||
-            (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
-    }
-
-    if lhs.wrapped && !rhs.wrapped return false;
-    return lhs.one_plus_last < rhs.one_plus_last;
-}
-
-source_range_enclosed :: (screen: *Screen, lhs: Source_Range, rhs: Source_Range) -> bool {
-    enclosed := false;
-
-    if lhs.wrapped && rhs.wrapped {
-        // If both are wrapped, then lhs must start after rhs and end before rhs.
-        enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
-    } else if lhs.wrapped {
-        // If lhs is wrapped and rhs is not, then lhs can only actually be enclosed
-        // if rhs covers the complete available range.
-        enclosed = rhs.first == 0 && rhs.one_plus_last == screen.backlog_size;
-    } else if rhs.wrapped {
-        // If rhs is wrapped and lhs isn't, then lhs needs to be completely enclosed inside
-        // of [0,rhs.one_plus_last]. It should also detect the edge case where lhs is an
-        // empty range just at the edge of rhs.one_plus_last (not enclosed).
-        // |--->       -->|  rhs
-        // | ->           |  lhs
-        // |            ->|  lhs
-        enclosed = (lhs.first < rhs.one_plus_last && lhs.one_plus_last <= rhs.one_plus_last) ||
-            (lhs.first >= rhs.first && lhs.one_plus_last <= screen.backlog_size);
-    } else {
-        // If neither are wrapped, then lhs must start after and end before rhs
-        enclosed = lhs.first >= rhs.first && lhs.one_plus_last <= rhs.one_plus_last;
-    }
-
-    return enclosed;
-}
-
-source_range_empty :: (source: Source_Range) -> bool {
-    return !source.wrapped && source.first == source.one_plus_last;
-}
-
-increase_source_range :: (screen: *Screen, range: *Source_Range) {
-    ++range.one_plus_last;
-    if range.one_plus_last > screen.backlog_size {
-        range.one_plus_last = 0;
-        range.wrapped = true;
-    }
-}
-
-cursor_after_range :: (cursor: s64, wrapped_before: bool, range: Source_Range) -> bool {
-    if !range.wrapped && cursor > range.first && cursor >= range.one_plus_last return true;
-    if !range.wrapped && wrapped_before && cursor < range.first return true;
-    if range.wrapped && wrapped_before && cursor >= range.one_plus_last return true;
-    return false;
-}
-
-compare_color_range :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
-    return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
-}
-
-activate_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
-    if color_range.color_index != -1 set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[color_range.color_index]);
-    else set_foreground_color(*cmdx.renderer, color_range.true_color);
-}
-
-
 /* =========================== Helper Procedures =========================== */
 
 mouse_over_rectangle :: (cmdx: *CmdX, rectangle: []s32) -> bool {
@@ -323,25 +214,6 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
     if cmdx.disabled_title_bar    window_style |= .Hide_Title_Bar;
     else window_style |= .Default;
     return window_style;
-}
-
-welcome_screen :: (cmdx: *CmdX, screen: *Screen, run_tree: string) {
-    config_location := concatenate_strings(*cmdx.frame_allocator, run_tree, CONFIG_FILE_NAME);
-
-    set_themed_color(screen, .Accent);
-    add_line(cmdx, screen, "    Welcome to cmdX.");
-    set_themed_color(screen, .Default);
-    add_line(cmdx, screen, "Use the :help command as a starting point.");
-    add_formatted_line(cmdx, screen, "The config file can be found under %.", config_location);
-    new_line(cmdx, screen); // Insert a new line for more visual clarity
-}
-
-get_prefix_string :: (screen: *Screen, allocator: *Allocator) -> string {
-    string_builder: String_Builder = ---;
-    create_string_builder(*string_builder, allocator);
-    if !screen.child_process_running    append_string(*string_builder, screen.current_directory);
-    append_string(*string_builder, "> ");
-    return finish_string_builder(*string_builder);
 }
 
 
@@ -436,7 +308,7 @@ update_backlog_size :: (cmdx: *CmdX) {
         deallocate(*cmdx.global_allocator, screen.backlog);
         screen.backlog = allocate(*cmdx.global_allocator, cmdx.backlog_size);
         screen.backlog_size = cmdx.backlog_size;
-        clear_backlog(cmdx, screen);
+        clear_screen(cmdx, screen);
     }
 }
 
