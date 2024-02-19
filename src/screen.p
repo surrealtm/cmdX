@@ -49,14 +49,6 @@ Screen :: struct {
     rounded_scroll: s64; // This is the interpolated_scroll rounded down
     enable_auto_scroll: s64 = true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
     
-    // Backlog selection information
-    do_backlog_selection: bool; // Set to true if we are currently dragging a selection
-    backlog_selection: Backlog_Range;
-    virtual_selection_l0: s64; // Line index of the virtual line of backlog_selection.first
-    virtual_selection_c0: s64; // Character index of the virtual line of backlog_selection.first
-    virtual_selection_l1: s64; // Line index of the virtual line of backlog_selection.one_plus_last
-    virtual_selection_c1: s64; // Character index of the virtual line of backlog_selection.one_plus_last
-    
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
     first_line_y_position: s64; // The y-position in screen-pixel-space at which the first virtual line should be rendered
@@ -74,7 +66,6 @@ Screen :: struct {
     scrollknob_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
     scrollknob_hitbox_hovered: bool;
     scrollknob_visual_color: Color;
-    
     scrollknob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
     scrollknob_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
 
@@ -116,79 +107,60 @@ create_screen :: (cmdx: *CmdX) -> *Screen {
 }
 
 close_screen :: (cmdx: *CmdX, screen: *Screen) {
+    //
     // Deallocate all the data that was allocated for this screen when it was created
+    //
+    if screen.child_process_running win32_cleanup(cmdx, screen);
+    clear_virtual_lines(cmdx, screen);
+    array_clear(*screen.backlog_lines);
+    array_clear(*screen.backlog_colors);
+    array_clear(*screen.history);
+    array_clear(*screen.auto_complete_options);
     deallocate(*cmdx.global_allocator, screen.backlog);
     deallocate_string(*cmdx.global_allocator, *screen.current_directory);
 
-    active_screen_index := screen.index % (cmdx.screens.count - 1); // Figure out the index of the new active screen
-
-    // Remove the screen from the linked list
+    //
+    // Remove the screen from the list and choose the next active screen
+    //
+    active_screen_index := screen.index % (cmdx.screens.count - 1);
     linked_list_remove_pointer(*cmdx.screens, screen);
 
     cmdx.active_screen = linked_list_get(*cmdx.screens, active_screen_index);
 
+    //
     // Readjust the screen rectangles of the remaining screens
+    //
     adjust_screen_indices(cmdx);
     adjust_screen_rectangles(cmdx);
 }
 
 clear_screen :: (cmdx: *CmdX, screen: *Screen) {
+    clear_virtual_lines(cmdx, screen);
     array_clear(*screen.backlog_lines);
-    array_clear(*screen.virtual_lines);
     array_clear(*screen.backlog_colors);
     next_line(cmdx, screen);
     set_themed_color(screen, .Default);
-    // @Incomplete: Clear the selection
 }
 
 draw_screen :: (cmdx: *CmdX, screen: *Screen) {
-    // Set up the cursor coordinates for rendering.
-    cursor_x: s32 = screen.first_line_x_position;
-    cursor_y: s32 = screen.first_line_y_position;
-
-    // Set up the color ranges.
-    wrapped_before := screen.line_wrapped_before_first;
-    color_range_index: s64 = 0;
-    color_range: Color_Range = array_get_value(*screen.backlog_colors, color_range_index);
-    set_foreground_color_for_color_range(cmdx, *color_range);
-
     //
     // Set scissors to avoid drawing into other screens' spaces.
     //
     set_scissors(screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], cmdx.window.height);
 
     //
-    // Draw the backlog selection if it is active
-    //
-    if screen.do_backlog_selection && !backlog_range_empty(screen.backlog_selection) {
-        virtual_line_index := screen.virtual_selection_l0;
-        
-        while virtual_line_index <= screen.virtual_selection_l1 {
-            virtual_line := array_get(*screen.virtual_lines, virtual_line_index);
-            
-            if backlog_range_empty(virtual_line.range) {
-                ++virtual_line_index;
-                continue;
-            }
-            
-            x0 := 0;
-            y0 := get_upper_y_position_for_virtual_line(cmdx, screen, virtual_line_index);
-            x1 := virtual_line.x[virtual_line.x.count - 1] + 4 * query_glyph_horizontal_advance(*cmdx.font, ' ');
-            y1 := get_upper_y_position_for_virtual_line(cmdx, screen, virtual_line_index) + cmdx.font.line_height;
-            
-            if virtual_line_index == screen.virtual_selection_l0 x0 = virtual_line.x[screen.virtual_selection_c0];
-            if virtual_line_index == screen.virtual_selection_l1 x1 = virtual_line.x[screen.virtual_selection_c1] + query_glyph_horizontal_advance(*cmdx.font, ' ');
-
-            draw_quad(*cmdx.renderer, x0, y0, x1, y1, cmdx.active_theme.colors[Color_Index.Selection]);
-        
-            ++virtual_line_index;
-        }
-    }
-
-    //
     // Draw all visible lines
+    // @Cleanup: This can be improved
     //
     current_line_index := screen.first_line_to_draw;
+    cursor_x: s32 = screen.first_line_x_position;
+    cursor_y: s32 = screen.first_line_y_position;
+
+    wrapped_before := screen.line_wrapped_before_first;
+    color_range_index: s64 = 0;
+    color_range: Color_Range = array_get_value(*screen.backlog_colors, color_range_index);
+    set_foreground_color_for_color_range(cmdx, *color_range);
+
     while current_line_index <= screen.last_line_to_draw {
         line := array_get(*screen.virtual_lines, current_line_index);
         backlog_range := line.range;
@@ -228,29 +200,33 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
         ++current_line_index;
     }
 
-    // Draw the text input at the end of the backlog
+    //
+    // Draw the text input
+    //
     prefix_string := get_prefix_string(screen, *cmdx.frame_allocator);
     draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
 
-    // Draw the scroll bar only if the backlog is bigger than the available screen size.
-    // If the scrollbar is not hovered, make it a bit thinner.
+    //
+    // Draw the scroll bar
+    //
     if screen.scrollbar_enabled {
-        // The scrollbar background rectangle is used to detect whether the mouse is currently hovering it.
-        // The visual of the background is a bit smaller to not look as distracting, but the hitbox being
-        // bigger should make it easier to select.
         draw_rectangle(*cmdx.renderer, screen.scrollbar_visual_rectangle, screen.scrollbar_visual_color);
         draw_rectangle(*cmdx.renderer, screen.scrollknob_visual_rectangle, screen.scrollknob_visual_color);
     }
 
+    //
     // If this is not the active screen, then overlay some darkening quad to make it easier for the user to
     // see that this is not the active one.
+    //
     if cmdx.active_screen != screen {
         deactive_color := Color.{ 0, 0, 0, 100 };
         draw_quad(*cmdx.renderer, screen.rectangle[0], screen.rectangle[1], screen.rectangle[2], screen.rectangle[3], deactive_color);
     }
 
+    //
     // Disable scissors after the screen has been rendered to avoid some weird artifacts. To avoid some left-over
     // text being rendered after this with invalid scissors, flush the font buffer now.
+    //
     flush_font_buffer(*cmdx.renderer);
     disable_scissors();
 }
@@ -259,18 +235,25 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Update the currently running child process
     //
-
     if screen.child_process_running && !win32_update_spawned_process(cmdx, screen) {
         // If CmdX is terminating, or if the child process has disconnected from us (either by terminating
-        // itself, or by closing the pipes), then close the connectoin to it.
+        // itself, or by closing the pipes), then close the connection to it.
         win32_detach_spawned_process(cmdx, screen);
     }
 
     //
     // Update the virtual line list for this screen
     //
-
     if screen.rebuild_virtual_lines {
+        //
+        // Clear and deallocate the current virtual lines
+        //
+        clear_virtual_lines(cmdx, screen);
+        
+        //
+        // Start rebuilding the virtual line array for the current backlog
+        // @Incomplete: Support disabling line wrapping through some config option
+        //
         active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
 
         if screen.scrollbar_enabled {
@@ -280,19 +263,6 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             active_screen_width = screen.rectangle[2] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
         }
 
-        //
-        // Clear and deallocate the current virtual lines
-        //
-        for i := 0; i < screen.virtual_lines.count; ++i {
-            virtual_line := array_get(*screen.virtual_lines, i);
-            deallocate_array(*cmdx.global_allocator, *virtual_line.x);
-        }
-        array_clear(*screen.virtual_lines);
-        
-        //
-        // Start rebuilding the virtual line array for the current backlog
-        // @Incomplete: Support disabling line wrapping through some config option
-        //
         for i := 0; i < screen.backlog_lines.count; ++i {
             backlog_line := array_get_value(*screen.backlog_lines, i);
 
@@ -301,35 +271,70 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 virtual_line := array_push(*screen.virtual_lines);
                 virtual_line.range = backlog_line;
                 virtual_line.is_first_in_backlog_line = true;
-                continue;
-            }
-            
-            virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
-            virtual_width := 0; // The current virtual line width in pixels
-            is_first_in_backlog_line := true;
-            
-            while backlog_range_ends_before(screen, virtual_range, backlog_line) {
-                next_character := screen.backlog[virtual_range.one_plus_last];
+            } else {
+                virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
+                virtual_width := 0; // The current virtual line width in pixels
+                is_first_in_backlog_line := true;
                 
-                while backlog_range_ends_before(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
-                    virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
-                    increase_backlog_range(screen, *virtual_range);
-                    next_character = screen.backlog[virtual_range.one_plus_last];
-                }
+                while backlog_range_ends_before(screen, virtual_range, backlog_line) {
+                    next_character := screen.backlog[virtual_range.one_plus_last];
+                    
+                    while backlog_range_ends_before(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
+                        virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
+                        increase_backlog_range(screen, *virtual_range);
+                        next_character = screen.backlog[virtual_range.one_plus_last];
+                    }
 
-                virtual_line := array_push(*screen.virtual_lines);
-                virtual_line.range = virtual_range;
-                virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
-                setup_x_positions_for_virtual_line(cmdx, screen, virtual_line);
-                
-                is_first_in_backlog_line = false;
-                virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
-                virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
+                    //
+                    // Add a new virtual line for the selected virtual range
+                    //
+                    virtual_line := array_push(*screen.virtual_lines);
+                    virtual_line.range = virtual_range;
+                    virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
+                                    
+                    //
+                    // Allocate the offset array
+                    //
+                    count := virtual_line.range.one_plus_last - virtual_line.range.first;
+                    if virtual_line.range.wrapped count = screen.backlog_size - virtual_line.range.first + virtual_line.range.one_plus_last;
+                    virtual_line.x = allocate_array(*cmdx.global_allocator, count, s16);
+
+                    //
+                    // Fill the offset array with screen coordinates
+                    //
+                    range := virtual_line.range; // Copy this so that we can modify it
+                    backlog_index := virtual_line.range.first;
+                    line_index := 0;
+                    x := OFFSET_FROM_SCREEN_BORDER;
+
+                    if !virtual_line.is_first_in_backlog_line x = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+                    
+                    while backlog_index != range.one_plus_last {
+                        virtual_line.x[line_index] = x;
+
+                        character := screen.backlog[backlog_index];
+                        x += query_glyph_horizontal_advance(*cmdx.font, character);
+
+                        ++line_index;
+                        ++backlog_index;
+                        if backlog_index == screen.backlog_size && range.wrapped {
+                            range.wrapped = false;
+                            backlog_index = 0;
+                        }
+                    }
+
+                    //
+                    // Prepare the data for the remaining range in this backlog line
+                    //
+                    is_first_in_backlog_line = false;
+                    virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+                    virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
+                }
             }
         }
         
         //
-        // Handle the scroll bar
+        // Set proper scroll information for the new virtual lines
         //
         screen.rebuild_virtual_lines = false;
 
@@ -337,17 +342,11 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             // Snap the view back to the bottom.
             screen.target_scroll = xx screen.virtual_lines.count;
         }
-
-        previous_scrollbar_enabled := screen.scrollbar_enabled;
-
-        screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
-        if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
     }
 
     //
     // Handle scrolling in this screen
     //
-
     {
         if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
             // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
@@ -413,6 +412,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         first_line_in_backlog := array_get(*screen.virtual_lines, 0);
         first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
         screen.line_wrapped_before_first = first_line_to_draw.range.first < first_line_in_backlog.range.first;
+    
+        // Enable the scroll bar depending on the number of lines drawn vs. the number of lines present
+        previous_scrollbar_enabled := screen.scrollbar_enabled;
+
+        screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
+        if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;        
     }
 
     if screen.scrollbar_enabled {
@@ -511,52 +516,6 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
     }
 
-
-    //
-    // Handle mouse selection of backlog text
-    //
-
-    if mouse_over_rectangle(cmdx, screen.rectangle) && cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender && 
-        cmdx.window.mouse_y < screen.first_line_y_position + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
-        virtual_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
-        virtual_line := array_get(*screen.virtual_lines, virtual_line_index);
-    
-        backlog_character_index, virtual_character_index := get_backlog_index_for_screen_position_in_virtual_line(cmdx, virtual_line, cmdx.window.mouse_x);
-
-        // @Cleanup: Handle selection over the wrapping of the backlog.
-        // @Cleanup: Cancel selection when rebuilding virtual lines since that would mess up all our indices
-        // @Cleanup: Handle drawing the selection if start or end are outside of the visible screen space
-        // @Cleanup: Set the proper background color for text rendering inside the selection
-        // @Incomplete: Start drawing the selection
-        // @Incomplete: Debug print the current selection, then allow the copying of it.
-        // @Incomplete: Disable the text input during selection.
-
-        if cmdx.window.button_pressed[Button_Code.Left] {
-            screen.do_backlog_selection = true;
-            screen.backlog_selection = .{ backlog_character_index, backlog_character_index, false };
-            screen.virtual_selection_l0 = virtual_line_index;
-            screen.virtual_selection_c0 = virtual_character_index;
-            screen.virtual_selection_l1 = virtual_line_index;
-            screen.virtual_selection_c1 = virtual_character_index;
-            draw_next_frame(cmdx);
-        } else if cmdx.window.button_held[Button_Code.Left] && screen.do_backlog_selection && backlog_character_index > screen.backlog_selection.first {
-            screen.backlog_selection.one_plus_last = backlog_character_index + 1;
-            screen.virtual_selection_l1 = virtual_line_index;
-            screen.virtual_selection_c1 = virtual_character_index;
-            draw_next_frame(cmdx);
-        } else if cmdx.window.button_held[Button_Code.Left] && screen.do_backlog_selection && backlog_character_index < screen.backlog_selection.one_plus_last {
-            screen.backlog_selection.first = backlog_character_index;
-            screen.virtual_selection_l0 = virtual_line_index;
-            screen.virtual_selection_c0 = virtual_character_index;
-            draw_next_frame(cmdx);
-        } 
-    }
-
-    if screen.do_backlog_selection && cmdx.window.button_released[Button_Code.Left] && backlog_range_empty(screen.backlog_selection) {
-        screen.do_backlog_selection = false;
-        draw_next_frame(cmdx);
-    }
-
     //
     // Update the text input's cursor rendering data
     //
@@ -604,7 +563,9 @@ add_history :: (cmdx: *CmdX, screen: *Screen, input_string: string) {
 refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     if !screen.auto_complete_dirty return;
 
+    //
     // Clear the previous auto complete options and deallocate all strings
+    //
     for i := 0; i < screen.auto_complete_options.count; ++i {
         string := array_get_value(*screen.auto_complete_options, i);
         deallocate_string(*cmdx.global_allocator, *string);
@@ -613,7 +574,9 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     array_clear(*screen.auto_complete_options);
     screen.auto_complete_index = 0;
 
-    // Gauge the text that should be auto-completed next
+    //
+    // Figure out the text that should be auto-completed next
+    //
     string_until_cursor := string_view(screen.text_input.buffer, screen.text_input.cursor);
     last_space, space_found := search_string_reverse(string_until_cursor, ' ');
     last_slash, slash_found := search_string_reverse(string_until_cursor, '/');
@@ -627,9 +590,11 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
 
     text_to_complete := substring_view(screen.text_input.buffer, screen.auto_complete_start, screen.text_input.cursor);
 
+    //
+    // Add all commands to the auto-complete, but only if this could actually 
+    // be a command (it is actually the first thing in the input string)
+    //        
     if screen.auto_complete_start == 0 {
-        // Add all commands, but only if this could actually be a command (it is actually the first thing in
-        // the input string)
         for i := 0; i < cmdx.commands.count; ++i {
             command := array_get(*cmdx.commands, i);
             if string_starts_with(command.name, text_to_complete) {
@@ -641,8 +606,9 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
         }
     }
 
+    //
     // Add all files in the current folder to the auto-complete.
-
+    //
     files_directory := screen.current_directory;
     directory_start := 0;
     if space_found     directory_start = last_space + 1;
@@ -658,10 +624,10 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     for i := 0; i < files.count; ++i {
         file := array_get_value(*files, i);
         if string_starts_with(file, text_to_complete) {
+            // @Incomplete: This is currently broken, because get_files_in_folder returns the full path.
             // Check if the given path is actually a folder. If so, then append a final slash
             // to it, to make it easier to just auto-complete to a path without having to type the slashes
-            // themselves. @@Robustness maybe return this information along with the path in the
-            // get_files_in_folder procedure?
+            // themselves.
             full_path := concatenate_strings(*cmdx.frame_allocator, files_directory, "\\");
             full_path = concatenate_strings(*cmdx.frame_allocator, full_path, file);
 
@@ -774,8 +740,9 @@ remove_overlapping_lines :: (screen: *Screen, new_line: Backlog_Range) -> *Backl
                 color_range.range.wrapped = color_range.range.one_plus_last < total_removed_range.one_plus_last;
                 color_range.range.first   = total_removed_range.one_plus_last;
                 break;
-            } else
+            } else {
                 break;
+            }
         }
     }
 
@@ -815,6 +782,14 @@ set_cursor_position_in_line :: (screen: *Screen, cursor: s64) {
 
 set_cursor_position_to_beginning_of_line :: (screen: *Screen) {
     set_cursor_position_in_line(screen, 0);
+}
+
+clear_virtual_lines :: (cmdx: *CmdX, screen: *Screen) {
+    for i := 0; i < screen.virtual_lines.count; ++i {
+        virtual_line := array_get(*screen.virtual_lines, i);
+        deallocate_array(*cmdx.global_allocator, *virtual_line.x);
+    }
+    array_clear(*screen.virtual_lines);
 }
 
 
@@ -1004,77 +979,6 @@ add_formatted_line :: (cmdx: *CmdX, screen: *Screen, format: string, args: ..Any
     next_line(cmdx, screen);
 }
 
-
-get_backlog_selection_as_string :: (cmdx: *CmdX, screen: *Screen) -> string {
-    string: string = ---;
-
-    // @Cleanup: We might wanna manually insert the new-lines here, by going through
-    // the selected virtual lines and using a string builder...
-    if screen.backlog_selection.wrapped {
-        before_wrap := cmdx.backlog_size - screen.backlog_selection.first;
-        count := before_wrap + screen.backlog_selection.one_plus_last;
-        string = allocate_string(*cmdx.frame_allocator, count);
-        copy_memory(string.data, *screen.backlog[screen.backlog_selection.first], before_wrap);
-        copy_memory(*string.data[before_wrap], screen.backlog, screen.backlog_selection.one_plus_last);
-    } else {
-        count := screen.backlog_selection.one_plus_last - screen.backlog_selection.first;
-        string = allocate_string(*cmdx.frame_allocator, count);
-        copy_memory(string.data, *screen.backlog[screen.backlog_selection.first], count);
-    }
-
-    return string;
-}
-
-get_backlog_index_for_screen_position_in_virtual_line :: (cmdx: *CmdX, line: *Virtual_Line, position: s64) -> s64, s64 {
-    backlog_index := line.range.first;
-    line_index := 0;
-
-    while line_index + 1 < line.x.count && line.x[line_index + 1] < position {
-        ++line_index;
-        ++backlog_index;
-        if line.range.wrapped && backlog_index == cmdx.backlog_size backlog_index = 0;
-    }
-
-    return backlog_index, line_index;
-}
-
-setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, virtual_line: *Virtual_Line) {
-    //
-    // Allocate the offset array
-    //
-    count := virtual_line.range.one_plus_last - virtual_line.range.first;
-    if virtual_line.range.wrapped count = screen.backlog_size - virtual_line.range.first + virtual_line.range.one_plus_last;
-    virtual_line.x = allocate_array(*cmdx.global_allocator, count, s16);
-
-    //
-    // Fill the offset array with screen coordinates
-    //
-    range := virtual_line.range; // Copy this so that we can modify it
-    backlog_index := virtual_line.range.first;
-    line_index := 0;
-    x := OFFSET_FROM_SCREEN_BORDER;
-
-    if !virtual_line.is_first_in_backlog_line x = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
-    
-    while backlog_index != range.one_plus_last {
-        virtual_line.x[line_index] = x;
-
-        character := screen.backlog[backlog_index];
-        x += query_glyph_horizontal_advance(*cmdx.font, character);
-
-        ++line_index;
-        ++backlog_index;
-        if backlog_index == screen.backlog_size && range.wrapped {
-            range.wrapped = false;
-            backlog_index = 0;
-        }
-    }
-}
-
-get_upper_y_position_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, vertical_line_index: s64) -> s64 {
-    return screen.first_line_y_position + (vertical_line_index - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.ascender;
-}
-
 calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 {
     active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
     completely_visible   := min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
@@ -1082,6 +986,7 @@ calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 
     return completely_visible, partially_visible;
 }
 
+// @Cleanup: Similar to draw_backlog, I feel this could be cleaner...
 draw_backlog_text :: (cmdx: *CmdX, screen: *Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
     set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
 
@@ -1243,5 +1148,3 @@ set_foreground_color_for_color_range :: (cmdx: *CmdX, color_range: *Color_Range)
     else 
         set_foreground_color(*cmdx.renderer, color_range.true_color);
 }
-
-// @Cleanup: It seems the scroll bar flickers once when doing 'help' for the first time
