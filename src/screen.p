@@ -44,9 +44,9 @@ Screen :: struct {
     auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
 
     // Backlog scrolling information
-    scroll_target_offset: f64; // The target scroll offset in virtual lines but with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
-    scroll_interpolation: f64; // The interpolated position which always grows towards the scroll target. Float to have smoother interpolation between frames
-    scroll_line_offset: s64; // The index for the first virtual line to be rendered at the top of the screen. This is always the scroll position rounded down
+    target_scroll: f64; // The target scroll offset with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
+    interpolated_scroll: f64; // This value interpolates towards the target scroll value
+    rounded_scroll: s64; // This is the interpolated_scroll rounded down
     enable_auto_scroll: s64 = true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
     
     // Backlog selection information
@@ -259,6 +259,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Update the currently running child process
     //
+
     if screen.child_process_running && !win32_update_spawned_process(cmdx, screen) {
         // If CmdX is terminating, or if the child process has disconnected from us (either by terminating
         // itself, or by closing the pipes), then close the connectoin to it.
@@ -268,28 +269,89 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Update the virtual line list for this screen
     //
-    build_virtual_lines(cmdx, screen);
+
+    if screen.rebuild_virtual_lines {
+        active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
+
+        if screen.scrollbar_enabled {
+            // Scroll bar is drawn, decrease the active screen width. We cannot use the scrollbar rectangle
+            // here, since that gets build after this procedure, therefore referencing the previous frame
+            // which is invalid if the window was resized.
+            active_screen_width = screen.rectangle[2] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
+        }
+
+        for i := 0; i < screen.virtual_lines.count; ++i {
+            virtual_line := array_get(*screen.virtual_lines, i);
+            deallocate_array(*cmdx.global_allocator, *virtual_line.x);
+        }
+        array_clear(*screen.virtual_lines);
+        
+        for i := 0; i < screen.backlog_lines.count; ++i {
+            backlog_line := array_get_value(*screen.backlog_lines, i);
+
+            if backlog_range_empty(backlog_line) {
+                // Empty lines should just be copied into the virtual line array.
+                virtual_line := array_push(*screen.virtual_lines);
+                virtual_line.range = backlog_line;
+                virtual_line.is_first_in_backlog_line = true;
+                continue;
+            }
+            
+            virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
+            virtual_width := 0; // The current virtual line width in pixels
+            is_first_in_backlog_line := true;
+            
+            while backlog_range_ends_before(screen, virtual_range, backlog_line) {
+                next_character := screen.backlog[virtual_range.one_plus_last];
+                
+                while backlog_range_ends_before(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
+                    virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
+                    increase_backlog_range(screen, *virtual_range);
+                    next_character = screen.backlog[virtual_range.one_plus_last];
+                }
+
+                virtual_line := array_push(*screen.virtual_lines);
+                virtual_line.range = virtual_range;
+                virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
+                setup_x_positions_for_virtual_line(cmdx, screen, virtual_line);
+                
+                is_first_in_backlog_line = false;
+                virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+                virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
+            }
+        }
+        
+        screen.rebuild_virtual_lines = false;
+
+        if screen.enable_auto_scroll {
+            // Snap the view back to the bottom.
+            screen.target_scroll = xx screen.virtual_lines.count;
+        }
+
+        previous_scrollbar_enabled := screen.scrollbar_enabled;
+
+        screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
+        if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
+    }
 
     //
     // Handle scrolling in this screen
     //
 
-    new_scroll_target := screen.scroll_target_offset;
-
     if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
         // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
         // indicating that all screens should be scrolled simultaneously
-        new_scroll_target = xx screen.scroll_target_offset - cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
+        screen.target_scroll -= cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
     }
 
     if cmdx.active_screen == screen {
         // Only actually do keyboard scrolling if this is either the active screen, or the shift key is held,
         // indicating that all screens should be scrolled simultaneously
-        if cmdx.window.key_pressed[Key_Code.Page_Down] new_scroll_target = xx screen.virtual_lines.count; // Scroll to the bottom of the backlog.
-        if cmdx.window.key_pressed[Key_Code.Page_Up]   new_scroll_target = 0; // Scroll all the way to the top of the backlog.
+        if cmdx.window.key_pressed[Key_Code.Page_Down] screen.target_scroll = xx screen.virtual_lines.count; // Scroll to the bottom of the backlog.
+        if cmdx.window.key_pressed[Key_Code.Page_Up]   screen.target_scroll = 0; // Scroll all the way to the top of the backlog.
     }
 
-    previous_scroll_offset := screen.scroll_line_offset;
+    previous_rounded_scroll := screen.rounded_scroll;
 
     // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
     // go below that number. This means that we cannot scroll past the very first line at the very top
@@ -301,11 +363,13 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     
     // Calculate the number of drawn lines at the target scrolling position, so that the target can be
     // clamped with the correct values.
-    highest_allowed_scroll_offset := screen.virtual_lines.count - complete_lines_fitting_on_screen;
-    screen.scroll_target_offset    = clamp(new_scroll_target, 0, xx highest_allowed_scroll_offset);
-    screen.scroll_interpolation    = clamp(damp(screen.scroll_interpolation, screen.scroll_target_offset, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll_offset);
-    screen.scroll_line_offset      = clamp(cast(s64) round(screen.scroll_interpolation), 0, highest_allowed_scroll_offset);
-    screen.enable_auto_scroll      = screen.scroll_target_offset == xx highest_allowed_scroll_offset;
+    highest_allowed_scroll    := screen.virtual_lines.count - complete_lines_fitting_on_screen;
+    screen.target_scroll       = clamp(screen.target_scroll, 0, xx highest_allowed_scroll);
+    screen.interpolated_scroll = clamp(damp(screen.interpolated_scroll, screen.target_scroll, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll);
+    screen.rounded_scroll      = clamp(cast(s64) round(screen.interpolated_scroll), 0, highest_allowed_scroll);
+    screen.enable_auto_scroll  = screen.target_scroll == xx highest_allowed_scroll;
+
+    if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
 
     //
     // Set up drawing data for this frame
@@ -314,12 +378,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
     // scrolled all the way to the top, allow one line to be cut off partially.
     final_drawn_line_count: s64 = 0;
-    if screen.scroll_line_offset > 0 {
+    if screen.rounded_scroll > 0 {
         final_drawn_line_count = partial_lines_fitting_on_screen;
     } else
         final_drawn_line_count = complete_lines_fitting_on_screen;
 
-    screen.first_line_to_draw = screen.scroll_line_offset - (final_drawn_line_count - complete_lines_fitting_on_screen);
+    screen.first_line_to_draw = screen.rounded_scroll - (final_drawn_line_count - complete_lines_fitting_on_screen);
     screen.last_line_to_draw  = screen.first_line_to_draw + final_drawn_line_count - 1;
 
     // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
@@ -337,8 +401,6 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
     screen.line_wrapped_before_first = first_line_to_draw.range.first < first_line_in_backlog.range.first;
 
-    if previous_scroll_offset != screen.scroll_line_offset draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
-
     if screen.scrollbar_enabled {
         //
         // Update the scroll bar of this screen. The scroll bar is always oriented around the scroll target, not
@@ -349,12 +411,8 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // represent.
         //
 
-        visible_lines_in_scrollbar_area: s64 = complete_lines_fitting_on_screen;
-        first_line_offset := visible_lines_in_scrollbar_area - complete_lines_fitting_on_screen;
-        
-        first_line_in_scrollbar_area: s64 = xx screen.scroll_target_offset - first_line_offset;
-        first_line_percentage   := cast(f64) (first_line_in_scrollbar_area)    / cast(f64) screen.virtual_lines.count;
-        visible_line_percentage := cast(f64) (visible_lines_in_scrollbar_area) / cast(f64) screen.virtual_lines.count;
+        first_line_percentage   := cast(f64) round(screen.target_scroll)        / cast(f64) screen.virtual_lines.count;
+        visible_line_percentage := cast(f64) (complete_lines_fitting_on_screen) / cast(f64) screen.virtual_lines.count;
 
         scrollbar_hitbox_width: s32 = SCROLL_BAR_WIDTH;
         scrollbar_hitbox_height := screen.rectangle[3] - OFFSET_FROM_SCREEN_BORDER - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER;
@@ -392,7 +450,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
             target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
 
-            screen.scroll_target_offset = target_inside_scrollbar_area * xx screen.virtual_lines.count + xx first_line_offset;
+            screen.target_scroll = target_inside_scrollbar_area * xx screen.virtual_lines.count;
         }
         
         if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
@@ -660,9 +718,9 @@ remove_overlapping_lines :: (screen: *Screen, new_line: Backlog_Range) -> *Backl
             // Since the scroll offset is an index into the backlog, we need to adjust the scroll offset
             // whenever indices shift. The text on screen should not visually move, so disable any
             // smoothing animation by decreasing all three values.
-            screen.scroll_target_offset -= 1;
-            screen.scroll_interpolation -= 1;
-            screen.scroll_line_offset   -= 1;
+            screen.target_scroll       -= 1;
+            screen.interpolated_scroll -= 1;
+            screen.rounded_scroll      -= 1;
         } else {
             // If the new line does not collide with the current backlog range, then there is enough space
             // made for the new line in the backlog, and we should stop removing more lines, since that
@@ -994,73 +1052,6 @@ get_upper_y_position_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, vertical
     return screen.first_line_y_position + (vertical_line_index - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.ascender;
 }
 
-build_virtual_lines :: (cmdx: *CmdX, screen: *Screen) {
-    if !screen.rebuild_virtual_lines return;
-
-    active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
-
-    if screen.scrollbar_enabled {
-        // Scroll bar is drawn, decrease the active screen width. We cannot use the scrollbar rectangle
-        // here, since that gets build after this procedure, therefore referencing the previous frame
-        // which is invalid if the window was resized.
-        active_screen_width = screen.rectangle[2] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
-    }
-
-    for i := 0; i < screen.virtual_lines.count; ++i {
-        virtual_line := array_get(*screen.virtual_lines, i);
-        deallocate_array(*cmdx.global_allocator, *virtual_line.x);
-    }
-    array_clear(*screen.virtual_lines);
-    
-    for i := 0; i < screen.backlog_lines.count; ++i {
-        backlog_line := array_get_value(*screen.backlog_lines, i);
-
-        if backlog_range_empty(backlog_line) {
-            // Empty lines should just be copied into the virtual line array.
-            virtual_line := array_push(*screen.virtual_lines);
-            virtual_line.range = backlog_line;
-            virtual_line.is_first_in_backlog_line = true;
-            continue;
-        }
-        
-        virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
-        virtual_width := 0; // The current virtual line width in pixels
-        is_first_in_backlog_line := true;
-        
-        while backlog_range_ends_before(screen, virtual_range, backlog_line) {
-            next_character := screen.backlog[virtual_range.one_plus_last];
-            
-            while backlog_range_ends_before(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
-                virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
-                increase_backlog_range(screen, *virtual_range);
-                next_character = screen.backlog[virtual_range.one_plus_last];
-            }
-
-            virtual_line := array_push(*screen.virtual_lines);
-            virtual_line.range = virtual_range;
-            virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
-            setup_x_positions_for_virtual_line(cmdx, screen, virtual_line);
-            
-            is_first_in_backlog_line = false;
-            virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
-            virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
-        }
-    }
-    
-    screen.rebuild_virtual_lines = false;
-    
-
-    if screen.enable_auto_scroll {
-        // Snap the view back to the bottom.
-        screen.scroll_target_offset = xx screen.virtual_lines.count;
-    }
-
-    previous_scrollbar_enabled := screen.scrollbar_enabled;
-
-    screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
-    if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
-}
-
 draw_backlog_text :: (cmdx: *CmdX, screen: *Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
     set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
 
@@ -1222,3 +1213,5 @@ set_foreground_color_for_color_range :: (cmdx: *CmdX, color_range: *Color_Range)
     else 
         set_foreground_color(*cmdx.renderer, color_range.true_color);
 }
+
+// @Cleanup: It seems the scroll bar flickers once when doing 'help' for the first time
