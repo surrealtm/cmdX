@@ -338,68 +338,71 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Handle scrolling in this screen
     //
 
-    if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
-        // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
-        // indicating that all screens should be scrolled simultaneously
-        screen.target_scroll -= cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
+    {
+        if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
+            // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
+            // indicating that all screens should be scrolled simultaneously
+            screen.target_scroll -= cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
+        }
+
+        if cmdx.active_screen == screen {
+            // Only actually do keyboard scrolling if this is either the active screen, or the shift key is held,
+            // indicating that all screens should be scrolled simultaneously
+            if cmdx.window.key_pressed[Key_Code.Page_Down] screen.target_scroll = xx screen.virtual_lines.count; // Scroll to the bottom of the backlog.
+            if cmdx.window.key_pressed[Key_Code.Page_Up]   screen.target_scroll = 0; // Scroll all the way to the top of the backlog.
+        }
+
+        previous_rounded_scroll := screen.rounded_scroll;
+
+        // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
+        // go below that number. This means that we cannot scroll past the very first line at the very top
+        // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
+        // with the top-most line potentially being partly cut off at the top of the window.
+        active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
+        complete_lines_fitting_on_screen: s64 = min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
+        
+        // Calculate the number of drawn lines at the target scrolling position, so that the target can be
+        // clamped with the correct values.
+        highest_allowed_scroll    := screen.virtual_lines.count - complete_lines_fitting_on_screen;
+        screen.target_scroll       = clamp(screen.target_scroll, 0, xx highest_allowed_scroll);
+        screen.interpolated_scroll = clamp(damp(screen.interpolated_scroll, screen.target_scroll, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll);
+        screen.rounded_scroll      = clamp(cast(s64) round(screen.interpolated_scroll), 0, highest_allowed_scroll);
+        screen.enable_auto_scroll  = screen.target_scroll == xx highest_allowed_scroll;
+
+        if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
     }
-
-    if cmdx.active_screen == screen {
-        // Only actually do keyboard scrolling if this is either the active screen, or the shift key is held,
-        // indicating that all screens should be scrolled simultaneously
-        if cmdx.window.key_pressed[Key_Code.Page_Down] screen.target_scroll = xx screen.virtual_lines.count; // Scroll to the bottom of the backlog.
-        if cmdx.window.key_pressed[Key_Code.Page_Up]   screen.target_scroll = 0; // Scroll all the way to the top of the backlog.
-    }
-
-    previous_rounded_scroll := screen.rounded_scroll;
-
-    // Calculate the number of lines that definitely fit on screen, so that the scroll offset can never
-    // go below that number. This means that we cannot scroll past the very first line at the very top
-    // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
-    // with the top-most line potentially being partly cut off at the top of the window.
-    active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
-    complete_lines_fitting_on_screen: s64 = min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
-    partial_lines_fitting_on_screen : s64 = min(cast(s64) ceil(xx active_screen_height / xx cmdx.font.line_height), screen.virtual_lines.count);
-    
-    // Calculate the number of drawn lines at the target scrolling position, so that the target can be
-    // clamped with the correct values.
-    highest_allowed_scroll    := screen.virtual_lines.count - complete_lines_fitting_on_screen;
-    screen.target_scroll       = clamp(screen.target_scroll, 0, xx highest_allowed_scroll);
-    screen.interpolated_scroll = clamp(damp(screen.interpolated_scroll, screen.target_scroll, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll);
-    screen.rounded_scroll      = clamp(cast(s64) round(screen.interpolated_scroll), 0, highest_allowed_scroll);
-    screen.enable_auto_scroll  = screen.target_scroll == xx highest_allowed_scroll;
-
-    if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
 
     //
     // Set up drawing data for this frame
     //
-   
-    // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
-    // scrolled all the way to the top, allow one line to be cut off partially.
-    final_drawn_line_count: s64 = 0;
-    if screen.rounded_scroll > 0 {
-        final_drawn_line_count = partial_lines_fitting_on_screen;
-    } else
-        final_drawn_line_count = complete_lines_fitting_on_screen;
+    {   
+        // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
+        // scrolled all the way to the top, allow one line to be cut off partially.
+        completely_visible, partially_visible := calculate_number_of_visible_lines(screen);
 
-    screen.first_line_to_draw = screen.rounded_scroll - (final_drawn_line_count - complete_lines_fitting_on_screen);
-    screen.last_line_to_draw  = screen.first_line_to_draw + final_drawn_line_count - 1;
+        if screen.rounded_scroll == 0 {
+            // If we have scrolled all the way to the top, the first line must be fully visible
+            partially_visible = 0;
+        }
 
-    // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
-    // the input line. If we are completely scrolled to the bottom, that line is shared between the
-    // backlog and the input line.
-    if screen.last_line_to_draw != screen.virtual_lines.count - 1    --screen.last_line_to_draw;
+        screen.first_line_to_draw = screen.rounded_scroll - (total_drawn_line_count - partial_drawn_line_count);
+        screen.last_line_to_draw  = screen.first_line_to_draw + total_drawn_line_count - 1;
 
-    // Set the appropriate screen space coordinates for the first backlog line to be drawn.
-    screen.first_line_x_position = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
-    screen.first_line_y_position = screen.rectangle[3] - (final_drawn_line_count - 1) * cmdx.font.line_height - OFFSET_FROM_SCREEN_BORDER; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
+        // If we are not completely scrolled to the bottom, then we need the last line on the screen to be
+        // the input line. If we are completely scrolled to the bottom, that line is shared between the
+        // backlog and the input line.
+        if screen.last_line_to_draw != screen.virtual_lines.count - 1    --screen.last_line_to_draw;
 
-    // If any of the lines above the first line to be rendered already wrapped around the backlog, that
-    // information needs to be stored for drawing each backlog line to properly handle color wrapping.
-    first_line_in_backlog := array_get(*screen.virtual_lines, 0);
-    first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
-    screen.line_wrapped_before_first = first_line_to_draw.range.first < first_line_in_backlog.range.first;
+        // Set the appropriate screen space coordinates for the first backlog line to be drawn.
+        screen.first_line_x_position = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
+        screen.first_line_y_position = screen.rectangle[3] - (total_drawn_line_count - 1) * cmdx.font.line_height - OFFSET_FROM_SCREEN_BORDER; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
+
+        // If any of the lines above the first line to be rendered already wrapped around the backlog, that
+        // information needs to be stored for drawing each backlog line to properly handle color wrapping.
+        first_line_in_backlog := array_get(*screen.virtual_lines, 0);
+        first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
+        screen.line_wrapped_before_first = first_line_to_draw.range.first < first_line_in_backlog.range.first;
+    }
 
     if screen.scrollbar_enabled {
         //
@@ -912,10 +915,7 @@ add_text :: (cmdx: *CmdX, screen: *Screen, text: string) {
         color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
         color_head.range.wrapped       = true;
         color_head.range.one_plus_last = after_wrap_length;
-        return;
-    }
-
-    if current_line.wrapped && projected_one_plus_last > current_line.first {
+    } else if current_line.wrapped && projected_one_plus_last > current_line.first {
         // If the current line still does entirely fit into the backlog, but we detect it in another way
         // (it would overlap itself), then we still need to cut off the line and use the complete backlog
         // for this line
@@ -935,26 +935,25 @@ add_text :: (cmdx: *CmdX, screen: *Screen, text: string) {
 
         color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
         color_head.range.one_plus_last = current_line.first;
-        return;
+    } else {
+        first_line := array_get(*screen.backlog_lines, 0);
+        if projected_one_plus_last > first_line.first {
+            // If the current line would flow into the next line in the backlog (which is actually the first line
+            // in the array), then that line will need to be removed.
+            to_remove_range := Backlog_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
+            current_line = remove_overlapping_lines(screen, to_remove_range);
+        }
+
+        // Copy the text content into the backlog
+        copy_memory(*screen.backlog[current_line.one_plus_last], text.data, text.count);
+
+        // The current line now has grown. Increase the backlog ranges
+        current_line.one_plus_last = current_line.one_plus_last + text.count;
+
+        color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
+        color_head.range.one_plus_last = current_line.one_plus_last;
+        color_head.range.wrapped = color_head.range.one_plus_last <= color_head.range.first;
     }
-
-    first_line := array_get(*screen.backlog_lines, 0);
-    if projected_one_plus_last > first_line.first {
-        // If the current line would flow into the next line in the backlog (which is actually the first line
-        // in the array), then that line will need to be removed.
-        to_remove_range := Backlog_Range.{ current_line.one_plus_last, projected_one_plus_last, false };
-        current_line = remove_overlapping_lines(screen, to_remove_range);
-    }
-
-    // Copy the text content into the backlog
-    copy_memory(*screen.backlog[current_line.one_plus_last], text.data, text.count);
-
-    // The current line now has grown. Increase the backlog ranges
-    current_line.one_plus_last = current_line.one_plus_last + text.count;
-
-    color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
-    color_head.range.one_plus_last = current_line.one_plus_last;
-    color_head.range.wrapped = color_head.range.one_plus_last <= color_head.range.first;
 }
 
 add_character :: (cmdx: *CmdX, screen: *Screen, character: u8) {
@@ -1050,6 +1049,13 @@ setup_x_positions_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, virtual_lin
 
 get_upper_y_position_for_virtual_line :: (cmdx: *CmdX, screen: *Screen, vertical_line_index: s64) -> s64 {
     return screen.first_line_y_position + (vertical_line_index - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.ascender;
+}
+
+calculate_number_of_visible_lines :: (screen: *Screen) -> s64, s64 {
+    active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
+    completely_visible := min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
+    partially_visible  := min(cast(s64) ceil(xx active_screen_height / xx cmdx.font.line_height), screen.virtual_lines.count);
+    return completely_visible, partially_visible;    
 }
 
 draw_backlog_text :: (cmdx: *CmdX, screen: *Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
