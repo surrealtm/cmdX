@@ -34,8 +34,8 @@ Screen :: struct {
     // Text Input
     text_input: Text_Input;
     history: [..]string;
-    history_index: s64 = -1; // -1 means no history is used
-    history_size: s64; // Similar to the backlog_size, this gets copied from the global cmdx setting.
+    history_index := -1; // -1 means no history is used
+    history_size  := 0; // Similar to the backlog_size, this gets copied from the global cmdx setting.
 
     // Auto complete
     auto_complete_options: [..]string;
@@ -46,8 +46,8 @@ Screen :: struct {
     // Backlog scrolling information
     target_scroll: f64; // The target scroll offset with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
     interpolated_scroll: f64; // This value interpolates towards the target scroll value
-    rounded_scroll: s64; // This is the interpolated_scroll rounded down
-    enable_auto_scroll: s64 = true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
+    rounded_scroll: s64; // This is the interpolated_scroll rounded down. Represents the first line (at the top) to be drawn.
+    enable_auto_scroll := true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
     
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
@@ -58,13 +58,14 @@ Screen :: struct {
 
     // Scrollbar data, which needs to be in sync for the logic and drawing
     scrollbar_enabled: bool; // The scroll bar only gets enabled when enough (virtual) lines are in the backlog to overflow the available screen space
-    scrollbar_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll bar
-    scrollbar_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
+    scrollbar_hitbox_rectangle: [4]s32 = ---; // Screen space rectangle which detects hovering for the scroll bar
     scrollbar_hitbox_hovered: bool;
+    scrollbar_visual_rectangle: [4]s32 = ---; // Screen space rectangle which is drawn on the screen this frame
     scrollbar_visual_color: Color; // The color with which to render the visual rectangle. Changes depending on the hover state
-    scrollknob_hitbox_rectangle: [4]s32; // Screen space rectangle which detects hovering for the scroll knob
-    scrollknob_visual_rectangle: [4]s32; // Screen space rectangle which is drawn on the screen this frame
+
+    scrollknob_hitbox_rectangle: [4]s32 = ---; // Screen space rectangle which detects hovering for the scroll knob
     scrollknob_hitbox_hovered: bool;
+    scrollknob_visual_rectangle: [4]s32 = ---; // Screen space rectangle which is drawn on the screen this frame
     scrollknob_visual_color: Color;
     scrollknob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
     scrollknob_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
@@ -78,6 +79,19 @@ Screen :: struct {
     win32: Win32 = ---;
 }
 
+Screen_Drawer :: struct {   
+    cursor_x: s64; // In screen space
+    cursor_y: s64; // In screen space
+
+    backlog_index: s64; // Character index into the backlog
+    backlog_index_wrapped: bool = false;
+
+    current_color: *Color_Range;
+    current_color_index: s64;
+
+    current_line: *Virtual_Line;
+    current_line_index: s64;
+}
 
 
 /* =========================== Screen API =========================== */
@@ -150,61 +164,105 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
 
     //
     // Draw all visible lines
-    // @Cleanup: This can be improved
     //
-    current_line_index := screen.first_line_to_draw;
-    cursor_x: s32 = screen.first_line_x_position;
-    cursor_y: s32 = screen.first_line_y_position;
+    drawer: Screen_Drawer;
+    drawer.cursor_x            = screen.first_line_x_position;
+    drawer.cursor_y            = screen.first_line_y_position;
+    drawer.current_line_index  = screen.first_line_to_draw;
+    drawer.current_color_index = 0;
+    
+    drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
+    set_foreground_color_for_color_range(cmdx, drawer.current_color);
 
-    wrapped_before := screen.line_wrapped_before_first;
-    color_range_index: s64 = 0;
-    color_range: Color_Range = array_get_value(*screen.backlog_colors, color_range_index);
-    set_foreground_color_for_color_range(cmdx, *color_range);
+    while drawer.current_line_index <= screen.last_line_to_draw {
+        drawer.current_line = array_get(*screen.virtual_lines, drawer.current_line_index);
+        drawer.backlog_index = drawer.current_line.range.first;
 
-    while current_line_index <= screen.last_line_to_draw {
-        line := array_get(*screen.virtual_lines, current_line_index);
-        backlog_range := line.range;
-
-        if !line.is_first_in_backlog_line {
-            // Indicate the wrapped line with a special character and some space
+        //
+        // Start this line by indicating whether it is wrapped or not
+        // @Cleanup: Only draw this if the specified overlay is toggled on, which it should be
+        // by default
+        //
+        if !drawer.current_line.is_first_in_backlog_line {
             previous_foreground_color := cmdx.renderer.foreground_color;
             flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
+            
             set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Scrollbar]);
-            render_single_character_with_font(*cmdx.font, 0xbb, cursor_x, cursor_y, draw_single_glyph, *cmdx.renderer);
-            cursor_x += OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+            render_single_character_with_font(*cmdx.font, 0xbb, drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer); // 0xbb is the double right arrow
             set_foreground_color(*cmdx.renderer, previous_foreground_color);                                 
+        
+            drawer.cursor_x += OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
         }
         
-        if backlog_range.wrapped {
-            // If this line wraps, then the line actually contains two parts. The first goes from the start
-            // until the end of the backlog, the second part starts at the beginning of the backlog and goes
-            // until the end of the line. It is easier for draw_backlog_split to do it like this.
-            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, backlog_range.first, screen.backlog_size, true, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
-            wrapped_before = true; // We have now wrapped a line, which is important for deciding whether a the cursor has passed a color range
-            cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, screen.backlog[screen.backlog_size - 1], screen.backlog[0]); // Since kerning cannot happen at the wrapping point automatically, we need to do that manually here.
-            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, 0, backlog_range.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
-        } else
-            cursor_x, cursor_y = draw_backlog_text(cmdx, screen, backlog_range.first, backlog_range.one_plus_last, false, *color_range_index, *color_range, cursor_x, cursor_y, wrapped_before);
+        //
+        // Draw the actual characters of this line
+        //
+        while !backlog_range_empty(drawer.current_line.range) && !cursor_after_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.current_line.range) {
+            //
+            // Find the active color range for this character. We may need to skip multiple ranges for the very
+            // first character to be drawn, since we have no mapping from virtual lines to color ranges.
+            // Empty lines do not create color ranges, therefore if we have an empty line at the end of the
+            // backlog, then there is no color range left which we could enable for this empty line.
+            //
+            while cursor_after_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.current_color.range) && drawer.current_color_index + 1 < screen.backlog_colors.count {
+                ++drawer.current_color_index;
+                drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
+                set_foreground_color_for_color_range(cmdx, drawer.current_color);
+            }
 
-        if cmdx.draw_overlays & .Line_Backgrounds {
-            draw_quad(*cmdx.renderer, screen.first_line_x_position, cursor_y - cmdx.font.line_height, cursor_x, cursor_y, .{ 255, 255, 0, 255 });
+            //
+            // Render the character
+            //
+            character := screen.backlog[drawer.backlog_index];
+            render_single_character_with_font(*cmdx.font, character, drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer);
+
+            //
+            // Render the character overlay
+            //
+            if cmdx.draw_overlays & .Whitespaces && character == ' ' {
+                set_background_color(*cmdx.renderer, .{ 255, 0, 255, 255 });
+                render_single_character_with_font(*cmdx.font, '#', drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer);
+                set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
+            }
+            
+            //
+            // Advance the backlog index, apply kerning to the cursor
+            //
+            increase_backlog_cursor(screen, *drawer.backlog_index, *drawer.backlog_index_wrapped);
+
+            if !cursor_after_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.current_line.range) {
+                drawer.cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[drawer.backlog_index]);
+            } else {
+                char_width, char_height := query_glyph_size(*cmdx.font, character);
+                drawer.cursor_x += char_width;
+            }
         }
 
+        //
+        // Indicate the area background if this overlay is on
+        //
+        if cmdx.draw_overlays & .Line_Backgrounds {
+            flush_font_buffer(*cmdx.renderer); // Make sure all text in this line has been rendered
+            draw_quad(*cmdx.renderer, screen.first_line_x_position, drawer.cursor_y - cmdx.font.line_height, drawer.cursor_x, drawer.cursor_y, .{ 255, 255, 0, 255 });
+        }
+
+        //
         // If this is not the last line in the backlog, position the cursor on the next line.
         // If it is the last line, then the text input should be appened to this line.
-        if current_line_index + 1 != screen.virtual_lines.count {
-            cursor_y += cmdx.font.line_height;
-            cursor_x = screen.first_line_x_position;
+        //
+        if drawer.current_line_index + 1 != screen.virtual_lines.count {
+            drawer.cursor_y += cmdx.font.line_height;
+            drawer.cursor_x = screen.first_line_x_position;
         }
 
-        ++current_line_index;
+        ++drawer.current_line_index;
     }
 
     //
     // Draw the text input
     //
     prefix_string := get_prefix_string(screen, *cmdx.frame_allocator);
-    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, cursor_x, cursor_y);
+    draw_text_input(*cmdx.renderer, cmdx.active_theme, *cmdx.font, *screen.text_input, prefix_string, drawer.cursor_x, drawer.cursor_y);
 
     //
     // Draw the scroll bar
@@ -519,12 +577,14 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Update the text input's cursor rendering data
     //
-    text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
-    text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
-    cursor_alpha_previous := screen.text_input.cursor_alpha;
-    set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
-    update_text_input_rendering_data(*screen.text_input);
-    if cursor_alpha_previous != screen.text_input.cursor_alpha    draw_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+    {
+        text_until_cursor := get_string_view_until_cursor_from_text_input(*screen.text_input);
+        text_until_cursor_width, text_until_cursor_height := query_text_size(*cmdx.font, text_until_cursor);
+        cursor_alpha_previous := screen.text_input.cursor_alpha;
+        set_text_input_target_position(*screen.text_input, xx text_until_cursor_width);
+        update_text_input_rendering_data(*screen.text_input);
+        if cursor_alpha_previous != screen.text_input.cursor_alpha    draw_next_frame(cmdx); // If the cursor changed it's blinking state, then we need to render the next frame for a smooth user experience. The cursor does not change if no input happened for a few seconds.
+    }
 }
 
 
@@ -793,6 +853,13 @@ clear_virtual_lines :: (cmdx: *CmdX, screen: *Screen) {
 }
 
 
+set_foreground_color_for_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
+    if color_range.color_index != -1 
+        set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[color_range.color_index]);
+    else 
+        set_foreground_color(*cmdx.renderer, color_range.true_color);
+}
+
 set_color_internal :: (screen: *Screen, true_color: Color, color_index: Color_Index) {
     if screen.backlog_colors.count {
         color_head := array_get(*screen.backlog_colors, screen.backlog_colors.count - 1);
@@ -986,56 +1053,6 @@ calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 
     return completely_visible, partially_visible;
 }
 
-// @Cleanup: Similar to draw_backlog, I feel this could be cleaner...
-draw_backlog_text :: (cmdx: *CmdX, screen: *Screen, start: s64, end: s64, line_wrapped: bool, color_range_index: *s64, color_range: *Color_Range, cursor_x: s64, cursor_y: s64, wrapped_before: bool) -> s64, s64 {
-    set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
-
-    for cursor := start; cursor < end; ++cursor {
-        character := screen.backlog[cursor];
-
-        while cursor_after_backlog_range(cursor, wrapped_before, color_range.range) && ~color_range_index + 1 < screen.backlog_colors.count {
-            // Increase the current color range
-            ~color_range_index += 1;
-            ~color_range = array_get_value(*screen.backlog_colors, ~color_range_index);
-
-            // Set the actual foreground color.
-            set_foreground_color_for_color_range(cmdx, color_range);
-        }
-
-        render_single_character_with_font(*cmdx.font, character, cursor_x, cursor_y, draw_single_glyph, *cmdx.renderer);
-
-        if cmdx.draw_overlays & .Whitespaces && character == ' ' {
-            set_background_color(*cmdx.renderer, .{ 255, 0, 255, 255 });
-            render_single_character_with_font(*cmdx.font, '#', cursor_x, cursor_y, draw_single_glyph, *cmdx.renderer);
-            set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
-        }
-
-        if cursor + 1 < end {
-            cursor_x += query_glyph_kerned_horizontal_advance(*cmdx.font, character, screen.backlog[cursor + 1]);
-        } else if !line_wrapped {
-            // If this is the very last character in the backlog to be rendered, then add the horizontal advance
-            // so that the input cursor is rendered next to this character.
-            // If the line is wrapped, then the caller properly handles kerning to the next character in the
-            // line, so we don't have to handle that here.
-            cursor_x += query_glyph_horizontal_advance(*cmdx.font, character);
-        }
-    }
-
-    if end == color_range.range.one_plus_last && color_range_index + 1 < screen.backlog_colors.count {
-        // There is an edge case where the color range's one_plus_last == backlog_size, and so the cursor
-        // never reaches one_plus_last in the above loop, therefore the color range never gets skipped.
-        // Deal with this edge case here.
-        ~color_range_index += 1;
-        ~color_range = array_get_value(*screen.backlog_colors, ~color_range_index);
-
-        // Set the actual foreground color.
-        set_foreground_color_for_color_range(cmdx, color_range);
-    }
-
-    return cursor_x, cursor_y;
-}
-
-
 /* =========================== Backlog Range =========================== */
 
 backlog_range_empty :: (range: Backlog_Range) -> bool {
@@ -1138,13 +1155,15 @@ cursor_after_backlog_range :: (cursor: s64, wrapped_before: bool, range: Backlog
     return false;
 }
 
-compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
-    return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
+increase_backlog_cursor :: (screen: *Screen, cursor: *s64, wrapped: *bool) {
+    if ~cursor == screen.backlog_size - 1 {
+        ~cursor  = 0;
+        ~wrapped = true;
+    } else {
+        ~cursor += 1;
+    }
 }
 
-set_foreground_color_for_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
-    if color_range.color_index != -1 
-        set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[color_range.color_index]);
-    else 
-        set_foreground_color(*cmdx.renderer, color_range.true_color);
+compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
+    return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
