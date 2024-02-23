@@ -318,7 +318,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             // Scroll bar is drawn, decrease the active screen width. We cannot use the scrollbar rectangle
             // here, since that gets build after this procedure, therefore referencing the previous frame
             // which is invalid if the window was resized.
-            active_screen_width = screen.rectangle[2] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
+            active_screen_width = screen.rectangle[2] - screen.rectangle[0] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
         }
 
         for i := 0; i < screen.backlog_lines.count; ++i {
@@ -1167,3 +1167,5 @@ increase_backlog_cursor :: (screen: *Screen, cursor: *s64, wrapped: *bool) {
 compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
+
+// @Incomplete: Line wrapping does not happen on the second screen?
