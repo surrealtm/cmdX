@@ -464,6 +464,7 @@ overlay :: (cmdx: *CmdX, string_flag: string) {
 
     if compare_strings(string_flag, "line_backgrounds") flag = .Line_Backgrounds;
     else if compare_strings(string_flag, "whitespaces") flag = .Whitespaces;
+    else if compare_strings(string_flag, "line_wrapping") flag = .Line_Wrapping; // This right now is not saved in the config, but it probably should be?
     else add_formatted_line(cmdx, cmdx.active_screen, "The specified overlay flag '%' does not exist.", string_flag);
 
     cmdx.draw_overlays ^= flag; // Toggle the flag in the bitfield

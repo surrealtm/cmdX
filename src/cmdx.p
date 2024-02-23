@@ -58,6 +58,7 @@ Draw_Overlay :: enum {
     None             :: 0;
     Line_Backgrounds :: 1;
     Whitespaces      :: 2;
+    Line_Wrapping    :: 4;
 }
 
 Theme :: struct {
@@ -84,7 +85,7 @@ CmdX :: struct {
     draw_ui: bool; // Currently no UI is actually implemented, therefore this will always be false. Keep this for now, in case we want some UI back in the future.
     ui: UI;
     disabled_title_bar: bool = false; // The user can toggle the window's title bar, since not having it may look cleaner, but disables window movement.
-    draw_overlays: Draw_Overlay = .None;
+    draw_overlays: Draw_Overlay = .Line_Wrapping;
 
     // Font
     font_size: s64 = 15;
@@ -106,6 +107,7 @@ CmdX :: struct {
     backlog_size:  s64 = 65535; // The size of the backlog for each screen in bytes
     scroll_speed:  s64 = 3;     // In lines per mouse wheel turn
     requested_fps: f32 = 60;
+    enable_line_wrapping: bool = true;
 
     // Screens
     screens: Linked_List(Screen);
@@ -651,19 +653,20 @@ cmdx :: () -> s32 {
     enable_high_resolution_time(); // Enable high resolution sleeping to keep a steady frame rate
 
     // Set up all the required config properties, and read the config file if it exists
-    create_s64_property(*cmdx.config,    "backlog-size",      *cmdx.backlog_size);
-    create_s64_property(*cmdx.config,    "history-size",      *cmdx.history_size);
-    create_s64_property(*cmdx.config,    "scroll-speed",      *cmdx.scroll_speed);
-    create_string_property(*cmdx.config, "theme",             *cmdx.active_theme_name);
-    create_string_property(*cmdx.config, "font-name",         *cmdx.font_path);
-    create_s64_property(*cmdx.config,    "font-size",         *cmdx.font_size);
-    create_bool_property(*cmdx.config,   "window-borderless", *cmdx.disabled_title_bar);
-    create_s32_property(*cmdx.config,    "window-x",          *cmdx.window.xposition);
-    create_s32_property(*cmdx.config,    "window-y",          *cmdx.window.yposition);
-    create_u32_property(*cmdx.config,    "window-width",      *cmdx.window.width);
-    create_u32_property(*cmdx.config,    "window-height",     *cmdx.window.height);
-    create_bool_property(*cmdx.config,   "window-maximized",  *cmdx.window.maximized);
-    create_f32_property(*cmdx.config,    "window-fps",        *cmdx.requested_fps);
+    create_s64_property(*cmdx.config,    "backlog-size",         *cmdx.backlog_size);
+    create_s64_property(*cmdx.config,    "history-size",         *cmdx.history_size);
+    create_s64_property(*cmdx.config,    "scroll-speed",         *cmdx.scroll_speed);
+    create_bool_property(*cmdx.config,   "enable-line-wrapping", *cmdx.enable_line_wrapping);
+    create_string_property(*cmdx.config, "theme",                *cmdx.active_theme_name);
+    create_string_property(*cmdx.config, "font-name",            *cmdx.font_path);
+    create_s64_property(*cmdx.config,    "font-size",            *cmdx.font_size);
+    create_bool_property(*cmdx.config,   "window-borderless",    *cmdx.disabled_title_bar);
+    create_s32_property(*cmdx.config,    "window-x",             *cmdx.window.xposition);
+    create_s32_property(*cmdx.config,    "window-y",             *cmdx.window.yposition);
+    create_u32_property(*cmdx.config,    "window-width",         *cmdx.window.width);
+    create_u32_property(*cmdx.config,    "window-height",        *cmdx.window.height);
+    create_bool_property(*cmdx.config,   "window-maximized",     *cmdx.window.maximized);
+    create_f32_property(*cmdx.config,    "window-fps",           *cmdx.requested_fps);
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer

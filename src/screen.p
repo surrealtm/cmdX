@@ -180,10 +180,8 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
 
         //
         // Start this line by indicating whether it is wrapped or not
-        // @Cleanup: Only draw this if the specified overlay is toggled on, which it should be
-        // by default
         //
-        if !drawer.current_line.is_first_in_backlog_line {
+        if cmdx.draw_overlays & .Line_Wrapping && !drawer.current_line.is_first_in_backlog_line {
             previous_foreground_color := cmdx.renderer.foreground_color;
             flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
             
@@ -312,13 +310,19 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // Start rebuilding the virtual line array for the current backlog
         // @Incomplete: Support disabling line wrapping through some config option
         //
-        active_screen_width := screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
-
-        if screen.scrollbar_enabled {
+        active_screen_width: s64 = ---;
+        
+        if !cmdx.enable_line_wrapping {
+            // The logic of querying the character's x position still needs to happen, so we simply "fake" this
+            // by saying the screen is infinitely large and therefore no wrapping ever needs to happen.
+            active_screen_width = MAX_S64;
+        } else if screen.scrollbar_enabled {
             // Scroll bar is drawn, decrease the active screen width. We cannot use the scrollbar rectangle
             // here, since that gets build after this procedure, therefore referencing the previous frame
             // which is invalid if the window was resized.
             active_screen_width = screen.rectangle[2] - screen.rectangle[0] - SCROLL_BAR_WIDTH - OFFSET_FROM_SCREEN_BORDER * 2;
+        } else {
+            active_screen_width = screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
         }
 
         for i := 0; i < screen.backlog_lines.count; ++i {
@@ -1168,4 +1172,4 @@ compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: 
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
 
-// @Incomplete: Line wrapping does not happen on the second screen?
+// @Cleanup: The scroll bar glitches when partial_lines_visible == virtual_line_count, but complete_lines_visible == virtual_line_count - 1
