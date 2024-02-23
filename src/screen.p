@@ -448,14 +448,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     {   
         // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
         // scrolled all the way to the top, allow one line to be cut off partially.
-        if screen.rounded_scroll > 0 {
-            completely_visible, partially_visible := calculate_number_of_visible_lines(cmdx, screen);
+        completely_visible, partially_visible := calculate_number_of_visible_lines(cmdx, screen);
         
+        if screen.rounded_scroll > 0 {       
             screen.first_line_to_draw = screen.rounded_scroll - (partially_visible - completely_visible);
             screen.last_line_to_draw  = screen.first_line_to_draw + partially_visible - 1;
         } else {
-            completely_visible, partially_visible := calculate_number_of_visible_lines(cmdx, screen);
-        
             screen.first_line_to_draw = screen.rounded_scroll;
             screen.last_line_to_draw  = screen.first_line_to_draw + completely_visible - 1;
         }
@@ -478,7 +476,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // Enable the scroll bar depending on the number of lines drawn vs. the number of lines present
         previous_scrollbar_enabled := screen.scrollbar_enabled;
 
-        screen.scrollbar_enabled = screen.last_line_to_draw - screen.first_line_to_draw + 1 < screen.virtual_lines.count;
+        screen.scrollbar_enabled = completely_visible < screen.virtual_lines.count;
         if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;        
     }
 
@@ -1171,5 +1169,3 @@ increase_backlog_cursor :: (screen: *Screen, cursor: *s64, wrapped: *bool) {
 compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
-
-// @Cleanup: The scroll bar glitches when partial_lines_visible == virtual_line_count, but complete_lines_visible == virtual_line_count - 1
