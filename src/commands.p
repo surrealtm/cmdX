@@ -32,15 +32,15 @@ get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
     // If the path appendation is empty, then just take the current directory
     if file_path.count == 0    return cmdx.active_screen.current_directory;
 
-    // If the path supplied ends on a slash, it is effectively the same as without the slash, so just ignore it.
-    while file_path[file_path.count - 1] == '/' || file_path[file_path.count - 1] == '\\' file_path.count -= 1;
-    
     // If the path is already absolute, then do not apply the relative working directory
     cstring := to_cstring(*cmdx.frame_allocator, file_path);
     if !PathIsRelativeA(cstring) {
         return get_absolute_path(*cmdx.frame_allocator, file_path); 
     }
-        
+
+    // If the path supplied ends on a slash, it is effectively the same as without the slash, so just ignore it.
+    while file_path[file_path.count - 1] == '/' || file_path[file_path.count - 1] == '\\' file_path.count -= 1;
+            
     // Concatenate the relative path with the current directory of cmdx.
     builder: String_Builder = ---;
     create_string_builder(*builder, *cmdx.frame_allocator);
@@ -523,10 +523,11 @@ ls :: (cmdx: *CmdX, directory: string) {
     
     add_formatted_line(cmdx, cmdx.active_screen, "Contents of folder '%':", complete_directory);
     
-    files := get_files_in_folder(*cmdx.frame_allocator, complete_directory, false);
+    files := get_files_in_folder(*cmdx.frame_allocator, complete_directory, .Non_Recursive | .Files_And_Folders);
     
     for i := 0; i < files.count; ++i {
-        file_name := array_get_value(*files, i);
+        full_path := array_get_value(*files, i);
+        file_name := substring_view(full_path, complete_directory.count + 1, full_path.count);
         add_formatted_line(cmdx, cmdx.active_screen, " > %", file_name);
     }
 }

@@ -678,26 +678,24 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     if slash_found && last_slash > directory_start {
         // If the user has already supplied a folder (e.g. some/path/file_), then get the files in that
         // directory, not the current one.
-        files_directory = get_path_relative_to_cd(cmdx, substring_view(screen.text_input.buffer, directory_start, last_slash));
+        files_directory = get_path_relative_to_cd(cmdx, substring_view(screen.text_input.buffer, directory_start, last_slash + 1));
     }
 
-    files := get_files_in_folder(*cmdx.frame_allocator, files_directory, false);
+    files := get_files_in_folder(*cmdx.frame_allocator, files_directory, .Non_Recursive | .Files_And_Folders);
 
     for i := 0; i < files.count; ++i {
-        file := array_get_value(*files, i);
-        if string_starts_with(file, text_to_complete) {
-            // @Incomplete: This is currently broken, because get_files_in_folder returns the full path.
+        full_path := array_get_value(*files, i);
+        file_name := substring_view(full_path, files_directory.count + 1, full_path.count);
+        
+        if string_starts_with(file_name, text_to_complete) {
             // Check if the given path is actually a folder. If so, then append a final slash
             // to it, to make it easier to just auto-complete to a path without having to type the slashes
             // themselves.
-            full_path := concatenate_strings(*cmdx.frame_allocator, files_directory, "\\");
-            full_path = concatenate_strings(*cmdx.frame_allocator, full_path, file);
-
             file_name_copy: string = ---;
             if folder_exists(full_path) {
-                file_name_copy = concatenate_strings(*cmdx.global_allocator, file, "/");
+                file_name_copy = concatenate_strings(*cmdx.global_allocator, file_name, "/");
             } else
-                file_name_copy = copy_string(*cmdx.global_allocator, file);
+                file_name_copy = copy_string(*cmdx.global_allocator, file_name);
 
             array_add(*screen.auto_complete_options, file_name_copy);
         }
@@ -1169,3 +1167,6 @@ increase_backlog_cursor :: (screen: *Screen, cursor: *s64, wrapped: *bool) {
 compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
+
+// @Incomplete: The C backend is broken right now, since it reports a Memory Pool Merging assertion on the
+// first 'help' command??
