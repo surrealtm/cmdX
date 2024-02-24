@@ -1,7 +1,8 @@
 Selection_State :: enum {
     Disabled;
-    During_Selection;
-    After_Selection;
+    Starting_Selection; // The user started pressing the left button but hasn't moved the cursor over more than the starting character. Might just be a long press.
+    During_Selection; // The user has dragged the selection over more than one character and is still dragging.
+    After_Selection; // The user has done the selection, keep it until the next button press but don't change it.
 }
 
 Screen_Drawer :: struct {   
@@ -16,6 +17,9 @@ Screen_Drawer :: struct {
 
     current_line: *Virtual_Line;
     current_line_index: s64;
+
+    selection_range: Backlog_Range;
+    currently_inside_selection: bool;
 }
 
 Backlog_Range :: struct {
@@ -179,6 +183,8 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     set_scissors(screen.rectangle[0], screen.rectangle[1], screen.rectangle[2] - screen.rectangle[0], screen.rectangle[3] - screen.rectangle[1], cmdx.window.height);
 
+    draw_selection := screen.selection_state != .Disabled && screen.selection_state != .Starting_Selection;
+
     //
     // Draw all visible lines
     //
@@ -190,6 +196,14 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     
     drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
     set_foreground_color_for_color_range(cmdx, drawer.current_color);
+
+    if draw_selection {
+        if screen.selection_end.l > screen.selection_start.l || screen.selection_end.c >= screen.selection_start.c {
+            drawer.selection_range = .{ screen.selection_start.b, screen.selection_end.b + 1, screen.selection_start.b > screen.selection_end.b };
+        } else {
+            drawer.selection_range = .{ screen.selection_end.b, screen.selection_start.b, screen.selection_end.b > screen.selection_start.b };
+        }
+    }
 
     while drawer.current_line_index <= screen.last_line_to_draw {
         drawer.current_line = array_get(*screen.virtual_lines, drawer.current_line_index);
@@ -223,6 +237,17 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
                 ++drawer.current_color_index;
                 drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
                 set_foreground_color_for_color_range(cmdx, drawer.current_color);
+            }
+
+            //
+            // If we are under the current backlog selection, then set the proper background color.
+            //
+            if draw_selection && cursor_inside_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.selection_range) {
+                set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Selection]);
+                drawer.currently_inside_selection = true;
+            } else if drawer.currently_inside_selection {
+                set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
+                drawer.currently_inside_selection = false;
             }
 
             //
@@ -603,11 +628,14 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         //
         // Track the proper state of the selection
         //
+        just_started_selection := false;
+
         if mouse_over_rectangle(cmdx, screen.rectangle) && !screen.scrollbar_hitbox_hovered && !screen.scrollknob_dragged && cmdx.window.button_pressed[Button_Code.Left] {
-            screen.selection_state = .During_Selection;
+            screen.selection_state = .Starting_Selection;
+            just_started_selection = true;
         }
 
-        if cmdx.window.button_released[Button_Code.Left] && screen.selection_state == .During_Selection {
+        if !cmdx.window.button_held[Button_Code.Left] && (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
             if screen.selection_start.b == screen.selection_end.b {
                 // Empty selection, cancel
                 screen.selection_state = .Disabled;
@@ -616,11 +644,24 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             }
         }
 
-        if screen.selection_state == .During_Selection && cmdx.window.mouse_y >= screen.first_line_y_position - cmdx.font.ascender && cmdx.window.mouse_y <= screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
-            // Figure out the currently hovered selection point
+        //
+        // Figure out the currently hovered selection point
+        // 
+        if (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) && cmdx.window.mouse_y >= screen.first_line_y_position - cmdx.font.ascender && cmdx.window.mouse_y <= screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
             hovered_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
             hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
             hovered_backlog, hovered_character := get_character_index_in_virtual_line_for_screen_position(screen, hovered_line, cmdx.window.mouse_x);
+        
+            if just_started_selection {
+                screen.selection_start = .{ hovered_backlog, hovered_line_index, hovered_character };
+                screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
+                draw_next_frame(cmdx);
+            } else if screen.selection_end.b != hovered_backlog || screen.selection_end.l != hovered_line_index || screen.selection_end.c != hovered_character {
+                screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
+                draw_next_frame(cmdx);
+            }
+
+            if screen.selection_start.b != screen.selection_end.b    screen.selection_state = .During_Selection;
         }
     }
 
@@ -1210,6 +1251,12 @@ increase_backlog_range :: (screen: *Screen, range: *Backlog_Range) {
         range.one_plus_last = 0;
         range.wrapped = true;
     }
+}
+
+cursor_inside_backlog_range :: (cursor: s64, wrapped_before: bool, range: Backlog_Range) -> bool {
+    if range.wrapped return (cursor >= range.first || (wrapped_before && cursor < range.one_plus_last));
+
+    return cursor >= range.first && cursor < range.one_plus_last;
 }
 
 cursor_after_backlog_range :: (cursor: s64, wrapped_before: bool, range: Backlog_Range) -> bool {
