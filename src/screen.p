@@ -44,8 +44,8 @@ Screen :: struct {
     auto_complete_dirty := false; // This gets set whenever the auto-complete options are out of date and need to be reevaluated if the user requests auto-complete. Gets set either on text input, or when an option gets implicitely "accepted"
 
     // Backlog scrolling information
-    target_scroll: f64; // The target scroll offset with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
-    interpolated_scroll: f64; // This value interpolates towards the target scroll value
+    target_scroll: f32; // The target scroll offset with fractional values for smoother cross-frame scrolling (e.g. when using the touchpad)
+    interpolated_scroll: f32; // This value interpolates towards the target scroll value
     rounded_scroll: s64; // This is the interpolated_scroll rounded down. Represents the first line (at the top) to be drawn.
     enable_auto_scroll := true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
     
@@ -68,7 +68,7 @@ Screen :: struct {
     scrollknob_visual_rectangle: [4]s32 = ---; // Screen space rectangle which is drawn on the screen this frame
     scrollknob_visual_color: Color;
     scrollknob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
-    scrollknob_drag_offset: f64; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
+    scrollknob_drag_offset: f32; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
 
     // Subprocess data
     current_directory: string;
@@ -308,7 +308,6 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         
         //
         // Start rebuilding the virtual line array for the current backlog
-        // @Incomplete: Support disabling line wrapping through some config option
         //
         active_screen_width: s64 = ---;
         
@@ -413,7 +412,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         if (cmdx.hovered_screen == screen || cmdx.window.key_held[Key_Code.Shift]) && !cmdx.window.key_held[Key_Code.Control] {
             // Only actually do mouse scrolling if this is either the hovered screen, or the shift key is held,
             // indicating that all screens should be scrolled simultaneously
-            screen.target_scroll -= cast(f64) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
+            screen.target_scroll -= cast(f32) cmdx.window.mouse_wheel_turns * xx cmdx.scroll_speed;
         }
 
         if cmdx.active_screen == screen {
@@ -435,8 +434,8 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // clamped with the correct values.
         highest_allowed_scroll    := screen.virtual_lines.count - completely_visible;
         screen.target_scroll       = clamp(screen.target_scroll, 0, xx highest_allowed_scroll);
-        screen.interpolated_scroll = clamp(damp(screen.interpolated_scroll, screen.target_scroll, 10, xx cmdx.window.frame_time), 0, xx highest_allowed_scroll);
-        screen.rounded_scroll      = clamp(cast(s64) round(screen.interpolated_scroll), 0, highest_allowed_scroll);
+        screen.interpolated_scroll = clamp(damp(screen.interpolated_scroll, screen.target_scroll, cmdx.scroll_interpolation, cmdx.window.frame_time), 0, xx highest_allowed_scroll);
+        screen.rounded_scroll      = clamp(cast(s64) roundf(screen.interpolated_scroll), 0, highest_allowed_scroll);
         screen.enable_auto_scroll  = screen.target_scroll == xx highest_allowed_scroll;
 
         if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
@@ -498,10 +497,10 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                                               screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER, 
                                               screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER + scrollbar_hitbox_height };
 
-        knob_offset_percentage := cast(f64) round(screen.target_scroll) / cast(f64) screen.virtual_lines.count;
-        knob_height_percentage := cast(f64) (completely_visible) / cast(f64) screen.virtual_lines.count;
-        scrollknob_hitbox_offset: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * knob_offset_percentage);
-        scrollknob_hitbox_height: s64 = cast(s32) (cast(f64) scrollbar_hitbox_height * knob_height_percentage);
+        knob_offset_percentage := cast(f32) roundf(screen.target_scroll) / cast(f32) screen.virtual_lines.count;
+        knob_height_percentage := cast(f32)       (completely_visible)   / cast(f32) screen.virtual_lines.count;
+        scrollknob_hitbox_offset: s64 = cast(s32) (cast(f32) scrollbar_hitbox_height * knob_offset_percentage);
+        scrollknob_hitbox_height: s64 = cast(s32) (cast(f32) scrollbar_hitbox_height * knob_height_percentage);
 
         screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0], 
                                                screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset, 
@@ -532,8 +531,8 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         }
 
         if scrollknob_dragged {
-            target_drag_position: f64 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
-            target_inside_scrollbar_area: f64 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
+            target_drag_position: f32 = xx (cmdx.window.mouse_y - screen.scrollbar_hitbox_rectangle[1]) - screen.scrollknob_drag_offset;
+            target_inside_scrollbar_area: f32 = target_drag_position / xx (screen.scrollbar_hitbox_rectangle[3] - screen.scrollbar_hitbox_rectangle[1]);
 
             screen.target_scroll = target_inside_scrollbar_area * xx screen.virtual_lines.count;
         }
@@ -1167,6 +1166,3 @@ increase_backlog_cursor :: (screen: *Screen, cursor: *s64, wrapped: *bool) {
 compare_color_ranges :: (existing: Color_Range, true_color: Color, color_index: Color_Index) -> bool {
     return existing.color_index == color_index && (color_index != -1 || compare_colors(existing.true_color, true_color));
 }
-
-// @Incomplete: The C backend is broken right now, since it reports a Memory Pool Merging assertion on the
-// first 'help' command??

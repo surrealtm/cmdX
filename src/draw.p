@@ -252,8 +252,10 @@ draw_text_input :: (renderer: *Renderer, theme: *Theme, font: *Font, input: *Tex
 /* Helper Procedures */
 
 
-damp :: (from: f64, to: f64, lambda: f64, delta: f64) -> f64 {
-    lerp := 1 - exp(-lambda * delta);    
+damp :: (from: f32, to: f32, lambda: f32, delta: f32) -> f32 {
+    if lambda == 0 return to;
+
+    lerp := 1 - expf(-lambda * delta);    
     return to * lerp + from * (1 - lerp);
 }
 

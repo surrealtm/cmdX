@@ -103,10 +103,11 @@ CmdX :: struct {
 
     // Global config variables. The history and backlog size are copied into each screen for easier access
     // and also to have a definitive number which is correct, when the sizes get changed by the config.
-    history_size:  s64 = 64;    // The number of history lines to keep
-    backlog_size:  s64 = 65535; // The size of the backlog for each screen in bytes
-    scroll_speed:  s64 = 3;     // In lines per mouse wheel turn
-    requested_fps: f32 = 60;
+    history_size:         s64 = 64;    // The number of history lines to keep
+    backlog_size:         s64 = 65535; // The size of the backlog for each screen in bytes
+    scroll_speed:         s64 = 3;     // In lines per mouse wheel turn
+    scroll_interpolation: f32 = 30;    // How fast the scrolling should interpolate towards the target. 0 Means snapping
+    requested_fps:        f32 = 60;
     enable_line_wrapping: bool = true;
 
     // Screens
@@ -640,7 +641,10 @@ cmdx :: () -> s32 {
     cmdx.commands.allocator = *cmdx.global_allocator;
     cmdx.screens.allocator  = *cmdx.global_allocator;
 
-    cmdx.startup_directory = copy_string(*cmdx.global_allocator, get_working_directory()); // @@Leak: get_working_directory() allocates on the Default_Allocator.
+    working_directory := get_working_directory();
+    defer deallocate_string(Default_Allocator, *working_directory);
+
+    cmdx.startup_directory = copy_string(*cmdx.global_allocator, working_directory);
 
     // Register all commands
     register_all_commands(*cmdx);
@@ -656,6 +660,7 @@ cmdx :: () -> s32 {
     create_s64_property(*cmdx.config,    "backlog-size",         *cmdx.backlog_size);
     create_s64_property(*cmdx.config,    "history-size",         *cmdx.history_size);
     create_s64_property(*cmdx.config,    "scroll-speed",         *cmdx.scroll_speed);
+    create_f32_property(*cmdx.config,    "scroll-interpolation", *cmdx.scroll_interpolation);
     create_bool_property(*cmdx.config,   "enable-line-wrapping", *cmdx.enable_line_wrapping);
     create_string_property(*cmdx.config, "theme",                *cmdx.active_theme_name);
     create_string_property(*cmdx.config, "font-name",            *cmdx.font_path);
