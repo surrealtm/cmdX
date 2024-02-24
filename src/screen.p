@@ -186,7 +186,65 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     draw_selection := screen.selection_state != .Disabled && screen.selection_state != .Starting_Selection;
 
     //
-    // Draw all visible lines
+    // Draw a proper background behind all selected lines.
+    //
+    if draw_selection {
+        l0, l1, c0, c1: s64 = ---;
+        appendix := query_glyph_horizontal_advance(*cmdx.font, ' ') * 2; // The space to append to the selection background at the end of each line
+
+        if screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c) {
+            l0 = screen.selection_start.l;
+            c0 = screen.selection_start.c;
+            l1 = screen.selection_end.l;
+            c1 = screen.selection_end.c + 1;
+        } else {
+            l0 = screen.selection_end.l;
+            c0 = screen.selection_end.c;
+            l1 = screen.selection_start.l;
+            c1 = screen.selection_start.c;
+        }        
+
+        l0 = max(l0, screen.first_line_to_draw);
+        l1 = min(l1, screen.last_line_to_draw);
+
+        for i := l0; i <= l1; ++i {
+            l := array_get(*screen.virtual_lines, i);
+
+            x0, y0, x1, y1: s64 = ---;
+
+            y1 = screen.first_line_y_position + (i - screen.first_line_to_draw) * cmdx.font.line_height - cmdx.font.descender;
+            y0 = y1 - cmdx.font.line_height;
+
+            lc0 := 0;
+            lc1 := l.x.count;
+
+            if i == l0 lc0 = c0;
+            if i == l1 lc1 = c1;
+
+            if lc0 < l.x.count {
+                x0 = l.x[lc0];
+            } else {
+                x0 = OFFSET_FROM_SCREEN_BORDER;
+            }
+            
+            if lc1 < l.x.count {
+                x1 = l.x[lc1];
+            } else if l.x.count > 0 {
+                x1 = l.x[l.x.count - 1];
+            } else {
+                x1 = x0;
+            }
+
+            // If this isn't the input line, and we have selected the entire end of this
+            // line, add a little more width to the background.
+            if lc1 >= l.x.count && i < screen.virtual_lines.count - 1  x1 += appendix;
+
+            draw_quad(*cmdx.renderer, x0, y0, x1, y1, cmdx.active_theme.colors[Color_Index.Selection]);
+        }
+    }
+
+    //
+    // Draw all visible lines.
     //
     drawer: Screen_Drawer;
     drawer.cursor_x            = screen.first_line_x_position;
@@ -672,10 +730,8 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 hovered_character = 0;
             }
 
-            // @Incomplete:
-            // Sometimes the selection gets fucked up, e.g. the first line isn't highlighted when dragging
-            // the selection up, instead the last line gets selected...
-
+            // If we just started dragging, then this point represents both the start and the end.
+            // Otherwise, just update the selection end.
             if just_started_selection {
                 screen.selection_start = .{ hovered_backlog, hovered_line_index, hovered_character };
                 screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
