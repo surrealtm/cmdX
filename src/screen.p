@@ -1,3 +1,23 @@
+Selection_State :: enum {
+    Disabled;
+    During_Selection;
+    After_Selection;
+}
+
+Screen_Drawer :: struct {   
+    cursor_x: s64; // In screen space
+    cursor_y: s64; // In screen space
+
+    backlog_index: s64; // Character index into the backlog
+    backlog_index_wrapped: bool = false;
+
+    current_color: *Color_Range;
+    current_color_index: s64;
+
+    current_line: *Virtual_Line;
+    current_line_index: s64;
+}
+
 Backlog_Range :: struct {
     first: s64; // The index containing the first character of this range in the backlog
     one_plus_last: s64; // One character past the last of this range in the backlog
@@ -14,6 +34,12 @@ Virtual_Line :: struct {
     range: Backlog_Range;
     x: []s16; // The left x coordinates of all characters in the backlog range, for mouse selection
     is_first_in_backlog_line: bool;
+}
+
+Selection_Point :: struct {
+    b: s64; // Backlog index
+    l: s64; // Virtual Line index
+    c: s64; // Character index in the virtual ine
 }
 
 Screen :: struct {
@@ -70,6 +96,11 @@ Screen :: struct {
     scrollknob_dragged: bool; // Set to true once the user left-clicked and had the knob hovered in that frame. Set to false when the left button is released.
     scrollknob_drag_offset: f32; // Offset from the top of the knob to where the mouse cursor was when dragging started. This is used to position the knob relative to the mouse cursor, because we always want to position the same "pixel" of the knob under the mouse cursor
 
+    // Backlog selection information
+    selection_start: Selection_Point;
+    selection_end:   Selection_Point;
+    selection_state: Selection_State = .Disabled;
+
     // Subprocess data
     current_directory: string;
     child_process_name: string;
@@ -77,20 +108,6 @@ Screen :: struct {
 
     // Platform data
     win32: Win32 = ---;
-}
-
-Screen_Drawer :: struct {   
-    cursor_x: s64; // In screen space
-    cursor_y: s64; // In screen space
-
-    backlog_index: s64; // Character index into the backlog
-    backlog_index_wrapped: bool = false;
-
-    current_color: *Color_Range;
-    current_color_index: s64;
-
-    current_line: *Virtual_Line;
-    current_line_index: s64;
 }
 
 
@@ -298,7 +315,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     }
 
     //
-    // Update the virtual line list for this screen
+    // Update the virtual line list if it was invalidated
     //
     if screen.rebuild_virtual_lines {
         //
@@ -398,6 +415,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // Set proper scroll information for the new virtual lines
         //
         screen.rebuild_virtual_lines = false;
+        screen.selection_state = .Disabled; // The indices (both backlog and virtual lines) in the selection may no longer be valid, so be safe and disable it.
 
         if screen.enable_auto_scroll {
             // Snap the view back to the bottom.
@@ -479,6 +497,9 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;        
     }
 
+    //
+    // Update the scroll bar if it is enabled
+    //
     if screen.scrollbar_enabled {
         //
         // Update the scroll bar of this screen. The scroll bar is always oriented around the scroll target, not
@@ -573,6 +594,34 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         }
 
         screen.scrollbar_visual_color = cmdx.active_theme.colors[Color_Index.Scrollbar];
+    }
+
+    //
+    // Update the backlog selection
+    //
+    {
+        //
+        // Track the proper state of the selection
+        //
+        if mouse_over_rectangle(cmdx, screen.rectangle) && !screen.scrollbar_hitbox_hovered && !screen.scrollknob_dragged && cmdx.window.button_pressed[Button_Code.Left] {
+            screen.selection_state = .During_Selection;
+        }
+
+        if cmdx.window.button_released[Button_Code.Left] && screen.selection_state == .During_Selection {
+            if screen.selection_start.b == screen.selection_end.b {
+                // Empty selection, cancel
+                screen.selection_state = .Disabled;
+            } else {
+                screen.selection_state = .After_Selection;
+            }
+        }
+
+        if screen.selection_state == .During_Selection && cmdx.window.mouse_y >= screen.first_line_y_position - cmdx.font.ascender && cmdx.window.mouse_y <= screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
+            // Figure out the currently hovered selection point
+            hovered_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
+            hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+            hovered_backlog, hovered_character := get_character_index_in_virtual_line_for_screen_position(screen, hovered_line, cmdx.window.mouse_x);
+        }
     }
 
     //
@@ -1051,6 +1100,22 @@ calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 
     partially_visible    := min(cast(s64) ceil(xx active_screen_height / xx cmdx.font.line_height), screen.virtual_lines.count);
     return completely_visible, partially_visible;
 }
+
+get_character_index_in_virtual_line_for_screen_position :: (screen: *Screen, line: *Virtual_Line, x: s64) -> s64, s64 {
+    if backlog_range_empty(line.range) return line.range.first, 0;
+
+    backlog := line.range.first;
+    backlog_wrapped: bool = ---;
+    character := 0;
+
+    while character + 1 < line.x.count && x > line.x[character + 1] {
+        increase_backlog_cursor(screen, *backlog, *backlog_wrapped);
+        ++character;
+    }
+
+    return backlog, character;
+}
+
 
 /* =========================== Backlog Range =========================== */
 
