@@ -198,7 +198,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     set_foreground_color_for_color_range(cmdx, drawer.current_color);
 
     if draw_selection {
-        if screen.selection_end.l > screen.selection_start.l || screen.selection_end.c >= screen.selection_start.c {
+        if screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c) {
             drawer.selection_range = .{ screen.selection_start.b, screen.selection_end.b + 1, screen.selection_start.b > screen.selection_end.b };
         } else {
             drawer.selection_range = .{ screen.selection_end.b, screen.selection_start.b, screen.selection_end.b > screen.selection_start.b };
@@ -647,11 +647,35 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         //
         // Figure out the currently hovered selection point
         // 
-        if (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) && cmdx.window.mouse_y >= screen.first_line_y_position - cmdx.font.ascender && cmdx.window.mouse_y <= screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height {
-            hovered_line_index := (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
-            hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
-            hovered_backlog, hovered_character := get_character_index_in_virtual_line_for_screen_position(screen, hovered_line, cmdx.window.mouse_x);
-        
+        if (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
+            mouse_above_first_line := cmdx.window.mouse_y < screen.first_line_y_position - cmdx.font.ascender;
+            mouse_below_last_line  := cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height;
+
+            hovered_line_index, hovered_backlog, hovered_character: s64 = ---;
+
+            if !mouse_above_first_line && !mouse_below_last_line {
+                // Find the character under the mouse cursor
+                hovered_line_index = (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
+                hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_backlog, hovered_character = get_character_index_in_virtual_line_for_screen_position(screen, hovered_line, cmdx.window.mouse_x);
+            } else if mouse_above_first_line {
+                // The cursor is over the first line to draw, completely select the first line to draw then.
+                hovered_line_index = screen.first_line_to_draw;
+                hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_backlog = hovered_line.range.first;
+                hovered_character = 0;
+            } else if mouse_below_last_line {
+                // The cursor is below to the last line to draw, completely select the last line to draw then.
+                hovered_line_index = screen.last_line_to_draw;
+                hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_backlog = hovered_line.range.one_plus_last - 1;
+                hovered_character = 0;
+            }
+
+            // @Incomplete:
+            // Sometimes the selection gets fucked up, e.g. the first line isn't highlighted when dragging
+            // the selection up, instead the last line gets selected...
+
             if just_started_selection {
                 screen.selection_start = .{ hovered_backlog, hovered_line_index, hovered_character };
                 screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
