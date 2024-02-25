@@ -41,7 +41,7 @@ FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
 SCROLL_BAR_WIDTH :: 10;
 OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
-OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES :: 15;
+OFFSET_FOR_WRAPPED_LINES :: 15; // Additional indentation of wrapped lines
 
 /* =========================== Data Structures =========================== */
 

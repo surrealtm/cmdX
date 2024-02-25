@@ -204,10 +204,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             c1 = screen.selection_start.c;
         }        
 
-        l0 = max(l0, screen.first_line_to_draw);
-        l1 = min(l1, screen.last_line_to_draw);
-
-        for i := l0; i <= l1; ++i {
+        for i := max(l0, screen.first_line_to_draw); i <= min(l1, screen.last_line_to_draw); ++i {
             l := array_get(*screen.virtual_lines, i);
 
             x0, y0, x1, y1: s64 = ---;
@@ -224,7 +221,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             if lc0 < l.x.count {
                 x0 = l.x[lc0];
             } else {
-                x0 = OFFSET_FROM_SCREEN_BORDER;
+                x0 = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
             }
             
             if lc1 < l.x.count {
@@ -272,13 +269,16 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
         //
         if cmdx.draw_overlays & .Line_Wrapping && !drawer.current_line.is_first_in_backlog_line {
             previous_foreground_color := cmdx.renderer.foreground_color;
+            previous_background_color := cmdx.renderer.background_color;
             flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
             
             set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Scrollbar]);
+            set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]); // In case the current line is under selection, don't highlight this wrapping icon
             render_single_character_with_font(*cmdx.font, 0xbb, drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer); // 0xbb is the double right arrow
             set_foreground_color(*cmdx.renderer, previous_foreground_color);                                 
-        
-            drawer.cursor_x += OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+            set_background_color(*cmdx.renderer, previous_background_color);
+
+            drawer.cursor_x += OFFSET_FOR_WRAPPED_LINES;
         }
         
         //
@@ -466,9 +466,9 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                     range := virtual_line.range; // Copy this so that we can modify it
                     backlog_index := virtual_line.range.first;
                     line_index := 0;
-                    x := OFFSET_FROM_SCREEN_BORDER;
+                    x := screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
 
-                    if !virtual_line.is_first_in_backlog_line x = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+                    if !virtual_line.is_first_in_backlog_line x += OFFSET_FOR_WRAPPED_LINES;
                     
                     while backlog_index != range.one_plus_last {
                         virtual_line.x[line_index] = x;
@@ -488,7 +488,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                     // Prepare the data for the remaining range in this backlog line
                     //
                     is_first_in_backlog_line = false;
-                    virtual_width = OFFSET_FROM_SCREEN_BORDER_FOR_WRAPPED_LINES;
+                    virtual_width = OFFSET_FROM_SCREEN_BORDER + OFFSET_FOR_WRAPPED_LINES;
                     virtual_range = .{ virtual_range.one_plus_last, virtual_range.one_plus_last, false };
                 }
             }
@@ -710,22 +710,26 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             mouse_below_last_line  := cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height;
 
             hovered_line_index, hovered_backlog, hovered_character: s64 = ---;
+            hovered_line_empty: bool = ---;
 
             if !mouse_above_first_line && !mouse_below_last_line {
                 // Find the character under the mouse cursor
                 hovered_line_index = (cmdx.window.mouse_y - (screen.first_line_y_position - cmdx.font.ascender)) / cmdx.font.line_height + screen.first_line_to_draw;
                 hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_line_empty = backlog_range_empty(hovered_line.range);
                 hovered_backlog, hovered_character = get_character_index_in_virtual_line_for_screen_position(screen, hovered_line, cmdx.window.mouse_x);
             } else if mouse_above_first_line {
                 // The cursor is over the first line to draw, completely select the first line to draw then.
                 hovered_line_index = screen.first_line_to_draw;
                 hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_line_empty = backlog_range_empty(hovered_line.range);
                 hovered_backlog = hovered_line.range.first;
                 hovered_character = 0;
             } else if mouse_below_last_line {
                 // The cursor is below to the last line to draw, completely select the last line to draw then.
                 hovered_line_index = screen.last_line_to_draw;
                 hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
+                hovered_line_empty = backlog_range_empty(hovered_line.range);
                 hovered_backlog = hovered_line.range.one_plus_last - 1;
                 hovered_character = 0;
             }
@@ -736,8 +740,16 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 screen.selection_start = .{ hovered_backlog, hovered_line_index, hovered_character };
                 screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
                 draw_next_frame(cmdx);
-            } else if screen.selection_end.b != hovered_backlog || screen.selection_end.l != hovered_line_index || screen.selection_end.c != hovered_character {
-                screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
+            } else if (screen.selection_end.b != hovered_backlog || screen.selection_end.l != hovered_line_index || screen.selection_end.c != hovered_character) {
+                if hovered_line_empty {
+                    // If this line is empty, then the backlog index actually is the same for the next line,
+                    // we would consider the next line as selected, which it isn't.
+                    // Therefore, fully select the previous line (which ends just before the range of this line).
+                    screen.selection_end = .{ hovered_backlog - 1, hovered_line_index, hovered_character };
+                } else {
+                    screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
+                }
+
                 draw_next_frame(cmdx);
             }
 
