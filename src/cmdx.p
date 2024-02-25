@@ -444,13 +444,14 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         // At this point actual UI panels can be created. For now, there is no actual UI integration
         // (since it is not really required), but maybe in the future?
     }
+    
+    if cmdx.active_screen.selection_state == .Disabled cmdx.active_screen.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
 
 
     // Handle keyboard input. Actual key presses can trigger shortcuts to actions, text input will go
     // straight into the text input. @Cleanup what happens if the 'A' key is a short cut? We probably
     // only want to trigger an action in that case, and not have it go into the text input...
-    cmdx.active_screen.text_input.active = cmdx.window.focused; // Text input events will only be handled if the text input is actually active. This will also render the "disabled" cursor so that the user knows the input isn't active
-
+    
     // Check if any actions have been triggered in the past frame
     for i := 0; i < cmdx.window.key_pressed.count; ++i {
         if cmdx.window.key_pressed[i] && execute_actions_with_trigger(cmdx, xx i) break;

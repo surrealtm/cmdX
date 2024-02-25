@@ -691,8 +691,9 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         just_started_selection := false;
 
         if mouse_over_rectangle(cmdx, screen.rectangle) && !screen.scrollbar_hitbox_hovered && !screen.scrollknob_dragged && cmdx.window.button_pressed[Button_Code.Left] {
-            screen.selection_state = .Starting_Selection;
-            just_started_selection = true;
+            screen.selection_state   = .Starting_Selection;
+            screen.text_input.active = false;
+            just_started_selection   = true;
         }
 
         if !cmdx.window.button_held[Button_Code.Left] && (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
@@ -702,6 +703,11 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             } else {
                 screen.selection_state = .After_Selection;
             }
+        }
+
+        if cmdx.window.key_pressed[Key_Code.Escape] && screen.selection_state != .Disabled {
+            // Empty selection, cancel
+            screen.selection_state = .Disabled;
         }
 
         //
