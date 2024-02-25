@@ -220,6 +220,8 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
 
             if lc0 < l.x.count {
                 x0 = l.x[lc0];
+            } else if l.x.count > 0 {
+                x0 = l.x[l.x.count - 1] + query_glyph_horizontal_advance(*cmdx.font, screen.backlog[l.range.one_plus_last - 1]); // one_plus_last != 0, it will be backlog_size before wrapping to 1
             } else {
                 x0 = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
             }
@@ -730,15 +732,17 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 hovered_line_index = screen.last_line_to_draw;
                 hovered_line := array_get(*screen.virtual_lines, hovered_line_index);
                 hovered_line_empty = backlog_range_empty(hovered_line.range);
-                hovered_backlog = hovered_line.range.one_plus_last - 1;
+                hovered_backlog = hovered_line.range.one_plus_last;
                 hovered_character = 0;
+
+                if !hovered_line_empty hovered_backlog -= 1;
             }
 
             // If we just started dragging, then this point represents both the start and the end.
             // Otherwise, just update the selection end.
             if just_started_selection {
                 screen.selection_start = .{ hovered_backlog, hovered_line_index, hovered_character };
-                screen.selection_end = .{ hovered_backlog, hovered_line_index, hovered_character };
+                screen.selection_end   = .{ hovered_backlog, hovered_line_index, hovered_character };
                 draw_next_frame(cmdx);
             } else if (screen.selection_end.b != hovered_backlog || screen.selection_end.l != hovered_line_index || screen.selection_end.c != hovered_character) {
                 if hovered_line_empty {
@@ -1236,6 +1240,8 @@ calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 
 
 get_character_index_in_virtual_line_for_screen_position :: (screen: *Screen, line: *Virtual_Line, x: s64) -> s64, s64 {
     if backlog_range_empty(line.range) return line.range.first, 0;
+
+    if line.x.count && x > line.x[line.x.count - 1] return line.range.one_plus_last, line.x.count;
 
     backlog := line.range.first;
     backlog_wrapped: bool = ---;
