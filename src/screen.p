@@ -5,7 +5,13 @@ Selection_State :: enum {
     After_Selection; // The user has done the selection, keep it until the next button press but don't change it.
 }
 
-Screen_Drawer :: struct {   
+Selection_Info :: struct {
+    l0, c0: s64; // Lower bound of the selection
+    l1, c1: s64; // Upper bound of the selection
+    range: Backlog_Range;
+}
+
+Screen_Drawer :: struct {
     cursor_x: s64; // In screen space
     cursor_y: s64; // In screen space
 
@@ -18,7 +24,7 @@ Screen_Drawer :: struct {
     current_line: *Virtual_Line;
     current_line_index: s64;
 
-    selection_range: Backlog_Range;
+    selection_info: Selection_Info;
     currently_inside_selection: bool;
 }
 
@@ -60,7 +66,7 @@ Screen :: struct {
     virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
     rebuild_virtual_lines: s64 = true; // Set to true if the virtual lines may be invalid, e.g. because text was added to the backlog or the window size changed.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
-    
+
     // Text Input
     text_input: Text_Input;
     history: [..]string;
@@ -78,7 +84,7 @@ Screen :: struct {
     interpolated_scroll: f32; // This value interpolates towards the target scroll value
     rounded_scroll: s64; // This is the interpolated_scroll rounded down. Represents the first line (at the top) to be drawn.
     enable_auto_scroll := true; // If this is set to true, the scroll target jumps to the end of the backlog whenever new input is read from the subprocess / command.
-    
+
     // Cached drawing information
     first_line_x_position: s64; // The x-position in screen-pixel-space at which the virutal lines should start
     first_line_y_position: s64; // The y-position in screen-pixel-space at which the first virtual line should be rendered
@@ -185,26 +191,27 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
 
     draw_selection := screen.selection_state != .Disabled && screen.selection_state != .Starting_Selection;
 
+    drawer: Screen_Drawer;
+    drawer.cursor_x            = screen.first_line_x_position;
+    drawer.cursor_y            = screen.first_line_y_position;
+    drawer.current_line_index  = screen.first_line_to_draw;
+    drawer.current_color_index = 0;
+
+    drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
+    set_foreground_color_for_color_range(cmdx, drawer.current_color);
+
+    if draw_selection {
+        drawer.selection_info = get_backlog_selection_info(screen);
+    }
+
     //
     // Draw a proper background behind all selected lines.
     //
+
     if draw_selection {
-        l0, l1, c0, c1: s64 = ---;
         appendix := query_glyph_horizontal_advance(*cmdx.font, ' ') * 2; // The space to append to the selection background at the end of each line
 
-        if screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c) {
-            l0 = screen.selection_start.l;
-            c0 = screen.selection_start.c;
-            l1 = screen.selection_end.l;
-            c1 = screen.selection_end.c + 1;
-        } else {
-            l0 = screen.selection_end.l;
-            c0 = screen.selection_end.c;
-            l1 = screen.selection_start.l;
-            c1 = screen.selection_start.c;
-        }        
-
-        for i := max(l0, screen.first_line_to_draw); i <= min(l1, screen.last_line_to_draw); ++i {
+        for i := max(drawer.selection_info.l0, screen.first_line_to_draw); i <= min(drawer.selection_info.l1, screen.last_line_to_draw); ++i {
             l := array_get(*screen.virtual_lines, i);
 
             x0, y0, x1, y1: s64 = ---;
@@ -215,8 +222,8 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             lc0 := 0;
             lc1 := l.x.count;
 
-            if i == l0 lc0 = c0;
-            if i == l1 lc1 = c1;
+            if i == drawer.selection_info.l0 lc0 = drawer.selection_info.c0;
+            if i == drawer.selection_info.l1 lc1 = drawer.selection_info.c1;
 
             if lc0 < l.x.count {
                 x0 = l.x[lc0];
@@ -225,7 +232,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             } else {
                 x0 = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
             }
-            
+
             if lc1 < l.x.count {
                 x1 = l.x[lc1];
             } else if l.x.count > 0 {
@@ -245,22 +252,6 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     //
     // Draw all visible lines.
     //
-    drawer: Screen_Drawer;
-    drawer.cursor_x            = screen.first_line_x_position;
-    drawer.cursor_y            = screen.first_line_y_position;
-    drawer.current_line_index  = screen.first_line_to_draw;
-    drawer.current_color_index = 0;
-    
-    drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
-    set_foreground_color_for_color_range(cmdx, drawer.current_color);
-
-    if draw_selection {
-        if screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c) {
-            drawer.selection_range = .{ screen.selection_start.b, screen.selection_end.b + 1, screen.selection_start.b > screen.selection_end.b };
-        } else {
-            drawer.selection_range = .{ screen.selection_end.b, screen.selection_start.b, screen.selection_end.b > screen.selection_start.b };
-        }
-    }
 
     while drawer.current_line_index <= screen.last_line_to_draw {
         drawer.current_line = array_get(*screen.virtual_lines, drawer.current_line_index);
@@ -273,16 +264,16 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             previous_foreground_color := cmdx.renderer.foreground_color;
             previous_background_color := cmdx.renderer.background_color;
             flush_font_buffer(*cmdx.renderer); // One font draw call only supports a single color.
-            
+
             set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Scrollbar]);
             set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]); // In case the current line is under selection, don't highlight this wrapping icon
             render_single_character_with_font(*cmdx.font, 0xbb, drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer); // 0xbb is the double right arrow
-            set_foreground_color(*cmdx.renderer, previous_foreground_color);                                 
+            set_foreground_color(*cmdx.renderer, previous_foreground_color);
             set_background_color(*cmdx.renderer, previous_background_color);
 
             drawer.cursor_x += OFFSET_FOR_WRAPPED_LINES;
         }
-        
+
         //
         // Draw the actual characters of this line
         //
@@ -302,7 +293,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
             //
             // If we are under the current backlog selection, then set the proper background color.
             //
-            if draw_selection && cursor_inside_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.selection_range) {
+            if draw_selection && drawer.current_line_index >= drawer.selection_info.l0 && drawer.current_line_index <= drawer.selection_info.l1 && cursor_inside_backlog_range(drawer.backlog_index, drawer.backlog_index_wrapped, drawer.selection_info.range) {
                 set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Selection]);
                 drawer.currently_inside_selection = true;
             } else if drawer.currently_inside_selection {
@@ -324,7 +315,7 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
                 render_single_character_with_font(*cmdx.font, '#', drawer.cursor_x, drawer.cursor_y, draw_single_glyph, *cmdx.renderer);
                 set_background_color(*cmdx.renderer, cmdx.active_theme.colors[Color_Index.Background]);
             }
-            
+
             //
             // Advance the backlog index, apply kerning to the cursor
             //
@@ -407,12 +398,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // Clear and deallocate the current virtual lines
         //
         clear_virtual_lines(cmdx, screen);
-        
+
         //
         // Start rebuilding the virtual line array for the current backlog
         //
         active_screen_width: s64 = ---;
-        
+
         if !cmdx.enable_line_wrapping {
             // The logic of querying the character's x position still needs to happen, so we simply "fake" this
             // by saying the screen is infinitely large and therefore no wrapping ever needs to happen.
@@ -438,10 +429,10 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
                 virtual_width := 0; // The current virtual line width in pixels
                 is_first_in_backlog_line := true;
-                
+
                 while backlog_range_ends_before(screen, virtual_range, backlog_line) {
                     next_character := screen.backlog[virtual_range.one_plus_last];
-                    
+
                     while backlog_range_ends_before(screen, virtual_range, backlog_line) && virtual_width + query_glyph_horizontal_advance(*cmdx.font, next_character) < active_screen_width {
                         virtual_width += query_glyph_horizontal_advance(*cmdx.font, next_character);
                         increase_backlog_range(screen, *virtual_range);
@@ -454,7 +445,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                     virtual_line := array_push(*screen.virtual_lines);
                     virtual_line.range = virtual_range;
                     virtual_line.is_first_in_backlog_line = is_first_in_backlog_line;
-                                    
+
                     //
                     // Allocate the offset array
                     //
@@ -471,7 +462,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                     x := screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
 
                     if !virtual_line.is_first_in_backlog_line x += OFFSET_FOR_WRAPPED_LINES;
-                    
+
                     while backlog_index != range.one_plus_last {
                         virtual_line.x[line_index] = x;
 
@@ -495,7 +486,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 }
             }
         }
-        
+
         //
         // Set proper scroll information for the new virtual lines
         //
@@ -532,7 +523,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         // of the screen. Also calculate the number of partial lines that would fit on screen, if we are fine
         // with the top-most line potentially being partly cut off at the top of the window.
         completely_visible, partially_visible := calculate_number_of_visible_lines(cmdx, screen);
-        
+
         // Calculate the number of drawn lines at the target scrolling position, so that the target can be
         // clamped with the correct values.
         highest_allowed_scroll    := screen.virtual_lines.count - completely_visible;
@@ -541,18 +532,18 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         screen.rounded_scroll      = clamp(cast(s64) roundf(screen.interpolated_scroll), 0, highest_allowed_scroll);
         screen.enable_auto_scroll  = screen.target_scroll == xx highest_allowed_scroll;
 
-        if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.       
+        if previous_rounded_scroll != screen.rounded_scroll    draw_next_frame(cmdx); // Since scrolling can happen without any user input (through interpolation), always render a frame if the scroll offset changed.
     }
 
     //
     // Set up drawing data for this frame
     //
-    {   
+    {
         // Calculate the actual number of drawn lines at the new scrolling offset. If the user has not
         // scrolled all the way to the top, allow one line to be cut off partially.
         completely_visible, partially_visible := calculate_number_of_visible_lines(cmdx, screen);
-        
-        if screen.rounded_scroll > 0 {       
+
+        if screen.rounded_scroll > 0 {
             screen.first_line_to_draw = screen.rounded_scroll - (partially_visible - completely_visible);
             screen.last_line_to_draw  = screen.first_line_to_draw + partially_visible - 1;
         } else {
@@ -574,12 +565,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         first_line_in_backlog := array_get(*screen.virtual_lines, 0);
         first_line_to_draw := array_get(*screen.virtual_lines, screen.first_line_to_draw);
         screen.line_wrapped_before_first = first_line_to_draw.range.first < first_line_in_backlog.range.first;
-    
+
         // Enable the scroll bar depending on the number of lines drawn vs. the number of lines present
         previous_scrollbar_enabled := screen.scrollbar_enabled;
 
         screen.scrollbar_enabled = completely_visible < screen.virtual_lines.count;
-        if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;        
+        if previous_scrollbar_enabled != screen.scrollbar_enabled    screen.rebuild_virtual_lines = true;
     }
 
     //
@@ -598,9 +589,9 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
 
         scrollbar_hitbox_width: s32 = SCROLL_BAR_WIDTH;
         scrollbar_hitbox_height := screen.rectangle[3] - OFFSET_FROM_SCREEN_BORDER - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER;
-        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER - scrollbar_hitbox_width, 
-                                              screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER, 
-                                              screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER, 
+        screen.scrollbar_hitbox_rectangle = { screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER - scrollbar_hitbox_width,
+                                              screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER,
+                                              screen.rectangle[2] - OFFSET_FROM_SCREEN_BORDER,
                                               screen.rectangle[1] + OFFSET_FROM_SCREEN_BORDER + scrollbar_hitbox_height };
 
         knob_offset_percentage := cast(f32) roundf(screen.target_scroll) / cast(f32) screen.virtual_lines.count;
@@ -608,11 +599,11 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         scrollknob_hitbox_offset: s64 = cast(s32) (cast(f32) scrollbar_hitbox_height * knob_offset_percentage);
         scrollknob_hitbox_height: s64 = cast(s32) (cast(f32) scrollbar_hitbox_height * knob_height_percentage);
 
-        screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0], 
-                                               screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset, 
-                                               screen.scrollbar_hitbox_rectangle[2], 
+        screen.scrollknob_hitbox_rectangle = { screen.scrollbar_hitbox_rectangle[0],
+                                               screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset,
+                                               screen.scrollbar_hitbox_rectangle[2],
                                                screen.scrollbar_hitbox_rectangle[1] + scrollknob_hitbox_offset + scrollknob_hitbox_height };
-        
+
         //
         // Handle mouse input on the scrollbar. Store the input state in local variables first, and then check
         // if anything changed to the last frame, so that a new frame is only rendered if the state (and
@@ -622,12 +613,12 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         scrollbar_hovered  := mouse_over_rectangle(cmdx, screen.scrollbar_hitbox_rectangle);
         scrollknob_hovered := mouse_over_rectangle(cmdx, screen.scrollknob_hitbox_rectangle);
         scrollknob_dragged := screen.scrollknob_dragged;
-        
+
         if scrollknob_hovered && cmdx.window.button_pressed[Button_Code.Left] {
             scrollknob_dragged = true; // Start dragging the knob if the user just pressed left-click on it
             screen.scrollknob_drag_offset = xx (cmdx.window.mouse_y - screen.scrollknob_hitbox_rectangle[1]);
         }
-            
+
         if !scrollknob_dragged && scrollbar_hovered && cmdx.window.button_pressed[Button_Code.Left] {
             // If the user left-clicked somewhere on the scrollbar outside of the knob, then immediatly move
             // the knob to the mouse position, and start dragging. The knob's center should be placed under
@@ -642,7 +633,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
 
             screen.target_scroll = target_inside_scrollbar_area * xx screen.virtual_lines.count;
         }
-        
+
         if !cmdx.window.button_held[Button_Code.Left] scrollknob_dragged = false; // Stop dragging the knob when the user released the left mouse button
 
         // If any state changed during this frame, then we should render it to give immediate feedback to the
@@ -653,7 +644,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         screen.scrollknob_hitbox_hovered = scrollknob_hovered;
         screen.scrollknob_dragged        = scrollknob_dragged;
 
-        
+
         //
         // Update the visual data for the scrollbar
         //
@@ -662,14 +653,14 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         scrollknob_visual_indent: s32 = 2;
         if screen.scrollbar_hitbox_hovered || screen.scrollknob_dragged   scrollbar_visual_indent = 4;
 
-        screen.scrollbar_visual_rectangle = { screen.scrollbar_hitbox_rectangle[0] + scrollbar_visual_indent, 
-                                              screen.scrollbar_hitbox_rectangle[1], 
-                                              screen.scrollbar_hitbox_rectangle[2] - scrollbar_visual_indent, 
+        screen.scrollbar_visual_rectangle = { screen.scrollbar_hitbox_rectangle[0] + scrollbar_visual_indent,
+                                              screen.scrollbar_hitbox_rectangle[1],
+                                              screen.scrollbar_hitbox_rectangle[2] - scrollbar_visual_indent,
                                               screen.scrollbar_hitbox_rectangle[3] };
 
-        screen.scrollknob_visual_rectangle = { screen.scrollknob_hitbox_rectangle[0] + scrollknob_visual_indent, 
-                                               screen.scrollknob_hitbox_rectangle[1], 
-                                               screen.scrollknob_hitbox_rectangle[2] - scrollknob_visual_indent, 
+        screen.scrollknob_visual_rectangle = { screen.scrollknob_hitbox_rectangle[0] + scrollknob_visual_indent,
+                                               screen.scrollknob_hitbox_rectangle[1],
+                                               screen.scrollknob_hitbox_rectangle[2] - scrollknob_visual_indent,
                                                screen.scrollknob_hitbox_rectangle[3] };
 
         if screen.scrollknob_dragged {
@@ -691,12 +682,11 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
         just_started_selection := false;
 
         if mouse_over_rectangle(cmdx, screen.rectangle) && !screen.scrollbar_hitbox_hovered && !screen.scrollknob_dragged && cmdx.window.button_pressed[Button_Code.Left] {
-            screen.selection_state   = .Starting_Selection;
-            screen.text_input.active = false;
-            just_started_selection   = true;
+            screen.selection_state = .Starting_Selection;
+            just_started_selection = true;
         }
 
-        if !cmdx.window.button_held[Button_Code.Left] && (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
+        if cmdx.active_screen == screen && !cmdx.window.button_held[Button_Code.Left] && (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
             if screen.selection_start.b == screen.selection_end.b {
                 // Empty selection, cancel
                 screen.selection_state = .Disabled;
@@ -705,14 +695,14 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             }
         }
 
-        if cmdx.window.key_pressed[Key_Code.Escape] && screen.selection_state != .Disabled {
+        if cmdx.active_screen == screen && cmdx.window.key_pressed[Key_Code.Escape] && screen.selection_state != .Disabled {
             // Empty selection, cancel
             screen.selection_state = .Disabled;
         }
 
         //
         // Figure out the currently hovered selection point
-        // 
+        //
         if (screen.selection_state == .Starting_Selection || screen.selection_state == .During_Selection) {
             mouse_above_first_line := cmdx.window.mouse_y < screen.first_line_y_position - cmdx.font.ascender;
             mouse_below_last_line  := cmdx.window.mouse_y > screen.first_line_y_position - cmdx.font.ascender + (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height;
@@ -763,7 +753,73 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 draw_next_frame(cmdx);
             }
 
-            if screen.selection_start.b != screen.selection_end.b    screen.selection_state = .During_Selection;
+            if screen.selection_start.b != screen.selection_end.b {
+                screen.selection_state = .During_Selection;
+                screen.text_input.active = false;
+                draw_next_frame(cmdx);
+            }
+        }
+
+        //
+        // If we are currently doing a selection and have pressed Ctrl+C, then copy the selection into
+        // the clipboard.
+        //
+        if (screen.selection_state == .During_Selection || screen.selection_state == .After_Selection) && cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.C] {
+            //
+            // Figure out the start and end to copy
+            //
+            l0, l1, c0, c1: s64 = ---;
+
+            if screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c) {
+                l0 = screen.selection_start.l;
+                c0 = screen.selection_start.c;
+                l1 = screen.selection_end.l;
+                c1 = screen.selection_end.c + 1;
+            } else {
+                l0 = screen.selection_end.l;
+                c0 = screen.selection_end.c;
+                l1 = screen.selection_start.l;
+                c1 = screen.selection_start.c;
+            }
+
+            selection_info := get_backlog_selection_info(screen);
+
+            count: s64 = ---; // Total number of characters in the current selection, including the implicit new lines. This allocates a final new line at the end which will only be needed if the selection goes to the very end of the line...
+            if selection_info.range.wrapped {
+                count = (screen.backlog_size - selection_info.range.first + selection_info.range.one_plus_last) + l1 - l0 + 1;
+            } else {
+                count = (selection_info.range.one_plus_last - selection_info.range.first) + l1 - l0 + 1;
+            }
+
+            text := allocate_string(*cmdx.frame_allocator, count);
+
+            //
+            // Append the actual backlog content to the string
+            //
+            text_index := 0;
+            backlog_index_wrapped: bool = false;
+
+            for i := l0; i <= l1; ++i {
+                line := array_get(*screen.virtual_lines, i);
+
+                backlog_index := line.range.first;
+
+                while !backlog_range_empty(line.range) && !cursor_after_backlog_range(backlog_index, backlog_index_wrapped, line.range) {
+                    if cursor_inside_backlog_range(backlog_index, backlog_index_wrapped, selection_info.range) {
+                        text[text_index] = screen.backlog[backlog_index];
+                        ++text_index;
+                    }
+
+                    increase_backlog_cursor(screen, *backlog_index, *backlog_index_wrapped);
+                }
+
+                if i < l1 || c1 == line.x.count {
+                    text[text_index] = '\n';
+                    ++text_index;
+                }
+            }
+
+            set_clipboard_data(substring_view(text, 0, text_index));
         }
     }
 
@@ -844,9 +900,9 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     text_to_complete := substring_view(screen.text_input.buffer, screen.auto_complete_start, screen.text_input.cursor);
 
     //
-    // Add all commands to the auto-complete, but only if this could actually 
+    // Add all commands to the auto-complete, but only if this could actually
     // be a command (it is actually the first thing in the input string)
-    //        
+    //
     if screen.auto_complete_start == 0 {
         for i := 0; i < cmdx.commands.count; ++i {
             command := array_get(*cmdx.commands, i);
@@ -877,7 +933,7 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     for i := 0; i < files.count; ++i {
         full_path := array_get_value(*files, i);
         file_name := substring_view(full_path, files_directory.count + 1, full_path.count);
-        
+
         if string_starts_with(file_name, text_to_complete) {
             // Check if the given path is actually a folder. If so, then append a final slash
             // to it, to make it easier to just auto-complete to a path without having to type the slashes
@@ -1045,9 +1101,9 @@ clear_virtual_lines :: (cmdx: *CmdX, screen: *Screen) {
 
 
 set_foreground_color_for_color_range :: (cmdx: *CmdX, color_range: *Color_Range) {
-    if color_range.color_index != -1 
+    if color_range.color_index != -1
         set_foreground_color(*cmdx.renderer, cmdx.active_theme.colors[color_range.color_index]);
-    else 
+    else
         set_foreground_color(*cmdx.renderer, color_range.true_color);
 }
 
@@ -1244,10 +1300,34 @@ calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 
     return completely_visible, partially_visible;
 }
 
+is_backlog_selection_forward :: (screen: *Screen) -> bool {
+    return screen.selection_end.l > screen.selection_start.l || (screen.selection_end.l == screen.selection_start.l && screen.selection_end.c >= screen.selection_start.c);
+}
+
+get_backlog_selection_info :: (screen: *Screen) -> Selection_Info {
+    info: Selection_Info = ---;
+
+    if is_backlog_selection_forward(screen) {
+        info.l0 = screen.selection_start.l;
+        info.c0 = screen.selection_start.c;
+        info.l1 = screen.selection_end.l;
+        info.c1 = screen.selection_end.c + 1;
+        info.range = .{ screen.selection_start.b, screen.selection_end.b + 1, screen.selection_start.b > screen.selection_end.b };
+    } else {
+        info.l0 = screen.selection_end.l;
+        info.c0 = screen.selection_end.c;
+        info.l1 = screen.selection_start.l;
+        info.c1 = screen.selection_start.c;
+        info.range = .{ screen.selection_end.b, screen.selection_start.b, screen.selection_end.b > screen.selection_start.b };
+    }
+
+    return info;
+}
+
 get_character_index_in_virtual_line_for_screen_position :: (screen: *Screen, line: *Virtual_Line, x: s64) -> s64, s64 {
     if backlog_range_empty(line.range) return line.range.first, 0;
 
-    if line.x.count && x > line.x[line.x.count - 1] return line.range.one_plus_last, line.x.count;
+    if line.x.count && x > line.x[line.x.count - 1] return line.range.one_plus_last, line.x.count; // Indicate that the last character of this line should also be included in backward selection, which does not happen by default...
 
     backlog := line.range.first;
     backlog_wrapped: bool = ---;
