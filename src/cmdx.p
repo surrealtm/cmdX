@@ -519,14 +519,17 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
 
     // Close the current screen if ctrl+0 was pressed.
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._0] && cmdx.screens.count > 1  cmdx.active_screen.marked_for_closing = true;
+    if is_keybind_activated(cmdx, "close-screen") && cmdx.screens.count > 1 {
+        cmdx.active_screen.marked_for_closing = true;
+    }
 
     // Create a new screen if ctrl+1 was pressed.
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code._1] {
+    if is_keybind_activated(cmdx, "create-screen") {
         screen := create_screen(cmdx);
         activate_screen(cmdx, screen);
     }
 
+    // Increase the font size
     if cmdx.window.key_held[Key_Code.Control] && cmdx.window.mouse_wheel_turns != 0 {
         cmdx.font_size += xx cmdx.window.mouse_wheel_turns;
         update_font(cmdx);
@@ -729,7 +732,9 @@ cmdx :: () -> s32 {
     create_bool_property(*cmdx.config,   "window-maximized",     *cmdx.window.maximized);
     create_f32_property(*cmdx.config,    "window-fps",           *cmdx.requested_fps);
 
-    create_keybind(*cmdx.config, "other-screen", { Key_Code.Control, Key_Code.Comma });
+    create_keybind(*cmdx.config, "create-screen", { Key_Code.Control, Key_Code._1 });
+    create_keybind(*cmdx.config, "other-screen",  { Key_Code.Control, Key_Code.Comma });
+    create_keybind(*cmdx.config, "close-screen",  { Key_Code.Control, Key_Code._0 });
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer
@@ -820,5 +825,3 @@ WinMain :: () -> s32 {
   The command to compile this program is:
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
 */
-
-// @Incomplete: Put all these screen hotkeys into the config file somehow (create, close, next screen...)
