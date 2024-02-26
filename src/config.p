@@ -373,7 +373,7 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_number: s64) 
 
     if !valid {
         config_error(cmdx, "Malformed config property in line %:", line_number);
-        config_error(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
+        config_error(cmdx, "   Property value of '%' is not valid ('%'), expected a % value.", property.name, value, property_type_to_string(property.type));
     }
 }
 
@@ -381,11 +381,82 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_number: s64) 
 /* =========================== Keybind Management =========================== */
 
 read_keybind :: (cmdx: *CmdX, config: *Config, line: string, line_number: s64) {
+    space, found_space := search_string(line, ' ');
+    if !found_space {
+        config_error(cmdx, "Malformed config keybind in line %:", line_number);
+        config_error(cmdx, "   Expected syntax 'keys name', no space found in the line.");
+        return;
+    }
 
+    keys := trim_string_right(substring_view(line, 0, space));
+    name := trim_string(substring_view(line, space + 1, line.count));
+    if name.count > 1 && name[0] == '"' && name[name.count - 1] == '"' name = substring_view(name, 1, name.count - 1);
+
+    if name.count == 0 {
+        config_error(cmdx, "Malformed config keybind in line %:", line_number);
+        config_error(cmdx, "   Expected syntax 'keys name', no space found in the line.");
+        return;
+    }
+
+    keybind := find_keybind(config, name);
+    if !keybind {
+        config_error(cmdx, "Malformed config keybind in line %:", line_number);
+        config_error(cmdx, "   Keybind name '%' is unknown.", name);
+        return;
+    }
+
+    valid := assign_keybind_keys_from_string(config, keybind, keys);
+
+    if !valid {
+        config_error(cmdx, "Malformed config keybind in line %:", line_number);
+        config_error(cmdx, "   Keybind string of '%' is not valid ('%').", keybind.name, keys);
+    }
 }
 
-is_keybind_activated :: (cmdx: *CmdX, name: string) -> bool {
-    return false;
+find_keybind :: (config: *Config, name: string) -> *Key_Bind {
+    for i := 0; i < config.keybinds.count; ++i {
+        keybind := array_get(*config.keybinds, i);
+        if compare_strings(keybind.name, name) return keybind;
+    }
+
+    return null;    
+}
+
+assign_keybind_keys_from_string :: (config: *Config, keybind: *Key_Bind, value: string) -> bool {
+    if value.count == 0 return false;
+
+    if keybind.keys.count {
+        deallocate_array(config.allocator, *keybind.keys);
+    }
+
+    count := count_occurances_in_string(value, '-') + 1;
+
+    keybind.keys = allocate_array(config.allocator, count, Key_Code);
+
+    success := true;
+    i := 0;
+    
+    while value.count > 0 {
+        dash, found_dash := search_string(value, '-');
+        if !found_dash dash = value.count;
+
+        key_view := substring_view(value, 0, dash);
+        key := parse_key_code(key_view);
+        value = substring_view(value, dash + 1, value.count);
+        
+        keybind.keys[i] = key;
+        ++i;
+        
+        success &= key != Key_Code.None;
+    }
+    
+    return success;
+}
+
+create_keybind :: (config: *Config, name: string, keys: []Key_Code) {
+    keybind := array_push(*config.keybinds);
+    keybind.name = copy_string(config.allocator, name);
+    keybind.keys = copy_array(config.allocator, keys);
 }
 
 
@@ -643,12 +714,12 @@ write_config_file :: (config: *Config, file_path: string) {
 
     for i := 0; i < config.keybinds.count; ++i {
         keybind := array_get(*config.keybinds, i);
-        bprint(*file_printer, "% ", keybind.name);
-
         for i := 0; i < keybind.keys.count; ++i {
             bprint(*file_printer, key_code_to_string(keybind.keys[i]));
             if i + 1 < keybind.keys.count bprint(*file_printer, "-");
         }
+
+        bprint(*file_printer, " %", keybind.name);
 
         bprint(*file_printer, "\n");
     }

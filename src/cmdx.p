@@ -259,6 +259,21 @@ get_window_style_and_range_check_window_position_and_size :: (cmdx: *CmdX) -> Wi
     return window_style;
 }
 
+is_keybind_activated :: (cmdx: *CmdX, name: string) -> bool {
+    keybind := find_keybind(*cmdx.config, name);
+    if !keybind || !keybind.keys.count return false;
+
+    activated := true;
+    
+    for i := 0; i < keybind.keys.count; ++i {
+        activated &= cmdx.window.key_held[keybind.keys[i]];
+
+        if i + 1 == keybind.keys.count activated &= cmdx.window.key_pressed[keybind.keys[i]];
+    }
+
+    return activated;
+}
+
 
 /* =========================== CmdX Properties =========================== */
 
@@ -498,7 +513,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     }
 
     // Go to the next screen if ctrl+comma was pressed.
-    if cmdx.window.key_held[Key_Code.Control] && cmdx.window.key_pressed[Key_Code.Comma] {
+    if is_keybind_activated(cmdx, "other-screen") {
         if cmdx.screens.count == 1 create_screen(cmdx);
         activate_next_screen(cmdx);
     }
@@ -713,11 +728,13 @@ cmdx :: () -> s32 {
     create_u32_property(*cmdx.config,    "window-height",        *cmdx.window.height);
     create_bool_property(*cmdx.config,   "window-maximized",     *cmdx.window.maximized);
     create_f32_property(*cmdx.config,    "window-fps",           *cmdx.requested_fps);
+
+    create_keybind(*cmdx.config, "other-screen", { Key_Code.Control, Key_Code.Comma });
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer
     window_style := get_window_style_and_range_check_window_position_and_size(*cmdx);
-    create_window(*cmdx.window, "cmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, window_style); // The title will be replaced when the first screen gets created
+    create_window(*cmdx.window, "CmdX", cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, window_style); // The title will be replaced when the first screen gets created
 
     create_gl_context(*cmdx.window, 3, 3);
     create_renderer(*cmdx.renderer);
