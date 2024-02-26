@@ -29,6 +29,8 @@
 #load "win32.p";
 #load "create_big_file.p";
 
+HISTORY_FILE_NAME :: ".cmdx-history";
+
 /* =========================== Default font paths to remember =========================== */
 
 CASCADIO_MONO    :: "C:\\windows\\fonts\\cascadiamono.ttf";
@@ -39,9 +41,9 @@ FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
 /* =========================== Visual Constants =========================== */
 
-SCROLL_BAR_WIDTH :: 10;
+SCROLL_BAR_WIDTH          :: 10;
 OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
-OFFSET_FOR_WRAPPED_LINES :: 15; // Additional indentation of wrapped lines
+OFFSET_FOR_WRAPPED_LINES  :: 15; // Additional indentation of wrapped lines
 
 /* =========================== Data Structures =========================== */
 
@@ -199,6 +201,45 @@ cmdx_assert :: (active_screen: *Screen, condition: bool, text: string) {
 
     debug_print_to_file("cmdx_log.txt", active_screen);
     assert(condition, text);
+}
+
+
+/* =========================== History Saving =========================== */
+
+/* When CmdX gets shut down, we save the current command history to disk so that we can restore
+ * it on the next start up. This is just a convenience to the user in case there are some complex
+ * commands entered which the user requires again in the next session.
+ * Note that we don't (currently) save the screen layout of CmdX, therefore we should only store
+ * the history of the first screen (since that seems most intuitive). */
+
+write_history_file :: (screen: *Screen, file_path: string) {
+    delete_file(file_path);
+
+    printer: File_Printer;
+    create_file_printer(*printer, file_path);
+
+    for i := screen.history.count - 1; i >= 0; --i {
+        string := array_get_value(*screen.history, i);
+        if !compare_strings(string, ":quit") { // This just doesn't seem interesting to store...
+            bprint(*printer, "%\n", string);
+        }
+    }
+    
+    close_file_printer(*printer);
+}
+
+read_history_file :: (cmdx: *CmdX, screen: *Screen, file_path: string) {
+    file_content, file_valid := read_file(file_path);
+    if !file_content.count || !file_valid return;
+
+    while file_content.count {
+        line := get_first_line(*file_content);
+        if !line continue;
+
+        add_history(cmdx, screen, line);
+    }
+    
+    free_file_content(*file_content);
 }
 
 
@@ -727,7 +768,8 @@ cmdx :: () -> s32 {
     activate_screen(*cmdx, screen);
     welcome_screen(*cmdx, cmdx.active_screen, run_tree);
     flush_config_errors(*cmdx, false);
-
+    read_history_file(*cmdx, cmdx.active_screen, HISTORY_FILE_NAME);
+    
     cmdx.setup = true;
 
     // Main loop until the window gets closed
@@ -735,6 +777,7 @@ cmdx :: () -> s32 {
 
     // Cleanup
     write_config_file(*cmdx.config, CONFIG_FILE_NAME);
+    write_history_file(linked_list_get(*cmdx.screens, 0), HISTORY_FILE_NAME);
     destroy_ui(*cmdx.ui);
     destroy_renderer(*cmdx.renderer);
     destroy_gl_context(*cmdx.window);
@@ -762,5 +805,4 @@ WinMain :: () -> s32 {
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
 */
 
-// @Incomplete: Store history in a file to restore it after program restart
 // @Incomplete: Put all these screen hotkeys into the config file somehow (create, close, next screen...)
