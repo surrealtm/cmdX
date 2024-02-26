@@ -2,9 +2,10 @@ CONFIG_FILE_NAME :: ".cmdx-config";
 CONFIG_HOTLOAD_CHECK_INTERVAL: f32 : 1000; // In milliseconds
 
 Section_Type :: enum {
-    Unknown :: 0;
-    General :: 1;
-    Actions;
+    Unknown   :: 0;
+    General   :: 1;
+    Key_Binds :: 2;
+    Actions   :: 3;
 }
 
 Property_Type :: enum {
@@ -41,9 +42,32 @@ Property :: struct {
     default: Property_Default; // This is used to initialize the property whenever the config is loaded, and the value is not present in the config file. Since reloading the config can happen multiple times, the default value from when the property was created needs to be remembered
 }
 
+
+Key_Bind :: struct {
+    name: string;
+    keys: []Key_Code; // A combination of keys which trigger this keybind. The last key needs to be pressed, the previous ones need to be held.
+}
+
+
+Action_Type :: enum {
+    Macro :: 1;
+}
+
+Action_Data :: union {
+    macro_text: string;
+}
+
+Action :: struct {
+    type: Action_Type;
+    data: Action_Data;
+    trigger: Key_Code;
+}
+
+
 Config :: struct {
     allocator: *Allocator = Default_Allocator;
     properties: [..]Property;
+    keybinds: [..]Key_Bind;
     actions: [..]Action;
 
     accumulate_errors: bool; // When the config file is currently being read, then all errors should be accumulated and reported together for better formatting. If some other process uses the config_error, then it should be immediately printed onto the screen.
@@ -52,6 +76,10 @@ Config :: struct {
     last_modification_check: s64; // In hardware time. Do not check the file for modification each frame, as that is unnecessary and expensive. Instead, check in regular intervals
     last_modification_time: s64; // In File Time (see File_Information). This is compared against the filesystems idea of the last modification time, and if the stored time is older, then the config gets reloaded and this time updated.
 }
+
+
+/* =========================== String Conversions =========================== */
+
 
 property_type_to_string :: (type: Property_Type) -> string {
     result: string = ---;
@@ -65,6 +93,160 @@ property_type_to_string :: (type: Property_Type) -> string {
 
     return result;
 }
+
+parse_key_code :: (string: string) -> Key_Code {
+    result: Key_Code = .None;
+
+    if compare_strings(string, "A") result = .A;
+    else if compare_strings(string, "B") result = .B;
+    else if compare_strings(string, "C") result = .C;
+    else if compare_strings(string, "D") result = .D;
+    else if compare_strings(string, "E") result = .E;
+    else if compare_strings(string, "F") result = .F;
+    else if compare_strings(string, "G") result = .G;
+    else if compare_strings(string, "H") result = .H;
+    else if compare_strings(string, "I") result = .I;
+    else if compare_strings(string, "J") result = .J;
+    else if compare_strings(string, "K") result = .K;
+    else if compare_strings(string, "L") result = .L;
+    else if compare_strings(string, "M") result = .M;
+    else if compare_strings(string, "N") result = .N;
+    else if compare_strings(string, "O") result = .O;
+    else if compare_strings(string, "P") result = .P;
+    else if compare_strings(string, "Q") result = .Q;
+    else if compare_strings(string, "R") result = .R;
+    else if compare_strings(string, "S") result = .S;
+    else if compare_strings(string, "T") result = .T;
+    else if compare_strings(string, "U") result = .U;
+    else if compare_strings(string, "V") result = .V;
+    else if compare_strings(string, "W") result = .W;
+    else if compare_strings(string, "X") result = .X;
+    else if compare_strings(string, "Y") result = .Y;
+    else if compare_strings(string, "Z") result = .Z;
+    else if compare_strings(string, "0") result = ._0;
+    else if compare_strings(string, "1") result = ._1;
+    else if compare_strings(string, "2") result = ._2;
+    else if compare_strings(string, "3") result = ._3;
+    else if compare_strings(string, "4") result = ._4;
+    else if compare_strings(string, "5") result = ._5;
+    else if compare_strings(string, "6") result = ._6;
+    else if compare_strings(string, "7") result = ._7;
+    else if compare_strings(string, "8") result = ._8;
+    else if compare_strings(string, "9") result = ._9;
+    else if compare_strings(string, ".") result = .Period;
+    else if compare_strings(string, ",") result = .Comma;
+    else if compare_strings(string, "-") result = .Minus;
+    else if compare_strings(string, "+") result = .Plus;
+    else if compare_strings(string, "Up")        result = .Arrow_Up;
+    else if compare_strings(string, "Down")      result = .Arrow_Down;
+    else if compare_strings(string, "Left")      result = .Arrow_Left;
+    else if compare_strings(string, "Right")     result = .Arrow_Right;
+    else if compare_strings(string, "Enter")     result = .Enter;
+    else if compare_strings(string, "Space")     result = .Space;
+    else if compare_strings(string, "Shift")     result = .Shift;
+    else if compare_strings(string, "Escape")    result = .Escape;
+    else if compare_strings(string, "Menu")      result = .Menu;
+    else if compare_strings(string, "Control")   result = .Control;
+    else if compare_strings(string, "Backspace") result = .Backspace;
+    else if compare_strings(string, "Delete")    result = .Delete;
+    else if compare_strings(string, "F1")  result = .F1;
+    else if compare_strings(string, "F2")  result = .F2;
+    else if compare_strings(string, "F3")  result = .F3;
+    else if compare_strings(string, "F4")  result = .F4;
+    else if compare_strings(string, "F5")  result = .F5;
+    else if compare_strings(string, "F6")  result = .F6;
+    else if compare_strings(string, "F7")  result = .F7;
+    else if compare_strings(string, "F8")  result = .F8;
+    else if compare_strings(string, "F9")  result = .F9;
+    else if compare_strings(string, "F10") result = .F10;
+    else if compare_strings(string, "F11") result = .F11;
+    else if compare_strings(string, "F12") result = .F12;
+    
+    return result;
+}
+
+key_code_to_string :: (key: Key_Code) -> string {
+    result: string = ---;
+
+    switch #complete key {
+    case .None; result = "None";
+    case .A; result = "A";
+    case .B; result = "B";
+    case .C; result = "C";
+    case .D; result = "D";
+    case .E; result = "E";
+    case .F; result = "F";
+    case .G; result = "G";
+    case .H; result = "H";
+    case .I; result = "I";
+    case .J; result = "J";
+    case .K; result = "K";
+    case .L; result = "L";
+    case .M; result = "M";
+    case .N; result = "N";
+    case .O; result = "O";
+    case .P; result = "P";
+    case .Q; result = "Q";
+    case .R; result = "R";
+    case .S; result = "S";
+    case .T; result = "T";
+    case .U; result = "U";
+    case .V; result = "V";
+    case .W; result = "W";
+    case .X; result = "X";
+    case .Y; result = "Y";
+    case .Z; result = "Z";
+    case ._0; result = "0";
+    case ._1; result = "1";
+    case ._2; result = "2";
+    case ._3; result = "3";
+    case ._4; result = "4";
+    case ._5; result = "5";
+    case ._6; result = "6";
+    case ._7; result = "7";
+    case ._8; result = "8";
+    case ._9; result = "9";
+    case .Period; result = ".";
+    case .Comma;  result = ",";
+    case .Minus;  result = "-";
+    case .Plus;   result = "+";
+    case .Arrow_Up;    result = "Up";
+    case .Arrow_Down;  result = "Down";
+    case .Arrow_Left;  result = "Left";
+    case .Arrow_Right; result = "Right";
+    case .Enter;       result = "Enter";
+    case .Space;       result = "Space";
+    case .Shift;       result = "Shift";
+    case .Escape;      result = "Escape";
+    case .Menu;        result = "Menu";
+    case .Control;     result = "Control";
+    case .Backspace;   result = "Backspace";
+    case .Delete;      result = "Delete";
+    case .Tab;         result = "Tab";
+    case .Page_Up;     result = "Page_Up";
+    case .Page_Down;   result = "Page_Down";
+    case .End;         result = "End";
+    case .Home;        result = "Home";
+    case .F1;  result = "F1";
+    case .F2;  result = "F2";
+    case .F3;  result = "F3";
+    case .F4;  result = "F4";
+    case .F5;  result = "F5";
+    case .F6;  result = "F6";
+    case .F7;  result = "F7";
+    case .F8;  result = "F8";
+    case .F9;  result = "F9";
+    case .F10; result = "F10";
+    case .F11; result = "F11";
+    case .F12; result = "F12";        
+    case; result = "UnknownKeyCode";
+    }
+    
+    return result;
+}
+
+
+/* =========================== Property Management =========================== */
 
 create_property_internal :: (config: *Config, name: string, type: Property_Type) -> *Property {
     property := array_push(*config.properties);
@@ -162,10 +344,10 @@ assign_property_value_from_string :: (config: *Config, property: *Property, valu
     return valid;
 }
 
-read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
+read_property :: (cmdx: *CmdX, config: *Config, line: string, line_number: s64) {
     space, found_space := search_string(line, ' ');
     if !found_space {
-        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "Malformed config property in line %:", line_number);
         config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
         return;
     }
@@ -175,14 +357,14 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     if value.count > 1 && value[0] == '"' && value[value.count - 1] == '"' value = substring_view(value, 1, value.count - 1);
 
     if value.count == 0 {
-        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "Malformed config property in line %:", line_number);
         config_error(cmdx, "   Expected syntax 'name value', no space found in the line.");
         return;
     }
 
     property := find_property(config, name);
     if !property {
-        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "Malformed config property in line %:", line_number);
         config_error(cmdx, "   Property name '%' is unknown.", name);
         return;
     }
@@ -190,14 +372,161 @@ read_property :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
     valid := assign_property_value_from_string(config, property, value);
 
     if !valid {
-        config_error(cmdx, "Malformed config property in line %:", line_count);
+        config_error(cmdx, "Malformed config property in line %:", line_number);
         config_error(cmdx, "   Property value of '%' is not valid, expected a % value.", property.name, property_type_to_string(property.type));
     }
 }
 
+
+/* =========================== Keybind Management =========================== */
+
+read_keybind :: (cmdx: *CmdX, config: *Config, line: string, line_number: s64) {
+
+}
+
+is_keybind_activated :: (cmdx: *CmdX, name: string) -> bool {
+    return false;
+}
+
+
+/* =========================== Action Management =========================== */
+
+parse_action_type :: (string: string) -> Action_Type {
+    result: Action_Type = 0;
+
+    if compare_strings(string, "Macro") result = .Macro;
+
+    return result;
+}
+
+action_type_to_string :: (type: Action_Type) -> string {
+    result: string = ---;
+
+    switch #complete type {
+    case .Macro; result = "Macro";
+    }
+    
+    return result;
+}
+
+parse_action_data :: (type: Action_Type, string: string, allocator: *Allocator) -> Action_Data {
+    result: Action_Data = ---;
+
+    if type == .Macro {
+        if string[0] == '"' && string[string.count - 1] == '"' {
+            result.macro_text = copy_string(allocator, substring_view(string, 1, string.count - 1));
+        } else
+            result.macro_text = copy_string(allocator, string);
+    }
+    
+    return result;
+}
+
+read_action :: (cmdx: *CmdX, config: *Config, line: string, line_count: s64) {
+    arguments := split_string(*cmdx.frame_allocator, line, ' ', true);
+
+    if arguments.count != 3 {
+        config_error(cmdx, "Malformed config action in line %:", line_count);
+        config_error(cmdx, "  Expected exactly three arguments, in the syntax: <key> <type> <data>");
+        return;
+    }
+
+    trigger_argument     := array_get_value(*arguments, 0);
+    action_type_argument := array_get_value(*arguments, 1);
+    action_data_argument := array_get_value(*arguments, 2);
+    
+    trigger := parse_key_code(trigger_argument);
+    type    := parse_action_type(action_type_argument);
+    data    := parse_action_data(type, action_data_argument, config.allocator);
+
+    if trigger == .None {
+        config_error(cmdx, "Malformed config action in line %: Unknown key code '%'", line_count, trigger_argument);
+        return;
+    }
+
+    if type == 0 {
+        config_error(cmdx, "Malformed config action in line %: Unknown action type '%'", line_count, action_type_argument);
+        return;
+    }
+
+    if find_action_with_trigger(cmdx, trigger) {
+        config_error(cmdx, "Duplicate action trigger binding in line %: The trigger '%' has been used before.", line_count, key_code_to_string(trigger));
+        return;
+    }
+    
+    action := array_push(*config.actions);
+    action.trigger = trigger;
+    action.type    = type;
+    action.data    = data;
+}
+
+free_action :: (action: *Action, allocator: *Allocator) {
+    if action.type == .Macro    deallocate_string(allocator, *action.data.macro_text);
+}
+
+write_actions_to_file :: (list: *[..]Action, file: *Print_Buffer) {
+    for i := 0; i < list.count; ++i {
+        action := array_get(list, i);
+
+        bprint(file, "% ", key_code_to_string(action.trigger));
+        bprint(file, "% ", action_type_to_string(action.type));
+        bprint(file, "\"%\"", action.data.macro_text);
+        bprint(file, "\n");
+    }
+}
+
+find_action_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> *Action {
+    result: *Action = null;
+    
+    for i := 0; i < cmdx.config.actions.count; ++i {
+        action := array_get(*cmdx.config.actions, i);
+
+        if action.trigger == trigger {
+            result = action;
+            break;
+        }
+    }
+
+    return result;
+}
+
+execute_actions_with_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
+    action := find_action_with_trigger(cmdx, trigger);
+
+    if !action return true;
+    
+    switch #complete action.type {
+    case .Macro;
+        clear_text_input(*cmdx.active_screen.text_input);
+        set_text_input_string(*cmdx.active_screen.text_input, action.data.macro_text);
+    }
+    
+    return true;
+}
+
+remove_action_by_trigger :: (cmdx: *CmdX, trigger: Key_Code) -> bool {
+    removed_something := false;
+
+    for i := 0; i < cmdx.config.actions.count; ++i {
+        action := array_get(*cmdx.config.actions, i);
+
+        if action.trigger == trigger {
+            array_remove(*cmdx.config.actions, i);
+            removed_something = true;
+            break;
+        }
+    }
+    
+    return removed_something;
+}
+
+
+/* =========================== General Config Management =========================== */
+
 read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
     // Set the proper allocat for both arrays
     config.properties.allocator = config.allocator;
+    config.keybinds.allocator   = config.allocator;
     config.actions.allocator    = config.allocator;
     config.accumulate_errors    = true;
 
@@ -213,14 +542,16 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         switch #complete property.type {
         case .String; ~property.value._string = copy_string(config.allocator, property.default._string);
         case .Bool;   ~property.value._bool   = property.default._bool;
-        case .S64;     ~property.value._s64   = property.default._s64;
-        case .S32;     ~property.value._s32   = property.default._s32;
-        case .U32;     ~property.value._u32   = property.default._u32;
-        case .F32;     ~property.value._f32   = property.default._f32;
+        case .S64;    ~property.value._s64    = property.default._s64;
+        case .S32;    ~property.value._s32    = property.default._s32;
+        case .U32;    ~property.value._u32    = property.default._u32;
+        case .F32;    ~property.value._f32    = property.default._f32;
         }
     }
 
+    //
     // Start parsing the config file
+    //
     original_file_data := file_data;
     defer free_file_content(*original_file_data);
 
@@ -250,6 +581,8 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
                 current_section = .General;
             } else if compare_strings(identifier, "actions") {
                 current_section = .Actions;
+            } else if compare_strings(identifier, "keybinds") {
+                current_section = .Key_Binds;
             } else {
                 config_error(cmdx, "Malformed section declaration in line %:", line_count);
                 config_error(cmdx, "    Unknown section identifier.");
@@ -262,6 +595,7 @@ read_config_file :: (cmdx: *CmdX, config: *Config, file_path: string) -> bool {
         switch #complete current_section {
         case .General; read_property(cmdx, config, line, line_count);
         case .Actions; read_action(cmdx, config, line, line_count);
+        case .Key_Binds; read_keybind(cmdx, config, line, line_count);
         case .Unknown;
             config_error(cmdx, "Malformed config declaration in line %:", line_count);
             config_error(cmdx, "    Expected a section identifier.");
@@ -285,10 +619,10 @@ write_config_file :: (config: *Config, file_path: string) {
     create_file_printer(*file_printer, file_path);
 
     bprint(*file_printer, "[1] # version number, do not change\n");
+    bprint(*file_printer, "\n");
     bprint(*file_printer, ":/general\n");
 
     for i := 0; i < config.properties.count; ++i {
-        // Write property to file
         property := array_get(*config.properties, i);
         bprint(*file_printer, "% ", property.name);
 
@@ -304,6 +638,21 @@ write_config_file :: (config: *Config, file_path: string) {
         bprint(*file_printer, "\n");
     }
 
+    bprint(*file_printer, "\n");
+    bprint(*file_printer, ":/keybinds\n");
+
+    for i := 0; i < config.keybinds.count; ++i {
+        keybind := array_get(*config.keybinds, i);
+        bprint(*file_printer, "% ", keybind.name);
+
+        for i := 0; i < keybind.keys.count; ++i {
+            bprint(*file_printer, key_code_to_string(keybind.keys[i]));
+            if i + 1 < keybind.keys.count bprint(*file_printer, "-");
+        }
+
+        bprint(*file_printer, "\n");
+    }
+    
     bprint(*file_printer, "\n");
     bprint(*file_printer, ":/actions\n");
 
@@ -369,7 +718,6 @@ apply_config_changes :: (cmdx: *CmdX) {
     set_window_position_and_size(*cmdx.window, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.width, cmdx.window.height, cmdx.window.maximized); // The config changes all the attributes of the window directly, but of course changing them does not have an immediate effect, so we need to actually tell win32 about that change
     adjust_screen_rectangles(cmdx);
 }
-
 
 config_error :: (cmdx: *CmdX, format: string, parameters: ..Any) {
     if !cmdx.setup || cmdx.config.accumulate_errors {

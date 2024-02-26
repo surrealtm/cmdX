@@ -22,7 +22,6 @@
 // --- Project files
 #load "screen.p";
 #load "config.p";
-#load "actions.p";
 #load "draw.p";
 #load "commands.p";
 #load "command_handlers.p";
@@ -758,11 +757,6 @@ cmdx :: () -> s32 {
 
     create_ui(*cmdx.ui, ui_callbacks, UI_Light_Theme, ui_font_stats);
 
-    // After everything has been loaded, actually show the window. This will prevent a small time
-    // frame in which the window is just blank white, which does not seem very clean. Instead, the
-    // window takes a little longer to show up, but it immediatly gets filled with the first frame.
-    show_window(*cmdx.window);
-
     // Create the main screen and display the welcome message
     screen := create_screen(*cmdx);
     activate_screen(*cmdx, screen);
@@ -770,6 +764,11 @@ cmdx :: () -> s32 {
     flush_config_errors(*cmdx, false);
     read_history_file(*cmdx, cmdx.active_screen, HISTORY_FILE_NAME);
     
+    // After everything has been loaded, actually show the window. This will prevent a small time
+    // frame in which the window is just blank white, which does not seem very clean. Instead, the
+    // window takes a little longer to show up, but it immediatly gets filled with the first frame.
+    show_window(*cmdx.window);
+
     cmdx.setup = true;
 
     // Main loop until the window gets closed
