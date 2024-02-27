@@ -192,10 +192,11 @@ draw_screen :: (cmdx: *CmdX, screen: *Screen) {
     draw_selection := screen.selection_state != .Disabled && screen.selection_state != .Starting_Selection;
 
     drawer: Screen_Drawer;
-    drawer.cursor_x            = screen.first_line_x_position;
-    drawer.cursor_y            = screen.first_line_y_position;
-    drawer.current_line_index  = screen.first_line_to_draw;
-    drawer.current_color_index = 0;
+    drawer.cursor_x              = screen.first_line_x_position;
+    drawer.cursor_y              = screen.first_line_y_position;
+    drawer.current_line_index    = screen.first_line_to_draw;
+    drawer.current_color_index   = 0;
+	drawer.backlog_index_wrapped = screen.line_wrapped_before_first;
 
     drawer.current_color = array_get(*screen.backlog_colors, drawer.current_color_index);
     set_foreground_color_for_color_range(cmdx, drawer.current_color);
