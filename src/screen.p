@@ -56,7 +56,7 @@ Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
-    marked_for_closing: bool = false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
+    marked_for_closing := false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
 
     // Backlog
     backlog: *u8 = ---;
@@ -64,7 +64,7 @@ Screen :: struct {
     backlog_colors: [..]Color_Range;
     backlog_lines: [..]Backlog_Range; // The actual lines as they are read in from the input.
     virtual_lines: [..]Virtual_Line; // The wrapped lines as they are actually rendered. Built from the backlog lines, therefore volatile.
-    rebuild_virtual_lines: s64 = true; // Set to true if the virtual lines may be invalid, e.g. because text was added to the backlog or the window size changed.
+    rebuild_virtual_lines := true; // Set to true if the virtual lines may be invalid, e.g. because text was added to the backlog or the window size changed.
     viewport_height: s64; // The amount of lines put into the backlog since the last command has been entered. Used for cursor positioning
 
     // Text Input
@@ -114,7 +114,7 @@ Screen :: struct {
     // Subprocess data
     current_directory: string;
     child_process_name: string;
-    child_process_running: bool = false;
+    child_process_running := false;
 
     // Platform data
     win32: Win32 = ---;
@@ -418,6 +418,8 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             active_screen_width = screen.rectangle[2] - screen.rectangle[0] - OFFSET_FROM_SCREEN_BORDER * 2;
         }
 
+        if active_screen_width < 100 active_screen_width = 100; // Make sure we don't go into an infinite loop when the window is too small to really be useful (e.g. through minimization)
+        
         for i := 0; i < screen.backlog_lines.count; ++i {
             backlog_line := array_get_value(*screen.backlog_lines, i);
 
@@ -487,7 +489,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 }
             }
         }
-
+            
         //
         // Set proper scroll information for the new virtual lines
         //
@@ -551,7 +553,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             screen.first_line_to_draw = screen.rounded_scroll;
             screen.last_line_to_draw  = screen.first_line_to_draw + completely_visible - 1;
         }
-
+        
         // Set the appropriate screen space coordinates for the first backlog line to be drawn.
         screen.first_line_x_position = screen.rectangle[0] + OFFSET_FROM_SCREEN_BORDER;
         screen.first_line_y_position = screen.rectangle[3] - (screen.last_line_to_draw - screen.first_line_to_draw) * cmdx.font.line_height - OFFSET_FROM_SCREEN_BORDER; // The text drawing expects the y coordinate to be the bottom of the line, so if there is only one line to be drawn, we want this y position to be the bottom of the screen (and so on)
@@ -798,7 +800,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
             // Append the actual backlog content to the string
             //
             text_index := 0;
-            backlog_index_wrapped: bool = false;
+            backlog_index_wrapped := false;
 
             for i := l0; i <= l1; ++i {
                 line := array_get(*screen.virtual_lines, i);
@@ -1296,6 +1298,9 @@ add_formatted_line :: (cmdx: *CmdX, screen: *Screen, format: string, args: ..Any
 
 calculate_number_of_visible_lines :: (cmdx: *CmdX, screen: *Screen) -> s64, s64 {
     active_screen_height := (screen.rectangle[3] - screen.rectangle[1] - OFFSET_FROM_SCREEN_BORDER);
+
+    if active_screen_height < cmdx.font.line_height return 1, 1; // We get some problems when trying to render 0 lines, since the code is set up to always render at least one line is several cases...
+    
     completely_visible   := min(active_screen_height / cmdx.font.line_height, screen.virtual_lines.count);
     partially_visible    := min(cast(s64) ceil(xx active_screen_height / xx cmdx.font.line_height), screen.virtual_lines.count);
     return completely_visible, partially_visible;
