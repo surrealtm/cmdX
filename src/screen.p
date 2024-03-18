@@ -430,7 +430,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
                 virtual_line.is_first_in_backlog_line = true;
             } else {
                 virtual_range := Backlog_Range.{ backlog_line.first, backlog_line.first, false };
-                virtual_width := 0; // The current virtual line width in pixels
+                virtual_width := OFFSET_FROM_SCREEN_BORDER; // The current virtual line width in pixels
                 is_first_in_backlog_line := true;
 
                 while backlog_range_ends_before(screen, virtual_range, backlog_line) {
