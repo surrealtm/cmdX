@@ -28,6 +28,8 @@
 #load "win32.p";
 #load "create_big_file.p";
 
+PACKAGED_MODE :: #run compiler_command_line_option_present("packaged"); // In packaged mode, the assets get compiled into the binary at compile-time so we don't have to ship the 'data' folder.
+
 HISTORY_FILE_NAME :: ".cmdx-history";
 
 /* =========================== Default font paths to remember =========================== */

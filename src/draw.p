@@ -1,3 +1,15 @@
+#if PACKAGED_MODE {
+    read_cmdx_data_file :: #no_export (file_path: string) -> string {
+        absolute_path := sprint(Default_Allocator, "%\\%", compiler_get_output_folder_path(), file_path);
+        content, valid := read_file(absolute_path);
+        assert(valid, "Failed to load cmdx data file at compile time.");
+        return content;
+    }
+
+    FONT_SHADER_CODE :: #run read_cmdx_data_file("data/font_shader.glsl");
+    QUAD_SHADER_CODE :: #run read_cmdx_data_file("data/quad_shader.glsl");
+}
+
 GLYPH_BATCH_COUNT :: 4096;
 GLYPH_BUFFER_SIZE :: GLYPH_BATCH_COUNT * 6 * 2; // 6 Vertices per glyph a 2 dimensions
 
@@ -6,10 +18,6 @@ Color :: struct {
     g: u8;
     b: u8;
     a: u8;
-}
-
-compare_colors :: (lhs: Color, rhs: Color) -> bool {
-    return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b;
 }
 
 Renderer :: struct {
@@ -30,9 +38,19 @@ Renderer :: struct {
     projection_matrix: m4f;
 }
 
+compare_colors :: (lhs: Color, rhs: Color) -> bool {
+    return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b;
+}
+
 create_renderer :: (renderer: *Renderer) {
+#if PACKAGED_MODE {
+    print("Shader: %\n", FONT_SHADER_CODE);
+    create_shader_from_string(*renderer.font_shader, FONT_SHADER_CODE, "font");
+    create_shader_from_string(*renderer.quad_shader, QUAD_SHADER_CODE, "quad");
+} #else {
     create_shader_from_file(*renderer.font_shader, "data/font_shader.glsl");
     create_shader_from_file(*renderer.quad_shader, "data/quad_shader.glsl");
+}
     
     quad_vertices: [12]f32 = { 0, 0,   0, 1,   1, 1,   0, 0,   1, 1,   1, 0 };
     create_vertex_buffer(*renderer.quad_vertex_buffer);
