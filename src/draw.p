@@ -88,17 +88,17 @@ flush_font_buffer :: (renderer: *Renderer) {
     if renderer.font_glyph_count == 0 return;
 
     set_shader(*renderer.font_shader);
-    set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix);
-    set_shader_uniform_v4f(*renderer.font_shader, "u_background", v4f.{
+    set_shader_uniform_m4f(*renderer.font_shader, "u_projection", renderer.projection_matrix._m[0].data);
+    set_shader_uniform_v4f(*renderer.font_shader, "u_background",
         xx renderer.background_color.r / 255.0,
         xx renderer.background_color.g / 255.0,
         xx renderer.background_color.b / 255.0,
-        xx renderer.background_color.a / 255.0 });
-    set_shader_uniform_v4f(*renderer.font_shader, "u_foreground", v4f.{
+        xx renderer.background_color.a / 255.0 );
+    set_shader_uniform_v4f(*renderer.font_shader, "u_foreground",
         xx renderer.foreground_color.r / 255.0,
         xx renderer.foreground_color.g / 255.0,
         xx renderer.foreground_color.b / 255.0,
-        xx renderer.foreground_color.a / 255.0 });
+        xx renderer.foreground_color.a / 255.0 );
     
     glBindTexture(GL_TEXTURE_2D, renderer.font_texture_handle);
     
@@ -173,10 +173,10 @@ draw_quad :: (renderer: *Renderer, x0: s32, y0: s32, x1: s32, y1: s32, color: Co
     if color.a != 255    set_blending(.Default);
     
     set_shader(*renderer.quad_shader);
-    set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale);
-    set_shader_uniform_v2f(*renderer.quad_shader, "u_position", position);
-    set_shader_uniform_v4f(*renderer.quad_shader, "u_color", v4f.{ xx color.r / 255.0, xx color.g / 255.0, xx color.b / 255.0, xx color.a / 255.0 });
-    set_shader_uniform_m4f(*renderer.quad_shader, "u_projection", renderer.projection_matrix);
+    set_shader_uniform_v2f(*renderer.quad_shader, "u_scale", scale.x, scale.y);
+    set_shader_uniform_v2f(*renderer.quad_shader, "u_position", position.x, position.y);
+    set_shader_uniform_v4f(*renderer.quad_shader, "u_color", xx color.r / 255.0, xx color.g / 255.0, xx color.b / 255.0, xx color.a / 255.0);
+    set_shader_uniform_m4f(*renderer.quad_shader, "u_projection", renderer.projection_matrix._m[0].data);
     set_vertex_buffer(*renderer.quad_vertex_buffer);
     draw_vertex_buffer(*renderer.quad_vertex_buffer);
     

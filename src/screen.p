@@ -839,6 +839,97 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
     }
 }
 
+update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
+    if !screen.text_input.active return; // Might be inactive due to backlog selection, just completely ignore any user input here.
+
+    // Handle the actual characters written by the user into the current text input
+    handled_some_text_input: bool = false;
+    for i := 0; i < cmdx.window.text_input_event_count; ++i {
+        event := cmdx.window.text_input_events[i];
+        if event.utf32 != 0x9 {
+            handle_text_input_event(*screen.text_input, event); // Do not handle tab keys in the actual text input
+            handled_some_text_input = true;
+        }
+    }
+
+    // The text buffer was updated, update the auto complete options and render the next frame
+    if handled_some_text_input {
+        screen.auto_complete_dirty = true;
+        draw_next_frame(cmdx);
+    }
+
+    // Do one cycle of auto-complete if the tab key has been pressed.
+    if cmdx.window.key_pressed[Key_Code.Tab] {
+        refresh_auto_complete_options(cmdx, screen);
+        one_autocomplete_cycle(cmdx, screen);
+    }
+
+    // Go up in the history
+    if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
+        if screen.history_index + 1 < screen.history.count {
+            ++screen.history_index;
+            set_text_input_string(*screen.text_input, array_get_value(*screen.history, screen.history_index));
+        }
+
+        screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        draw_next_frame(cmdx);
+    }
+
+    // Go down in the history
+    if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
+        if screen.history_index >= 1 {
+            --screen.history_index;
+            set_text_input_string(*screen.text_input, array_get_value(*screen.history, screen.history_index));
+        } else {
+            screen.history_index = -1;
+            set_text_input_string(*screen.text_input, "");
+        }
+
+        screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
+        draw_next_frame(cmdx);
+    }
+
+    // Check for potential control keys
+    if screen.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
+        // Terminate the current running process
+        win32_terminate_child_process(cmdx, screen);
+    }
+
+    // Handle input for this screen
+    if screen.text_input.entered {
+        // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
+        // afterwards, we need to make a copy from the input string, so that it may potentially be used later on.
+        input_string := copy_string(*cmdx.frame_allocator, get_string_view_from_text_input(*screen.text_input));
+
+        // Reset the text input
+        screen.history_index = -1;
+        clear_text_input(*screen.text_input);
+        activate_text_input(*screen.text_input);
+
+        if screen.child_process_running {
+            // Send the input to the child process
+            win32_write_to_child_process(cmdx, screen, input_string);
+        } else if input_string.count {
+            if screen.history.count {
+                // Only add the new input string to the history if it is not the exact same input
+                // as the previous
+                previous := array_get_value(*screen.history, 0);
+                if !compare_strings(previous, input_string) add_history(cmdx, screen, input_string);
+            } else add_history(cmdx, screen, input_string);
+
+            // Print the complete input line into the backlog
+            set_themed_color(screen, .Accent);
+            add_text(cmdx, screen, get_prefix_string(screen, *cmdx.frame_allocator));
+            set_themed_color(screen, .Default);
+            add_line(cmdx, screen, input_string);
+
+            // Actually launch the command
+            handle_input_string(cmdx, input_string);
+        }
+    }
+}
+
+
 
 /* =========================== General Screen Management =========================== */
 

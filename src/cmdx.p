@@ -494,7 +494,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         input.mouse_active           = cmdx.window.mouse_active;
         input.text_input_events      = cmdx.window.text_input_events;
         input.text_input_event_count = cmdx.window.text_input_event_count;
-        prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height });
+        prepare_ui(*cmdx.ui, input, .{ xx cmdx.window.width, xx cmdx.window.height }, .{ 256, 32 });
 
         // At this point actual UI panels can be created. For now, there is no actual UI integration
         // (since it is not really required), but maybe in the future?
@@ -551,91 +551,8 @@ one_cmdx_frame :: (cmdx: *CmdX) {
         activate_screen(cmdx, cmdx.hovered_screen);
     }
 
-    // Handle the actual characters written by the user into the current text input
-    handled_some_text_input: bool = false;
-    for i := 0; i < cmdx.window.text_input_event_count; ++i {
-        event := cmdx.window.text_input_events[i];
-        if event.utf32 != 0x9 {
-            handle_text_input_event(*cmdx.active_screen.text_input, event); // Do not handle tab keys in the actual text input
-            handled_some_text_input = true;
-        }
-    }
-
-    // The text buffer was updated, update the auto complete options and render the next frame
-    if handled_some_text_input {
-        cmdx.active_screen.auto_complete_dirty = true;
-        draw_next_frame(cmdx);
-    }
-
-    // Do one cycle of auto-complete if the tab key has been pressed.
-    if cmdx.window.key_pressed[Key_Code.Tab] {
-        refresh_auto_complete_options(cmdx, cmdx.active_screen);
-        one_autocomplete_cycle(cmdx, cmdx.active_screen);
-    }
-
-    // Go up in the history
-    if cmdx.window.key_pressed[Key_Code.Arrow_Up] {
-        if cmdx.active_screen.history_index + 1 < cmdx.active_screen.history.count {
-            ++cmdx.active_screen.history_index;
-            set_text_input_string(*cmdx.active_screen.text_input, array_get_value(*cmdx.active_screen.history, cmdx.active_screen.history_index));
-        }
-
-        cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
-        draw_next_frame(cmdx);
-    }
-
-    // Go down in the history
-    if cmdx.window.key_pressed[Key_Code.Arrow_Down] {
-        if cmdx.active_screen.history_index >= 1 {
-            --cmdx.active_screen.history_index;
-            set_text_input_string(*cmdx.active_screen.text_input, array_get_value(*cmdx.active_screen.history, cmdx.active_screen.history_index));
-        } else {
-            cmdx.active_screen.history_index = -1;
-            set_text_input_string(*cmdx.active_screen.text_input, "");
-        }
-
-        cmdx.active_screen.text_input.time_of_last_input = get_hardware_time(); // Even if there is actually no more history to go back on, still flash the cursor so that the user received some kind of feedback
-        draw_next_frame(cmdx);
-    }
-
-    // Check for potential control keys
-    if cmdx.active_screen.child_process_running && cmdx.window.key_pressed[Key_Code.C] && cmdx.window.key_held[Key_Code.Control] {
-        // Terminate the current running process
-        win32_terminate_child_process(cmdx, cmdx.active_screen);
-    }
-
-    // Handle input for this screen
-    if cmdx.active_screen.text_input.entered {
-        // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
-        // afterwards, we need to make a copy from the input string, so that it may potentially be used later on.
-        input_string := copy_string(*cmdx.frame_allocator, get_string_view_from_text_input(*cmdx.active_screen.text_input));
-
-        // Reset the text input
-        cmdx.active_screen.history_index = -1;
-        clear_text_input(*cmdx.active_screen.text_input);
-        activate_text_input(*cmdx.active_screen.text_input);
-
-        if cmdx.active_screen.child_process_running {
-            // Send the input to the child process
-            win32_write_to_child_process(cmdx, cmdx.active_screen, input_string);
-        } else if input_string.count {
-            if cmdx.active_screen.history.count {
-                // Only add the new input string to the history if it is not the exact same input
-                // as the previous
-                previous := array_get_value(*cmdx.active_screen.history, 0);
-                if !compare_strings(previous, input_string) add_history(cmdx, cmdx.active_screen, input_string);
-            } else add_history(cmdx, cmdx.active_screen, input_string);
-
-            // Print the complete input line into the backlog
-            set_themed_color(cmdx.active_screen, .Accent);
-            add_text(cmdx, cmdx.active_screen, get_prefix_string(cmdx.active_screen, *cmdx.frame_allocator));
-            set_themed_color(cmdx.active_screen, .Default);
-            add_line(cmdx, cmdx.active_screen, input_string);
-
-            // Actually launch the command
-            handle_input_string(cmdx, input_string);
-        }
-    }
+    // Handle user input into the active screen
+    update_active_screen_input(cmdx, cmdx.active_screen);
 
     // Update each individual screen
     for it := cmdx.screens.first; it != null; it = it.next {
