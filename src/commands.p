@@ -532,14 +532,14 @@ close_active_screen :: (cmdx: *CmdX) {
 widen_screen :: (cmdx: *CmdX) {
     cmdx.active_screen.currently_widened = true;
     adjust_screen_space_percentage(cmdx, cmdx.active_screen, WIDENED_SCREEN_SPACE_PERCENTAGE);
-    adjust_screen_rectangles(cmdx);
+    adjust_screen_rectangles(cmdx, false);
     draw_next_frame(cmdx);
 }
 
 unwiden_screen :: (cmdx: *CmdX) {
     cmdx.active_screen.currently_widened = false;
     adjust_screen_space_percentage(cmdx, cmdx.active_screen, 1 / xx cmdx.screens.count);
-    adjust_screen_rectangles(cmdx);
+    adjust_screen_rectangles(cmdx, false);
     draw_next_frame(cmdx);
 }
 

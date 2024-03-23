@@ -433,7 +433,7 @@ adjust_screen_space_percentage :: (cmdx: *CmdX, adjusted_screen: *Screen, adjust
     adjusted_screen.requested_screen_space_percentage = adjusted_percentage;
 }
 
-adjust_screen_rectangles :: (cmdx: *CmdX) {
+adjust_screen_rectangles :: (cmdx: *CmdX, normalize_screen_space_percentages: bool) {
     //
     // Make sure the requested screen spaces are valid.
     //
@@ -444,8 +444,15 @@ adjust_screen_rectangles :: (cmdx: *CmdX) {
         assert(screen.requested_screen_space_percentage > 0 && screen.requested_screen_space_percentage <= 1, "Screen has an invalid screen space percentage.");
     }
 
-    assert(fuzzy_equals(total_screen_space_percentage, 1), "Invalid screen space percentage distribution.");
-    
+    if normalize_screen_space_percentages {
+        for it := cmdx.screens.first; it != null; it = it.next {
+            screen := *it.data;
+            screen.requested_screen_space_percentage /= total_screen_space_percentage;
+        }
+    } else {
+        assert(fuzzy_equals(total_screen_space_percentage, 1), "Invalid screen space percentage distribution.");
+    }
+
     //
     // Adjust the position and size of all screens.
     //
@@ -503,7 +510,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
     if cmdx.window.resized {
         // If the window was resized, adjust the screen rectangles and render next frame to properly
         // fill the new screen area
-        adjust_screen_rectangles(cmdx);
+        adjust_screen_rectangles(cmdx, false);
         draw_next_frame(cmdx);
     }
 
@@ -516,7 +523,7 @@ one_cmdx_frame :: (cmdx: *CmdX) {
 
         // By changing the window style, the window size changes, meaning text layout changes, therefore
         // the next frame should be rendered
-        adjust_screen_rectangles(cmdx);
+        adjust_screen_rectangles(cmdx, false);
         draw_next_frame(cmdx);
     }
 
@@ -788,3 +795,5 @@ WinMain :: () -> s32 {
   The command to compile a packaged version is:
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -c -d:packaged -run
 */
+
+// nocheckin: Fix the crash when closing a screen

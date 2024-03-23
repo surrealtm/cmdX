@@ -786,7 +786,7 @@ apply_config_changes :: (cmdx: *CmdX) {
     update_history_size(cmdx);
 
     set_window_size_and_position(*cmdx.window, cmdx.window.width, cmdx.window.height, cmdx.window.xposition, cmdx.window.yposition, cmdx.window.maximized); // The config changes all the attributes of the window directly, but of course changing them does not have an immediate effect, so we need to actually tell win32 about that change
-    adjust_screen_rectangles(cmdx);
+    adjust_screen_rectangles(cmdx, false);
 }
 
 config_error :: (cmdx: *CmdX, format: string, parameters: ..Any) {

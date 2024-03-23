@@ -143,7 +143,7 @@ create_screen :: (cmdx: *CmdX) -> *Screen {
     screen.index                    = cmdx.screens.count - 1;
 
     adjust_screen_space_percentage(cmdx, screen, 1 / xx cmdx.screens.count);
-    adjust_screen_rectangles(cmdx);
+    adjust_screen_rectangles(cmdx, false);
     
     clear_screen(cmdx, screen);
 
@@ -175,7 +175,7 @@ close_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Readjust the screen rectangles of the remaining screens
     //
     adjust_screen_indices(cmdx);
-    adjust_screen_rectangles(cmdx);
+    adjust_screen_rectangles(cmdx, true);
 }
 
 clear_screen :: (cmdx: *CmdX, screen: *Screen) {
@@ -908,7 +908,7 @@ update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
             adjust_screen_space_percentage(cmdx, screen, 1 / xx cmdx.screens.count);
         }
         
-        adjust_screen_rectangles(cmdx);
+        adjust_screen_rectangles(cmdx, false);
         draw_next_frame(cmdx);
     }
 
