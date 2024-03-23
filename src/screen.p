@@ -899,7 +899,7 @@ update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
     }
 
     // Potentially widen the screen if that hotkey was pressed
-    if is_keybind_activated(cmdx, "widen-screen") {
+    if is_keybind_activated(cmdx, "toggle-widened-screen") {
         screen.currently_widened = !screen.currently_widened;
 
         if screen.currently_widened {

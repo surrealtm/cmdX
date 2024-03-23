@@ -447,6 +447,21 @@ config :: (cmdx: *CmdX) {
     }
 
     next_line(cmdx, cmdx.active_screen);
+    add_line(cmdx, cmdx.active_screen, "Keybinds:");
+
+    for i := 0; i < cmdx.config.keybinds.count; ++i {
+        keybind := array_get(*cmdx.config.keybinds, i);
+        add_text(cmdx, cmdx.active_screen, "    ");
+        
+        for i := 0; i < keybind.keys.count; ++i {
+            add_text(cmdx, cmdx.active_screen, key_code_to_string(keybind.keys[i]));
+            if i + 1 < keybind.keys.count add_text(cmdx, cmdx.active_screen, "-");
+        }
+
+        add_formatted_line(cmdx, cmdx.active_screen, ": %", keybind.name);
+    }
+    
+    next_line(cmdx, cmdx.active_screen);
     add_line(cmdx, cmdx.active_screen, "Actions:");
     
     for i := 0; i < cmdx.config.actions.count; ++i {

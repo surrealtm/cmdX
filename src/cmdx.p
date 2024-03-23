@@ -426,6 +426,7 @@ adjust_screen_space_percentage :: (cmdx: *CmdX, adjusted_screen: *Screen, adjust
 
         if screen != adjusted_screen {
             screen.requested_screen_space_percentage = remaining_screen_percentage * remaining_screen_partitioning;
+            screen.currently_widened = false;
         }
     }
 
@@ -693,7 +694,7 @@ cmdx :: () -> s32 {
     create_keybind(*cmdx.config, "create-screen", { Key_Code.Control, Key_Code._1 });
     create_keybind(*cmdx.config, "other-screen",  { Key_Code.Control, Key_Code.Comma });
     create_keybind(*cmdx.config, "close-screen",  { Key_Code.Control, Key_Code._0 });
-    create_keybind(*cmdx.config, "widen-screen",  { Key_Code.Control, Key_Code.Shift, Key_Code.L });
+    create_keybind(*cmdx.config, "toggle-widened-screen",  { Key_Code.Control, Key_Code.Shift, Key_Code.L });
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer
@@ -782,5 +783,8 @@ WinMain :: () -> s32 {
 
 /*
   The command to compile this program is:
-  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -c -run
+  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
+
+  The command to compile a packaged version is:
+  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -c -d:packaged -run
 */
