@@ -26,9 +26,11 @@ Command :: struct {
 }
 
 
-/* --- Command Handling --- */
+
+/* --------------------------------------------- Command Handling --------------------------------------------- */
 
 get_path_relative_to_cd :: (cmdx: *CmdX, file_path: string) -> string {
+
     // If the path appendation is empty, then just take the current directory
     if file_path.count == 0    return cmdx.active_screen.current_directory;
 
@@ -202,9 +204,6 @@ find_command_by_name :: (cmdx: *CmdX, name: string) -> *Command {
     return command;
 }
 
-
-/* --- Input splitting --- */
-
 get_next_word_in_input :: (input: *string) -> string {
     // Eat empty characters before the word
     argument_start: u32 = 0;
@@ -308,7 +307,8 @@ handle_input_string :: (cmdx: *CmdX, input: string) {
 }
 
 
-/* Builtin command behaviour */
+
+/* -------------------------------------- Builtin Command Implementation -------------------------------------- */
 
 help :: (cmdx: *CmdX, command_name: string) {
     if command_name.count == 0 {
@@ -512,6 +512,20 @@ split_screen :: (cmdx: *CmdX) {
 
 close_active_screen :: (cmdx: *CmdX) {
     if cmdx.screens.count > 1 cmdx.active_screen.marked_for_closing = true;
+}
+
+widen_screen :: (cmdx: *CmdX) {
+    cmdx.active_screen.currently_widened = true;
+    adjust_screen_space_percentage(cmdx, cmdx.active_screen, WIDENED_SCREEN_SPACE_PERCENTAGE);
+    adjust_screen_rectangles(cmdx);
+    draw_next_frame(cmdx);
+}
+
+unwiden_screen :: (cmdx: *CmdX) {
+    cmdx.active_screen.currently_widened = false;
+    adjust_screen_space_percentage(cmdx, cmdx.active_screen, 1 / xx cmdx.screens.count);
+    adjust_screen_rectangles(cmdx);
+    draw_next_frame(cmdx);
 }
 
 ls :: (cmdx: *CmdX, directory: string) {
