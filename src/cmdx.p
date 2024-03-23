@@ -31,8 +31,10 @@
 PACKAGED_MODE :: #run compiler_command_line_option_present("packaged"); // In packaged mode, the assets get compiled into the binary at compile-time so we don't have to ship the 'data' folder.
 
 HISTORY_FILE_NAME :: ".cmdx-history";
+CONFIG_FILE_NAME  :: ".cmdx-config";
 
-/* =========================== Default font paths to remember =========================== */
+
+/* -------------------------------------- Default font paths to remember -------------------------------------- */
 
 CASCADIO_MONO    :: "C:\\windows\\fonts\\cascadiamono.ttf";
 TIMES_NEW_ROMAN  :: "C:\\windows\\fonts\\times.ttf";
@@ -40,13 +42,15 @@ COURIER_NEW      :: "C:\\windows\\fonts\\cour.ttf";
 ARIAL            :: "C:\\windows\\fonts\\arial.ttf";
 FIRACODE_REGULAR :: "C:\\source\\cmdX\\run_tree\\data\\FiraCode-Regular.ttf";
 
-/* =========================== Visual Constants =========================== */
+
+/* --------------------------------------------- Visual Constants --------------------------------------------- */
 
 SCROLL_BAR_WIDTH          :: 10;
 OFFSET_FROM_SCREEN_BORDER :: 5; // How many pixels to leave empty between the text and the screen border
 OFFSET_FOR_WRAPPED_LINES  :: 15; // Additional indentation of wrapped lines
 
-/* =========================== Data Structures =========================== */
+
+/* --------------------------------------------- Data Structures --------------------------------------------- */
 
 Color_Index :: enum {
     Default;    // The default font color
@@ -120,7 +124,8 @@ CmdX :: struct {
 }
 
 
-/* =========================== Debug Procedures =========================== */
+
+/* ---------------------------------------------- Debug Helpers ---------------------------------------------- */
 
 debug_print_lines :: (printer: *Print_Buffer, screen: *Screen) {
     bprint(printer, "=== LINES ===\n");
@@ -205,7 +210,8 @@ cmdx_assert :: (active_screen: *Screen, condition: bool, text: string) {
 }
 
 
-/* =========================== History Saving =========================== */
+
+/* ---------------------------------------------- History Saving ---------------------------------------------- */
 
 /* When CmdX gets shut down, we save the current command history to disk so that we can restore
  * it on the next start up. This is just a convenience to the user in case there are some complex
@@ -244,7 +250,8 @@ read_history_file :: (cmdx: *CmdX, screen: *Screen, file_path: string) {
 }
 
 
-/* =========================== Helper Procedures =========================== */
+
+/* ------------------------------------------------- Helpers ------------------------------------------------- */
 
 mouse_over_rectangle :: (cmdx: *CmdX, rectangle: []s32) -> bool {
     return cmdx.window.mouse_active &&
@@ -277,7 +284,8 @@ is_keybind_activated :: (cmdx: *CmdX, name: string) -> bool {
 }
 
 
-/* =========================== CmdX Properties =========================== */
+
+/* --------------------------------------------- CmdX Properties --------------------------------------------- */
 
 create_theme :: (cmdx: *CmdX, name: string, default: Color, cursor: Color, accent: Color, background: Color, scrollbar: Color, selection: Color) -> *Theme {
     theme := array_push(*cmdx.themes);
@@ -384,7 +392,8 @@ update_history_size :: (cmdx: *CmdX) {
 }
 
 
-/* =========================== Screen Handling =========================== */
+
+/* --------------------------------------------- Screen Handling --------------------------------------------- */
 
 activate_screen :: (cmdx: *CmdX, screen: *Screen) {
     // Deactivate the text input of the previous active screen
@@ -408,20 +417,50 @@ activate_next_screen :: (cmdx: *CmdX) {
     activate_screen_with_index(cmdx, (cmdx.active_screen.index + 1) % cmdx.screens.count);
 }
 
+adjust_screen_space_percentage :: (cmdx: *CmdX, adjusted_screen: *Screen, adjusted_percentage: f32) {
+    remaining_screen_percentage: f32 = 1 - adjusted_percentage;
+    remaining_screen_partitioning: f32 = 1 / xx (cmdx.screens.count - 1); // All other screens get sized uniformly now, or else it would get really tricky with more than 2 screens.
+    
+    for it := cmdx.screens.first; it != null; it = it.next {
+        screen := *it.data;
+
+        if screen != adjusted_screen {
+            screen.requested_screen_space_percentage = remaining_screen_percentage * remaining_screen_partitioning;
+        }
+    }
+
+    adjusted_screen.requested_screen_space_percentage = adjusted_percentage;
+}
+
 adjust_screen_rectangles :: (cmdx: *CmdX) {
-    // Adjust the position and size of all screens
-    screen_width:     s32 = cmdx.window.width / cmdx.screens.count;
-    screen_height:    s32 = cmdx.window.height;
+    //
+    // Make sure the requested screen spaces are valid.
+    //
+    total_screen_space_percentage: f32 = 0;
+    for it := cmdx.screens.first; it != null; it = it.next {
+        screen := *it.data;
+        total_screen_space_percentage += screen.requested_screen_space_percentage;
+        assert(screen.requested_screen_space_percentage > 0 && screen.requested_screen_space_percentage <= 1, "Screen has an invalid screen space percentage.");
+    }
+
+    assert(fuzzy_equals(total_screen_space_percentage, 1), "Invalid screen space percentage distribution.");
+    
+    //
+    // Adjust the position and size of all screens.
+    //
     next_screen_left: s32 = 0;
     next_screen_top:  s32 = 0;
 
     for it := cmdx.screens.first; it != null; it = it.next {
         screen := *it.data;
+        
+        screen_width:  s32 = xx roundf(cast(f32) cmdx.window.width * screen.requested_screen_space_percentage);
+        screen_height: s32 = cmdx.window.height;
 
         screen.rectangle[0] = next_screen_left;
         screen.rectangle[1] = next_screen_top;
-        screen.rectangle[2] = screen.rectangle[0] + xx screen_width;
-        screen.rectangle[3] = screen.rectangle[1] + xx screen_height;
+        screen.rectangle[2] = screen.rectangle[0] + screen_width;
+        screen.rectangle[3] = screen.rectangle[1] + screen_height;
 
         next_screen_left = screen.rectangle[2];
         next_screen_top  = screen.rectangle[1];
@@ -441,7 +480,7 @@ adjust_screen_indices :: (cmdx: *CmdX) {
 
 
 
-/* =========================== CmdX Handling =========================== */
+/* ---------------------------------------------- CmdX Handling ---------------------------------------------- */
 
 draw_next_frame :: (cmdx: *CmdX) {
     cmdx.draw_frame = true;
@@ -654,6 +693,7 @@ cmdx :: () -> s32 {
     create_keybind(*cmdx.config, "create-screen", { Key_Code.Control, Key_Code._1 });
     create_keybind(*cmdx.config, "other-screen",  { Key_Code.Control, Key_Code.Comma });
     create_keybind(*cmdx.config, "close-screen",  { Key_Code.Control, Key_Code._0 });
+    create_keybind(*cmdx.config, "widen-screen",  { Key_Code.Control, Key_Code.Shift, Key_Code.L });
     read_config_file(*cmdx, *cmdx.config, CONFIG_FILE_NAME);
 
     // Create the window and the renderer
@@ -742,5 +782,5 @@ WinMain :: () -> s32 {
 
 /*
   The command to compile this program is:
-  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -run
+  prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -c -run
 */

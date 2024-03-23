@@ -1,4 +1,3 @@
-CONFIG_FILE_NAME :: ".cmdx-config";
 CONFIG_HOTLOAD_CHECK_INTERVAL: f32 : 1000; // In milliseconds
 
 Section_Type :: enum {

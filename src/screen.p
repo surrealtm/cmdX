@@ -1,3 +1,5 @@
+WIDENED_SCREEN_SPACE_PERCENTAGE: f32 : 0.8;
+
 Selection_State :: enum {
     Disabled;
     Starting_Selection; // The user started pressing the left button but hasn't moved the cursor over more than the starting character. Might just be a long press.
@@ -55,9 +57,11 @@ Selection_Point :: struct {
 Screen :: struct {
     // Screen rectangle
     index: s64 = ---;
+    requested_screen_space_percentage: f32 = 0; // How much of the screen space this screen wants to have allocated. Used to dynamically size different screens by the user.
     rectangle: [4]s32; // top, left, bottom, right. In window pixel space.
     marked_for_closing := false; // Since we do not want to just remove screens while still handling commands, do it after all commands have been resolved and we know nothing wants to interact with this screen anymore
-
+    currently_widened := false;
+    
     // Backlog
     backlog: *u8 = ---;
     backlog_size: s64; // The amount of bytes allocated for this screen's backlog. CmdX has one backlog_size property which this screen will use, but that property may get reloaded and then we need to remember the previous backlog size, and it is easier to not pass around the cmdX struct everywhere.
@@ -121,10 +125,10 @@ Screen :: struct {
 }
 
 
-/* =========================== Screen API =========================== */
+
+/* ------------------------------------------------ Screen API ------------------------------------------------ */
 
 create_screen :: (cmdx: *CmdX) -> *Screen {
-    // Actually create the new screen, set the proper allocators for arrays and so forth
     screen := linked_list_push(*cmdx.screens);
     screen.auto_complete_options.allocator = *cmdx.global_allocator;
     screen.history.allocator        = *cmdx.global_allocator;
@@ -138,11 +142,10 @@ create_screen :: (cmdx: *CmdX) -> *Screen {
     screen.history_size             = cmdx.history_size;
     screen.index                    = cmdx.screens.count - 1;
 
-    // Set up the backlog for this screen
-    clear_screen(cmdx, screen);
-
-    // Readjust the screen rectangles with the new screen
+    adjust_screen_space_percentage(cmdx, screen, 1 / xx cmdx.screens.count);
     adjust_screen_rectangles(cmdx);
+    
+    clear_screen(cmdx, screen);
 
     return screen;
 }
@@ -841,7 +844,7 @@ update_screen :: (cmdx: *CmdX, screen: *Screen) {
 
 update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
     if !screen.text_input.active return; // Might be inactive due to backlog selection, just completely ignore any user input here.
-
+    
     // Handle the actual characters written by the user into the current text input
     handled_some_text_input: bool = false;
     for i := 0; i < cmdx.window.text_input_event_count; ++i {
@@ -895,6 +898,20 @@ update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
         win32_terminate_child_process(cmdx, screen);
     }
 
+    // Potentially widen the screen if that hotkey was pressed
+    if is_keybind_activated(cmdx, "widen-screen") {
+        screen.currently_widened = !screen.currently_widened;
+
+        if screen.currently_widened {
+            adjust_screen_space_percentage(cmdx, screen, WIDENED_SCREEN_SPACE_PERCENTAGE);
+        } else {
+            adjust_screen_space_percentage(cmdx, screen, 1 / xx cmdx.screens.count);
+        }
+        
+        adjust_screen_rectangles(cmdx);
+        draw_next_frame(cmdx);
+    }
+
     // Handle input for this screen
     if screen.text_input.entered {
         // Since the returned value is just a string_view, and the actual text input buffer may be overwritten
@@ -931,7 +948,7 @@ update_active_screen_input :: (cmdx: *CmdX, screen: *Screen) {
 
 
 
-/* =========================== General Screen Management =========================== */
+/* ---------------------------------------- General Screen Management ---------------------------------------- */
 
 prepare_viewport :: (cmdx: *CmdX, screen: *Screen) {
     screen.viewport_height = 0;
@@ -1085,7 +1102,8 @@ get_prefix_string :: (screen: *Screen, allocator: *Allocator) -> string {
 }
 
 
-/* =========================== Backlog =========================== */
+
+/* ------------------------------------------------- Backlog ------------------------------------------------- */
 
 remove_overlapping_lines :: (screen: *Screen, new_line: Backlog_Range) -> *Backlog_Range {
     //
@@ -1439,7 +1457,8 @@ get_character_index_in_virtual_line_for_screen_position :: (screen: *Screen, lin
 }
 
 
-/* =========================== Backlog Range =========================== */
+
+/* ---------------------------------------------- Backlog Range ---------------------------------------------- */
 
 backlog_range_empty :: (range: Backlog_Range) -> bool {
     return !range.wrapped && range.first == range.one_plus_last;
