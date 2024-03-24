@@ -1042,19 +1042,19 @@ refresh_auto_complete_options :: (cmdx: *CmdX, screen: *Screen) {
     files := get_files_in_folder(*cmdx.frame_allocator, files_directory, .Non_Recursive | .Files_And_Folders);
 
     for i := 0; i < files.count; ++i {
-        full_path := array_get_value(*files, i);
-        file_name := substring_view(full_path, files_directory.count + 1, full_path.count);
+        file_name := array_get_value(*files, i);
 
         if string_starts_with(file_name, text_to_complete) {
             // Check if the given path is actually a folder. If so, then append a final slash
             // to it, to make it easier to just auto-complete to a path without having to type the slashes
             // themselves.
             file_name_copy: string = ---;
-            if folder_exists(full_path) {
+            if folder_exists(sprint(*cmdx.frame_allocator, "%\\%", files_directory, file_name)) {
                 file_name_copy = concatenate_strings(*cmdx.global_allocator, file_name, "/");
-            } else
+            } else {
                 file_name_copy = copy_string(*cmdx.global_allocator, file_name);
-
+            }
+                
             array_add(*screen.auto_complete_options, file_name_copy);
         }
     }

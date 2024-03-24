@@ -795,5 +795,3 @@ WinMain :: () -> s32 {
   The command to compile a packaged version is:
   prometheus src/cmdx.p -o:run_tree/cmdx.exe -subsystem:windows -l:run_tree/.res -c -d:packaged -run
 */
-
-// nocheckin: Fix the crash when closing a screen

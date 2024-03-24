@@ -555,8 +555,7 @@ ls :: (cmdx: *CmdX, directory: string) {
     files := get_files_in_folder(*cmdx.frame_allocator, complete_directory, .Non_Recursive | .Files_And_Folders);
     
     for i := 0; i < files.count; ++i {
-        full_path := array_get_value(*files, i);
-        file_name := substring_view(full_path, complete_directory.count + 1, full_path.count);
+        file_name := array_get_value(*files, i);
         add_formatted_line(cmdx, cmdx.active_screen, " > %", file_name);
     }
 }
